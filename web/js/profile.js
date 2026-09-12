@@ -317,6 +317,29 @@ function escapeHtml(str) {
 }
 
 /**
+ * Wire up the profile-photo file input: show the Upload button only when
+ * a file has been selected. This must be (re)run after every render of
+ * renderProfileContent() because the inputs are recreated each time.
+ *
+ * Defensive: if the elements don't exist yet (e.g. content area still being
+ * built) the function simply returns without error.
+ */
+function setupPhotoInput() {
+  const photoInput = document.getElementById('photo-input');
+  const uploadBtn = document.getElementById('upload-btn');
+  if (!photoInput || !uploadBtn) return;
+
+  // Ensure the upload button reflects the current selection
+  const hasFile = !!(photoInput.files && photoInput.files.length > 0);
+  uploadBtn.style.display = hasFile ? 'inline-block' : 'none';
+
+  photoInput.addEventListener('change', function () {
+    const fileSelected = !!(this.files && this.files.length > 0);
+    uploadBtn.style.display = fileSelected ? 'inline-block' : 'none';
+  });
+}
+
+/**
  * Enter edit mode (FEED-07)
  */
 window.startEditProfile = function() {

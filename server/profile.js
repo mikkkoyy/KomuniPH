@@ -701,7 +701,14 @@ export async function handleUpdateTheme(req, res, user) {
       return errorResponse(res, 404, 'Profile not found');
     }
 
-    const currentCustom = existing.custom_theme_config ? JSON.parse(existing.custom_theme_config) : {};
+        let currentCustom = {};
+    try {
+      currentCustom = existing.custom_theme_config ? JSON.parse(existing.custom_theme_config) : {};
+    } catch (e) {
+      // custom_theme_config is corrupted/invalid JSON — fall back to empty so
+      // the profile / theme system never breaks on a bad row.
+      currentCustom = {};
+    }
     const mergedCustom = { ...currentCustom, ...body };
 
     // Remove null values so they revert to base theme

@@ -1275,6 +1275,342 @@ a:hover {
 }
 
 /* ============================================
+   PROFILE-04 — Friendster-Style Personal Profile
+   ============================================ */
+
+/* Profile frame - main container */
+.profile-frame {
+  max-width: calc(1040px);
+  margin: 0 auto;
+  padding: 1rem;
+  width: 100%;
+}
+
+/* Profile frame with max-width responsive */
+@media (max-width: 1024px) {
+  .profile-frame {
+    max-width: calc(100vw - 16px);
+  }
+}
+
+/* Profile header */
+.profile-header {
+  background: var(--theme-background, var(--kp-cream));
+  border: 1px solid var(--theme-card-border-color, var(--kp-border));
+  border-radius: var(--theme-card-radius, var(--kp-card-radius));
+  padding: 1rem;
+  margin-bottom: 1rem;
+  text-align: center;
+  position: relative;
+}
+
+.profile-header-inner {
+  position: relative;
+  z-index: 1;
+}
+
+.profile-brand {
+  font-family: 'Fredoka', system-ui, sans-serif;
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--theme-text, var(--kp-ink));
+  margin-bottom: 0.25rem;
+}
+
+.profile-tagline {
+  font-size: 0.875rem;
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+  margin-bottom: 0.5rem;
+}
+
+/* Quote/status strip */
+.profile-status-strip {
+  background: var(--theme-card-background, rgba(255, 247, 236, 0.95));
+  border: 1px solid var(--theme-card-border-color, var(--kp-border));
+  border-radius: var(--theme-card-radius, var(--kp-card-radius));
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+  text-align: center;
+}
+
+/* Two-column layout */
+.profile-content {
+  display: grid;
+  grid-template-columns: 590px 280px;
+  gap: 14px;
+  margin-bottom: 1rem;
+}
+
+/* For responsive, use mobile-first approach */
+@media (max-width: 640px) {
+  .profile-content {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+}
+
+/* Profile main module */
+.profile-module {
+  background: var(--theme-card-background, white);
+  border: 1px solid var(--theme-card-border-color, var(--kp-border));
+  border-radius: var(--theme-card-radius, var(--kp-card-radius));
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+.profile-module-header {
+  padding: 0.75rem 1rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--theme-text, var(--kp-ink));
+  border-bottom: 1px solid var(--theme-card-border-color, var(--kp-border));
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.profile-module-body {
+  padding: 1rem;
+}
+
+/* Large profile photo section */
+.profile-photo-large {
+  width: 290px;
+  height: 400px;
+  border-radius: var(--theme-card-radius, var(--kp-card-radius));
+  object-fit: cover;
+  background: var(--theme-card-background, #fff7ec);
+  margin: 0 auto 1rem;
+  border: 1px solid var(--theme-card-border-color, var(--kp-border));
+}
+
+/* Profile name and username */
+.profile-name {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--theme-text, var(--kp-ink));
+  text-align: center;
+  margin-bottom: 0.25rem;
+}
+
+.profile-username {
+  font-size: 0.875rem;
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+  text-align: center;
+  margin-bottom: 0.5rem;
+}
+
+.profile-nickname {
+  font-size: 0.875rem;
+  font-style: italic;
+  color: var(--theme-text, var(--kp-ink));
+  text-align: center;
+  margin-bottom: 0.5rem;
+}
+
+/* Personal information module */
+.profile-info-grid {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 0.5rem 1rem;
+  font-size: 0.875rem;
+  margin-bottom: 1rem;
+}
+
+.profile-info-label {
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+  font-weight: 500;
+  font-style: italic;
+  text-align: right;
+}
+
+.profile-info-value {
+  color: var(--theme-text, var(--kp-ink));
+  text-align: left;
+}
+
+/* Profile actions */
+.profile-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.profile-action-btn {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border: 1px solid var(--theme-card-border-color, var(--kp-border));
+  border-radius: var(--theme-control-radius, 0.875rem);
+  background: transparent;
+  color: var(--theme-text, var(--kp-ink));
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+  font-family: inherit;
+}
+
+.profile-action-btn:hover {
+  background: rgba(107, 96, 114, 0.1);
+}
+
+/* Right sidebar modules */
+.sidebar-module {
+  background: var(--theme-card-background, white);
+  border: 1px solid var(--theme-card-border-color, var(--kp-border));
+  border-radius: var(--theme-card-radius, var(--kp-card-radius));
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+.sidebar-module-header {
+  padding: 0.5rem 0.75rem;
+  font-weight: 600;
+  font-size: 0.75rem;
+  color: var(--theme-text, var(--kp-ink));
+  border-bottom: 1px solid var(--theme-card-border-color, var(--kp-border));
+}
+
+.sidebar-module-body {
+  padding: 0.75rem;
+}
+
+/* Friends grid (Friend Space) */
+.friends-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+}
+
+.friend-item {
+  text-align: center;
+}
+
+.friend-avatar {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: var(--theme-card-radius, var(--kp-card-radius));
+  object-fit: cover;
+}
+
+.friend-initials {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: var(--theme-card-radius, var(--kp-card-radius));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: white;
+  background: var(--theme-accent, var(--kp-teal));
+}
+
+.friend-name {
+  font-size: 0.625rem;
+  color: var(--theme-text, var(--kp-ink));
+  margin-top: 0.25rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Photo Gallery module */
+.photo-gallery {
+  text-align: center;
+}
+
+.photo-gallery-empty {
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+  font-size: 0.875rem;
+}
+
+/* Video Box module */
+.video-box {
+  background: var(--theme-card-background, #fff7ec);
+  border: 1px solid var(--theme-card-border-color, var(--kp-border));
+  border-radius: var(--theme-card-radius, var(--kp-card-radius));
+  padding: 1rem;
+  text-align: center;
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+}
+
+.video-box-empty {
+  font-size: 0.875rem;
+}
+
+/* Blog module */
+.blog-module {
+  padding: 1rem;
+}
+
+.blog-module-empty {
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+/* Music module */
+.music-module {
+  padding: 1rem;
+  text-align: center;
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+}
+
+.music-module-empty {
+  font-size: 0.875rem;
+}
+
+/* Scraps/Comments module */
+.scraps-module {
+  padding: 1rem;
+}
+
+.scraps-module-empty {
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+/* Testimonials module */
+.testimonials-module {
+  padding: 1rem;
+  text-align: center;
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+}
+
+.testimonials-module-empty {
+  font-size: 0.875rem;
+}
+
+/* Community module */
+.community-module {
+  padding: 0.75rem;
+}
+
+.community-module-header {
+  font-weight: 600;
+  font-size: 0.75rem;
+  color: var(--theme-text, var(--kp-ink));
+  margin-bottom: 0.5rem;
+  text-align: center;
+}
+
+/* Footer */
+.profile-footer {
+  background: var(--theme-card-background, rgba(255, 247, 236, 0.95));
+  border: 1px solid var(--theme-card-border-color, var(--kp-border));
+  border-radius: var(--theme-card-radius, var(--kp-card-radius));
+  padding: 0.75rem 1rem;
+  margin-top: 1rem;
+  font-size: 0.875rem;
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+  text-align: center;
+}
+
+/* ============================================
    SOCIAL-01 — Three-Column Social Layout
    ============================================ */
 

@@ -29,24 +29,219 @@ export function renderProfilePage() {
   }
 
   return `
-    <div class="profile-page" id="profile-page">
-      <header class="home-header">
-        <h1>Your Profile</h1>
-        <a href="#/home" class="nav-link">Back to Home</a>
+    <div class="profile-frame" id="profile-frame">
+      <!-- Header -->
+      <header class="profile-header" id="profile-header">
+        <div class="profile-header-inner">
+          <h1 class="profile-brand">KomuniPH</h1>
+          <p class="profile-tagline">Your personal space on KomuniPH</p>
+        </div>
       </header>
 
-      <div id="profile-loading" class="loading">
-        <div class="spinner"></div>
-        <p class="loading-text">Loading your profile...</p>
+      <!-- Navigation -->
+      <nav class="profile-nav" id="profile-nav">
+        <a href="#/home" class="profile-nav-link">Home</a>
+        <a href="#/profile" class="profile-nav-link profile-nav-active">My Profile ▼</a>
+        <a href="#/connections" class="profile-nav-link">My Connections ▼</a>
+        <a href="#/explore" class="profile-nav-link">Explore ▼</a>
+        <a href="#/search" class="profile-nav-link">Search</a>
+        <a href="#/messages" class="profile-nav-link">Messages</a>
+        <a href="#/settings" class="profile-nav-link">Settings</a>
+        <button class="profile-nav-link profile-nav-link-logout" onclick="window.handleLogout()">Log Out</button>
+      </nav>
+
+      <!-- Quote/Status Strip -->
+      <div class="profile-status-strip" id="profile-status-strip">
+        Your personal space on KomuniPH
       </div>
 
-      <div id="profile-content" style="display:none"></div>
+      <!-- Main content two-column layout -->
+      <div class="profile-content" id="profile-content">
+        <!-- Main column -->
+        <div class="profile-main" id="profile-main">
+          <!-- Profile module -->
+          <div class="profile-module" id="profile-module">
+            <div class="profile-module-header">
+              Profile
+              <span></span>
+            </div>
+            <div class="profile-module-body" id="profile-module-body">
+              <!-- Large profile photo -->
+              <img class="profile-photo-large" id="profile-photo-large"
+                   src="" alt="Profile photo"
+                   style="display:none">
+              <!-- Fallback initials -->
+              <div class="profile-photo-large" id="profile-photo-initials"
+                   style="display:none; background: var(--theme-accent, var(--kp-teal)); color: white;">
+                ?
+              </div>
+              <div style="clear:both"></div>
 
-      <div id="profile-error" class="error-state" style="display:none">
-        <p class="error-message"></p>
-        <button class="btn btn-secondary" onclick="window.loadProfile()">Retry</button>
+              <h2 class="profile-name" id="profile-name"></h2>
+              <p class="profile-username" id="profile-username"></p>
+              <p class="profile-nickname" id="profile-nickname"></p>
+
+              <div class="profile-info-grid" id="profile-info-grid">
+                <!-- Identity fields will be populated by JS -->
+              </div>
+
+              <div class="profile-actions" id="profile-actions">
+                <button class="profile-action-btn" onclick="window.startEditProfile()">Edit Profile</button>
+                <button class="profile-action-btn" onclick="window.openCustomization()">Customize Profile</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Personal Information Module -->
+          <div class="profile-module" id="personal-info-module">
+            <div class="profile-module-header">
+              Personal Information
+              <span></span>
+            </div>
+            <div class="profile-module-body" id="personal-info-body">
+              <div class="profile-info-grid">
+                <div>
+                  <span class="profile-info-label">Name:</span>
+                </div>
+                <span class="profile-info-value" id="profile-info-name"></span>
+                <br>
+                <div>
+                  <span class="profile-info-label">Nickname:</span>
+                </div>
+                <span class="profile-info-value" id="profile-info-nickname"></span>
+                <br>
+                <div>
+                  <span class="profile-info-label">Location:</span>
+                </div>
+                <span class="profile-info-value" id="profile-info-location"></span>
+                <br>
+                <div>
+                  <span class="profile-info-label">About Me:</span>
+                </div>
+                <span class="profile-info-value" id="profile-info-bio"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sidebar column -->
+        <div class="profile-sidebar" id="profile-sidebar">
+          <!-- Friend Space module -->
+          <div class="sidebar-module" id="friend-space-module">
+            <div class="sidebar-module-header">
+              Friend Space
+            </div>
+            <div class="sidebar-module-body" id="friend-space-body">
+              <div class="friends-grid" id="friends-grid">
+                <!-- Friends will appear here -->
+              </div>
+              <div class="coming-soon" id="friends-coming-soon">
+                Your friends will appear here.
+                Coming soon.
+              </div>
+            </div>
+          </div>
+
+          <!-- Photo Gallery module -->
+          <div class="sidebar-module" id="photo-gallery-module">
+            <div class="sidebar-module-header">
+              Photo Gallery
+            </div>
+            <div class="sidebar-module-body" id="photo-gallery-body">
+              <div class="photo-gallery" id="photo-gallery">
+                <div class="photo-gallery-empty" id="photo-gallery-empty">
+                  No photos yet.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Video Box module -->
+          <div class="sidebar-module" id="video-box-module">
+            <div class="sidebar-module-header">
+              Video Box
+            </div>
+            <div class="sidebar-module-body" id="video-box-body">
+              <div class="video-box" id="video-box">
+                <div class="video-box-empty" id="video-box-empty">
+                  No videos yet.
+                  Coming soon.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Blog module -->
+          <div class="sidebar-module" id="blog-module">
+            <div class="sidebar-module-header">
+              Blog
+            </div>
+            <div class="sidebar-module-body" id="blog-body">
+              <div class="blog-module" id="blog-module-content">
+                <div class="blog-module-empty" id="blog-module-empty">
+                  Latest Blog Entry
+                  <br><br>
+                  No blog entries yet.
+                  Coming soon.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Music module -->
+          <div class="sidebar-module" id="music-module">
+            <div class="sidebar-module-header">
+              Music
+            </div>
+            <div class="sidebar-module-body" id="music-body">
+              <div class="music-module" id="music-module-content">
+                <div class="music-module-empty" id="music-module-empty">
+                  No track selected.
+                  Coming soon.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Scraps/Comments module -->
+          <div class="sidebar-module" id="scraps-module">
+            <div class="sidebar-module-header">
+              Scraps / Comments
+            </div>
+            <div class="sidebar-module-body" id="scraps-body">
+              <div class="scraps-module" id="scraps-content">
+                <div class="scraps-module-empty" id="scraps-empty">
+                  Coming soon.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Community module -->
+          <div class="sidebar-module" id="community-module">
+            <div class="sidebar-module-header">
+              Community
+            </div>
+            <div class="sidebar-module-body" id="community-body">
+              <div class="community-module" id="community-content">
+                <div class="community-module-header">
+                  Community
+                </div>
+                <p class="coming-soon" style="font-size:0.75rem; color:var(--theme-text-secondary, var(--kp-ink-soft));">
+                  Coming soon.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
+      <!-- Footer -->
+      <footer class="profile-footer" id="profile-footer">
+        ~ Welcome to my KomuniPH space ~
+      </footer>
+
+      <!-- Theme customization panel -->
       <div id="theme-customization-panel" class="theme-panel" style="display:none">
         <div class="theme-panel-header">
           <h2>Customize Profile</h2>
@@ -192,27 +387,98 @@ export function renderProfilePage() {
  * Load profile
  */
 window.loadProfile = async function() {
-  const loading = document.getElementById('profile-loading');
-  const content = document.getElementById('profile-content');
-  const error = document.getElementById('profile-error');
-  const panel = document.getElementById('theme-customization-panel');
-
-  loading.style.display = 'block';
-  content.style.display = 'none';
-  error.style.display = 'none';
-  if (panel) panel.style.display = 'none';
-
   try {
     const profile = await profileApi.getOwnProfile();
     currentProfile = profile;
-    content.innerHTML = renderProfileContent(profile);
-    setupPhotoInput();
-    loading.style.display = 'none';
-    content.style.display = 'block';
+    // The profile content is already in the HTML frame,
+    // so we just need to update the data in existing elements
+    const displayName = profile.display_name || profile.username;
+    const nickname = profile.nickname || '';
+    const alias = profile.alias_enabled && profile.alias ? profile.alias : '';
+
+    // Update profile name display in the frame
+    const nameDisplay = profile.display_name || profile.username;
+    const nameEl = document.getElementById('profile-name');
+    const usernameEl = document.getElementById('profile-username');
+    const nicknameEl = document.getElementById('profile-nickname');
+
+    if (nameEl) nameEl.textContent = nameDisplay;
+    if (usernameEl) usernameEl.textContent = `@${profile.username || ''}`;
+    if (nicknameEl) nicknameEl.textContent = nickname ? `"${nickname}"` : '';
+
+    // Update personal info module
+    const infoName = displayName;
+    const infoNickname = nickname;
+    const infoLocation = profile.real_name ? (profile.real_name + ', Philippines') : '';
+    const infoBio = profile.bio || '';
+
+    const infoNameEl = document.getElementById('profile-info-name');
+    const infoNicknameEl = document.getElementById('profile-info-nickname');
+    const infoLocationEl = document.getElementById('profile-info-location');
+    const infoBioEl = document.getElementById('profile-info-bio');
+
+    if (infoNameEl) infoNameEl.textContent = infoName;
+    if (infoNicknameEl) infoNicknameEl.textContent = infoNickname;
+    if (infoLocationEl) infoLocationEl.textContent = infoLocation;
+    if (infoBioEl) infoBioEl.textContent = infoBio;
+
+    // Update friends coming soon visibility
+    const friendsComingSoon = document.getElementById('friends-coming-soon');
+    if (friendsComingSoon) {
+      // Check if there are any friends - for now always show coming soon
+      friendsComingSoon.style.display = 'block';
+    }
+
+    // Update photo large preview
+    const profilePhotoLarge = document.getElementById('profile-photo-large');
+    const profilePhotoInitials = document.getElementById('profile-photo-initials');
+    if (profile.profile_photo_url) {
+      if (profilePhotoLarge) {
+        profilePhotoLarge.src = profile.profile_photo_url;
+        profilePhotoLarge.alt = displayName;
+        profilePhotoLarge.style.display = 'block';
+      }
+      if (profilePhotoInitials) {
+        profilePhotoInitials.style.display = 'none';
+      }
+    } else {
+      if (profilePhotoLarge) profilePhotoLarge.style.display = 'none';
+      if (profilePhotoInitials) {
+        profilePhotoInitials.style.display = 'block';
+        profilePhotoInitials.textContent = (displayName || '?').charAt(0).toUpperCase();
+      }
+    }
+
+    // Update sidebar/avatar references if they exist (for other pages)
+    const sidebarImg = document.getElementById('sidebar-avatar-img');
+    const sidebarInitials = document.getElementById('sidebar-avatar-initials');
+    const sidebarName = document.getElementById('sidebar-display-name');
+    const sidebarAlias = document.getElementById('sidebar-alias');
+
+    if (sidebarImg) {
+      if (profile.profile_photo_url) {
+        sidebarImg.src = profile.profile_photo_url;
+        sidebarImg.alt = displayName;
+        sidebarImg.style.display = 'block';
+      }
+    }
+    if (sidebarInitials) {
+      sidebarInitials.textContent = (displayName || '?').charAt(0).toUpperCase();
+      if (profile.profile_photo_url) {
+        sidebarInitials.style.display = 'none';
+      }
+    }
+    if (sidebarName) sidebarName.textContent = displayName;
+    if (sidebarAlias) sidebarAlias.textContent = alias ? `@${alias}` : '';
+
   } catch (err) {
-    loading.style.display = 'none';
-    error.querySelector('.error-message').textContent = err.message || 'Failed to load profile';
-    error.style.display = 'block';
+    console.error('[PROFILE] Load profile error:', err);
+    // Show error in the status strip
+    const statusStrip = document.getElementById('profile-status-strip');
+    if (statusStrip) {
+      statusStrip.textContent = 'Failed to load profile: ' + (err.message || 'Unknown error');
+      statusStrip.style.color = '#dc2626';
+    }
   }
 };
 
@@ -234,6 +500,35 @@ function renderProfileContent(profile) {
   const fullNameParts = [firstName, middleName, lastName].filter(Boolean);
   const fullName = fullNameParts.join(' ') || displayName;
 
+  // Determine the photo URL
+  const photoUrl = profile.profile_photo_url || '';
+
+  // Build name display
+  const nameDisplay = displayName ? displayName : (firstName ? firstName + ' ' + (lastName || '') : username);
+
+  // Nickname display
+  const nicknameDisplay = nickname ? `"${nickname}"` : '';
+
+  // Build personal info display
+  const infoName = displayName || (firstName + ' ' + (middleName ? middleName + ' ' : '') + (lastName || ''));
+  const infoNickname = nickname || '';
+  const infoLocation = profile.real_name ? (profile.real_name + ', Philippines') : '';
+  const infoBio = bioValue || '';
+
+  // Profile photo HTML - large photo
+  let photoHtml = '';
+  if (photoUrl) {
+    photoHtml = `<img class="profile-photo-large" id="profile-photo-large"
+                    src="${escapeHtml(photoUrl)}"
+                    alt="${escapeHtml(displayName)}">`;
+  } else {
+    photoHtml = `<div class="profile-photo-large" id="profile-photo-initials"
+                   style="width:290px;height:400px;background: var(--theme-accent, var(--kp-teal)); color: white; display:flex; align-items:center; justify-content:center; font-size:2rem;">
+                    ?
+                </div>`;
+  }
+
+  // Theme
   const theme = profile.theme && profile.theme.config ? profile.theme.config : {};
   const bgImage = theme.backgroundImage || '';
   const bgGradient = theme.backgroundGradient || '';
@@ -251,15 +546,15 @@ function renderProfileContent(profile) {
   const accentColor = theme.accentColor || theme.accent || '#0e6e6e';
 
   const themeStyle = [
-    `--theme-background: ${bgColor}`,
-    `--theme-card-background: ${cardBg}`,
-    `--theme-card-opacity: ${cardOpacity}`,
-    `--theme-card-border-color: ${cardBorderColor}`,
-    `--theme-card-radius: ${cardBorderRadius}`,
-    `--theme-card-shadow: ${cardShadow}`,
-    `--theme-text: ${textColor}`,
-    `--theme-text-secondary: ${mutedTextColor}`,
-    `--theme-accent: ${accentColor}`
+    '--theme-background: ${bgColor}',
+    '--theme-card-background: ${cardBg}',
+    '--theme-card-opacity: ${cardOpacity}',
+    '--theme-card-border-color: ${cardBorderColor}',
+    '--theme-card-radius: ${cardBorderRadius}',
+    '--theme-card-shadow: ${cardShadow}',
+    '--theme-text: ${textColor}',
+    '--theme-text-secondary: ${mutedTextColor}',
+    '--theme-accent: ${accentColor}'
   ].join('; ');
 
   const bgStyle = bgImage
@@ -268,10 +563,34 @@ function renderProfileContent(profile) {
       ? `background: ${escapeHtml(bgGradient)};`
       : `background: ${bgColor};`;
 
+  // Build profile info grid HTML
+  let infoGridHtml = '';
+  if (infoName) {
+    infoGridHtml += `<div><span class="profile-info-label">Name:</span> <span class="profile-info-value">${escapeHtml(infoName)}</span></div>`;
+  }
+  if (infoNickname) {
+    infoGridHtml += `<div><span class="profile-info-label">Nickname:</span> <span class="profile-info-value">${escapeHtml(infoNickname)}</span></div>`;
+  }
+  if (infoLocation) {
+    infoGridHtml += `<div><span class="profile-info-label">Location:</span> <span class="profile-info-value">${escapeHtml(infoLocation)}</span></div>`;
+  }
+  if (infoBio) {
+    infoGridHtml += `<div><span class="profile-info-label">About Me:</span> <span class="profile-info-value">${escapeHtml(infoBio)}</span></div>`;
+  }
+  if (!infoName && !infoNickname && !infoLocation && !infoBio) {
+    infoGridHtml = `<div><span class="profile-info-value" style="color:var(--theme-text-secondary, var(--kp-ink-soft));">No information yet.</span></div>`;
+  }
+
+  // Build action buttons
+  let actionsHtml = `
+    <button class="profile-action-btn" onclick="window.startEditProfile()">Edit Profile</button>
+    <button class="profile-action-btn" onclick="window.openCustomization()">Customize Profile</button>
+  `;
+
   return `
     <div class="profile-card" style="${themeStyle}">
       <div class="profile-photo-section">
-        ${createAvatar(profile.username, displayName, profile.profile_photo_url)}
+        ${photoHtml}
         <div class="photo-upload-form">
           <input type="file" id="photo-input" accept="image/jpeg,image/png,image/webp" style="display:none">
           <button class="btn btn-secondary" onclick="document.getElementById('photo-input').click()">Choose Photo</button>
@@ -280,9 +599,9 @@ function renderProfileContent(profile) {
         </div>
       </div>
       <div id="profile-view">
-        <h2 class="profile-name">${escapeHtml(displayName)}</h2>
+        <h2 class="profile-name">${escapeHtml(nameDisplay)}</h2>
         <p class="profile-username">@${escapeHtml(username)}</p>
-        ${nickname ? `<p class="profile-nickname">"${escapeHtml(nickname)}"</p>` : ''}
+        ${nicknameDisplay ? `<p class="profile-nickname">${escapeHtml(nicknameDisplay)}</p>` : ''}
         ${profile.alias
           ? `<p class="profile-alias">Alias: ${escapeHtml(profile.alias)}</p>`
           : '<p class="profile-alias empty">No alias set.</p>'
@@ -291,8 +610,7 @@ function renderProfileContent(profile) {
           ? `<p class="profile-bio">${escapeHtml(profile.bio)}</p>`
           : '<p class="profile-bio empty">No bio yet.</p>'
         }
-        <button class="btn btn-secondary" id="edit-profile-btn" onclick="window.startEditProfile()">Edit Profile</button>
-        <button class="btn btn-primary" id="customize-profile-btn" onclick="window.openCustomization()">Customize Profile</button>
+        ${actionsHtml}
       </div>
       <div id="profile-edit" style="display:none">
         <div class="form-group">
@@ -855,6 +1173,14 @@ window.resetCustomization = async function() {
       status.className = 'upload-status error';
     }
   }
+};
+
+/**
+ * Handle logout
+ */
+window.handleLogout = function() {
+  authApi.logout();
+  navigate('/login');
 };
 
 /**

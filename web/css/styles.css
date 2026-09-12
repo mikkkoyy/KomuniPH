@@ -871,13 +871,6 @@ a:hover {
   margin-top: 0.25rem;
 }
 
-/* Profile frame - the main container */
-.profile-frame {
-  max-width: 900px;
-  margin: 0 auto;
-  padding: 1rem;
-}
-
 /* Profile banner - decorative header area */
 .profile-banner {
   background: var(--theme-background, var(--kp-cream));
@@ -957,7 +950,7 @@ a:hover {
 /* Main profile content - two column layout */
 .profile-content {
   display: grid;
-  grid-template-columns: 590px 280px;
+  grid-template-columns: 695px 315px;
   gap: 14px;
   margin-bottom: 1rem;
 }
@@ -1338,7 +1331,7 @@ a:hover {
 /* Two-column layout */
 .profile-content {
   display: grid;
-  grid-template-columns: 590px 280px;
+  grid-template-columns: 695px 315px;
   gap: 14px;
   margin-bottom: 1rem;
 }

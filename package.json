@@ -1,0 +1,25 @@
+{
+  "name": "komuniph-lite",
+  "version": "1.0.0",
+  "description": "KomuniPH Lite - Node.js + SQLite + Lightweight Frontend",
+  "main": "server/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "db:init": "node server/database.js --init"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.0",
+    "better-sqlite3": "^13.0.3",
+    "busboy": "^1.6.0",
+    "dotenv": "^16.0.0",
+    "jsonwebtoken": "^9.0.0",
+    "nodemailer": "^10.0.3",
+    "sharp": "^0.35.4",
+    "uuid": "^10.0.0"
+  }
+}

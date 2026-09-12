@@ -1,0 +1,228 @@
+/**
+ * KomuniPH Lite - Database
+ * SQLite setup, schema initialization, and query helpers
+ */
+
+import Database from 'better-sqlite3';
+import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
+import config from './config.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+let db = null;
+
+/**
+ * Get or create the database connection
+ */
+export function getDb() {
+  if (db) return db;
+
+  const dbPath = resolve(__dirname, '..', config.database.path);
+  db = new Database(dbPath);
+
+  // Enable WAL mode for better concurrency
+  db.pragma('journal_mode = WAL');
+
+  // Enable foreign keys
+  db.pragma('foreign_keys = ON');
+
+  return db;
+}
+
+/**
+ * Initialize the database schema
+ */
+export function initDatabase() {
+  const database = getDb();
+
+  database.exec(`
+    -- Users table
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'member',
+      account_status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Profiles table
+    CREATE TABLE IF NOT EXISTS profiles (
+      id TEXT PRIMARY KEY,
+      user_id TEXT UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      display_name TEXT NOT NULL,
+      real_name TEXT,
+      alias TEXT,
+      alias_enabled INTEGER NOT NULL DEFAULT 0,
+      bio TEXT,
+      profile_photo_url TEXT,
+      cover_photo_url TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Posts table
+    CREATE TABLE IF NOT EXISTS posts (
+      id TEXT PRIMARY KEY,
+      author_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      edited_at TEXT
+    );
+
+    -- Comments table
+    CREATE TABLE IF NOT EXISTS comments (
+      id TEXT PRIMARY KEY,
+      post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      author_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Reactions table (likes)
+    CREATE TABLE IF NOT EXISTS reactions (
+      id TEXT PRIMARY KEY,
+      post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(post_id, user_id)
+    );
+
+    -- Password reset tokens
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Email verification tokens
+    CREATE TABLE IF NOT EXISTS email_verification_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      verified_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Indexes for performance
+    CREATE INDEX IF NOT EXISTS idx_profiles_user_id ON profiles(user_id);
+    CREATE INDEX IF NOT EXISTS idx_posts_author_id ON posts(author_id);
+    CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_comments_post_id ON comments(post_id);
+    CREATE INDEX IF NOT EXISTS idx_comments_author_id ON comments(author_id);
+    CREATE INDEX IF NOT EXISTS idx_reactions_post_id ON reactions(post_id);
+    CREATE INDEX IF NOT EXISTS idx_reactions_user_id ON reactions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id ON password_reset_tokens(user_id);
+    CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_expires_at ON password_reset_tokens(expires_at);
+    CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_token_hash ON password_reset_tokens(token_hash);
+    CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_user_id ON email_verification_tokens(user_id);
+    CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_token_hash ON email_verification_tokens(token_hash);
+    CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_expires_at ON email_verification_tokens(expires_at);
+
+    -- MESSAGE-01: Messaging tables
+    CREATE TABLE IF NOT EXISTS conversations (
+      id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS conversation_participants (
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      joined_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_read_at TEXT,
+      PRIMARY KEY (conversation_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      sender_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      body TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id);
+    CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(conversation_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_messages_sender_id ON messages(sender_id);
+    CREATE INDEX IF NOT EXISTS idx_conversation_participants_user_id ON conversation_participants(user_id);
+
+    -- MESSAGE-02: Safe schema migration for existing databases
+    -- conversation_participants may already exist without last_read_at;
+    -- ALTER TABLE is safe to attempt even if the column is already present
+    -- on SQLite builds that already ran MESSAGE-01.
+  `);
+
+  // MESSAGE-02: Add last_read_at column to existing conversation_participants tables.
+  // SQLite does not support IF NOT EXISTS on ALTER TABLE, so we attempt and
+  // silently ignore the error if the column already exists.
+  try {
+    database.exec('ALTER TABLE conversation_participants ADD COLUMN last_read_at TEXT');
+  } catch (err) {
+    // Column already exists or table does not exist yet — both are safe no-ops.
+  }
+
+  console.log('[DB] Database initialized successfully');
+  return database;
+}
+
+/**
+ * Close the database connection
+ */
+export function closeDatabase() {
+  if (db) {
+    db.close();
+    db = null;
+    console.log('[DB] Database connection closed');
+  }
+}
+
+/**
+ * Execute a query and return all results
+ */
+export function queryAll(sql, params = []) {
+  const database = getDb();
+  return database.prepare(sql).all(...params);
+}
+
+/**
+ * Execute a query and return the first result
+ */
+export function queryOne(sql, params = []) {
+  const database = getDb();
+  return database.prepare(sql).get(...params);
+}
+
+/**
+ * Execute an INSERT/UPDATE/DELETE and return info
+ */
+export function execute(sql, params = []) {
+  const database = getDb();
+  return database.prepare(sql).run(...params);
+}
+
+/**
+ * Run multiple statements in a transaction
+ */
+export function transaction(fn) {
+  const database = getDb();
+  const stmt = database.transaction(fn);
+  return stmt();
+}
+
+// Run schema initialization when executed directly
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  initDatabase();
+  console.log('[DB] Schema initialization complete');
+  process.exit(0);
+}

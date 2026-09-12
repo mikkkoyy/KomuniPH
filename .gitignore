@@ -1,0 +1,40 @@
+# --------------------------------------------------------------------- #
+# KomuniPH Lite — Git exclusions
+# --------------------------------------------------------------------- #
+
+# Secrets — never commit a real .env
+.env
+.env.*
+!.env.example
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build output
+dist/
+build/
+.next/
+out/
+
+# Runtime
+*.log
+logs/
+data/*.db-shm
+data/*.db-wal
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~

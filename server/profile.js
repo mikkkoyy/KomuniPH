@@ -13,17 +13,23 @@ import crypto from 'crypto';
 import config from './config.js';
 import { queryOne, execute } from './database.js';
 import { jsonResponse, errorResponse, parseBody } from './utils.js';
+import { seedDefaultTheme } from './database.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Ensure upload directory exists
+// Ensure upload directories exist
 const uploadDir = resolve(__dirname, '..', config.upload.profileDir);
 if (!existsSync(uploadDir)) {
   mkdirSync(uploadDir, { recursive: true });
 }
 
-// Startup diagnostic: confirm the upload directory is actually writable
+const backgroundUploadDir = resolve(__dirname, '..', config.upload.backgroundDir);
+if (!existsSync(backgroundUploadDir)) {
+  mkdirSync(backgroundUploadDir, { recursive: true });
+}
+
+// Startup diagnostics
 try {
   const probePath = resolve(uploadDir, '.write-probe');
   writeFileSync(probePath, '');
@@ -31,6 +37,93 @@ try {
   console.log('[PROFILE] Upload directory writable:', uploadDir);
 } catch (probeErr) {
   console.error('[PROFILE] Upload directory NOT writable:', uploadDir, probeErr.message);
+}
+
+try {
+  const probePath = resolve(backgroundUploadDir, '.write-probe');
+  writeFileSync(probePath, '');
+  unlinkSync(probePath);
+  console.log('[PROFILE] Background upload directory writable:', backgroundUploadDir);
+} catch (probeErr) {
+  console.error('[PROFILE] Background upload directory NOT writable:', backgroundUploadDir, probeErr.message);
+}
+
+const ALLOWED_BACKGROUND_POSITIONS = new Set([
+  'center', 'top', 'bottom', 'left', 'right',
+  'top left', 'top center', 'top right',
+  'center left', 'center center', 'center right',
+  'bottom left', 'bottom center', 'bottom right'
+]);
+
+const ALLOWED_BACKGROUND_SIZES = new Set(['cover', 'contain', 'auto']);
+const ALLOWED_BACKGROUND_REPEATS = new Set(['no-repeat', 'repeat', 'repeat-x', 'repeat-y']);
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+
+function isValidHexColor(value) {
+  return typeof value === 'string' && HEX_COLOR_RE.test(value);
+}
+
+function validateThemeConfig(body) {
+  const errors = [];
+  const allowedFields = new Set([
+    'backgroundImage', 'backgroundPosition', 'backgroundRepeat', 'backgroundSize',
+    'backgroundGradient', 'backgroundColor', 'textColor', 'mutedTextColor',
+    'accentColor', 'cardBackground', 'cardOpacity', 'cardBorderColor', 'cardBorderRadius'
+  ]);
+
+  for (const key of Object.keys(body)) {
+    if (!allowedFields.has(key)) {
+      errors.push(`Unknown theme field: ${key}`);
+    }
+  }
+
+  if (body.backgroundImage !== undefined && body.backgroundImage !== null && typeof body.backgroundImage !== 'string') {
+    errors.push('backgroundImage must be a string or null');
+  }
+  if (body.backgroundPosition !== undefined && body.backgroundPosition !== null && !ALLOWED_BACKGROUND_POSITIONS.has(body.backgroundPosition)) {
+    errors.push('backgroundPosition must be a valid position value');
+  }
+  if (body.backgroundRepeat !== undefined && body.backgroundRepeat !== null && !ALLOWED_BACKGROUND_REPEATS.has(body.backgroundRepeat)) {
+    errors.push('backgroundRepeat must be a valid repeat value');
+  }
+  if (body.backgroundSize !== undefined && body.backgroundSize !== null && !ALLOWED_BACKGROUND_SIZES.has(body.backgroundSize)) {
+    errors.push('backgroundSize must be a valid size value');
+  }
+  if (body.backgroundGradient !== undefined && body.backgroundGradient !== null) {
+    if (typeof body.backgroundGradient !== 'string' || !/^linear-gradient\(/i.test(body.backgroundGradient)) {
+      errors.push('backgroundGradient must be a linear-gradient string or null');
+    }
+  }
+  if (body.backgroundColor !== undefined && body.backgroundColor !== null && !isValidHexColor(body.backgroundColor)) {
+    errors.push('backgroundColor must be a valid hex color (#RRGGBB) or null');
+  }
+  if (body.textColor !== undefined && body.textColor !== null && !isValidHexColor(body.textColor)) {
+    errors.push('textColor must be a valid hex color (#RRGGBB) or null');
+  }
+  if (body.mutedTextColor !== undefined && body.mutedTextColor !== null && !isValidHexColor(body.mutedTextColor)) {
+    errors.push('mutedTextColor must be a valid hex color (#RRGGBB) or null');
+  }
+  if (body.accentColor !== undefined && body.accentColor !== null && !isValidHexColor(body.accentColor)) {
+    errors.push('accentColor must be a valid hex color (#RRGGBB) or null');
+  }
+  if (body.cardBackground !== undefined && body.cardBackground !== null && !isValidHexColor(body.cardBackground)) {
+    errors.push('cardBackground must be a valid hex color (#RRGGBB) or null');
+  }
+  if (body.cardOpacity !== undefined && body.cardOpacity !== null) {
+    if (typeof body.cardOpacity !== 'number' || body.cardOpacity < 0 || body.cardOpacity > 1) {
+      errors.push('cardOpacity must be a number between 0 and 1');
+    }
+  }
+  if (body.cardBorderColor !== undefined && body.cardBorderColor !== null && !isValidHexColor(body.cardBorderColor)) {
+    errors.push('cardBorderColor must be a valid hex color (#RRGGBB) or null');
+  }
+  if (body.cardBorderRadius !== undefined && body.cardBorderRadius !== null) {
+    if (typeof body.cardBorderRadius !== 'number' || body.cardBorderRadius < 0 || body.cardBorderRadius > 100) {
+      errors.push('cardBorderRadius must be a number between 0 and 100');
+    }
+  }
+
+  return errors;
 }
 
 /**
@@ -48,11 +141,53 @@ const PROFILE_SELECT = `
     p.bio,
     p.profile_photo_url,
     p.cover_photo_url,
+    p.theme_id,
+    p.custom_theme_config,
     p.created_at,
     p.updated_at
   FROM profiles p
   JOIN users u ON p.user_id = u.id
 `;
+
+/**
+ * Build theme object for a profile row, merging base theme with custom config.
+ */
+function buildTheme(profile) {
+  if (!profile || !profile.theme_id) return null;
+
+  const theme = queryOne(
+    'SELECT id, name, type, is_free, config FROM profile_themes WHERE id = ?',
+    [profile.theme_id]
+  );
+  if (!theme) return null;
+
+  let baseConfig = {};
+  try {
+    baseConfig = theme.config ? JSON.parse(theme.config) : {};
+  } catch (e) {
+    baseConfig = {};
+  }
+
+  let customConfig = {};
+  if (profile.custom_theme_config) {
+    try {
+      customConfig = JSON.parse(profile.custom_theme_config);
+    } catch (e) {
+      customConfig = {};
+    }
+  }
+
+  const mergedConfig = { ...baseConfig, ...customConfig };
+
+  return {
+    id: theme.id,
+    name: theme.name,
+    type: theme.type,
+    is_free: Boolean(theme.is_free),
+    config: mergedConfig,
+    custom: customConfig
+  };
+}
 
 /**
  * Fetch a profile row by user id (same shape as GET /api/profile).
@@ -61,6 +196,7 @@ function getProfileByUserId(userId) {
   const profile = queryOne(`${PROFILE_SELECT} WHERE p.user_id = ?`, [userId]);
   if (profile) {
     profile.alias_enabled = Boolean(profile.alias_enabled);
+    profile.theme = buildTheme(profile);
   }
   return profile;
 }
@@ -106,6 +242,8 @@ export function handleGetPublicProfile(req, res, params) {
         p.bio,
         p.profile_photo_url,
         p.cover_photo_url,
+        p.theme_id,
+        p.custom_theme_config,
         p.created_at,
         p.updated_at
       FROM profiles p
@@ -119,6 +257,7 @@ export function handleGetPublicProfile(req, res, params) {
 
     // Convert alias_enabled from integer to boolean
     profile.alias_enabled = Boolean(profile.alias_enabled);
+    profile.theme = buildTheme(profile);
 
     jsonResponse(res, 200, profile);
   } catch (err) {
@@ -164,6 +303,7 @@ export async function handleUpdateProfile(req, res, user) {
     let displayName = existing.display_name;
     let bio = existing.bio;
     let alias = existing.alias;
+    let customThemeConfig = existing.custom_theme_config;
 
     // display_name: required when provided, trimmed, 1-100 chars
     if (hasDisplayName) {
@@ -219,8 +359,8 @@ export async function handleUpdateProfile(req, res, user) {
     }
 
     execute(
-      "UPDATE profiles SET display_name = ?, bio = ?, alias = ?, updated_at = datetime('now') WHERE user_id = ?",
-      [displayName, bio, alias, user.sub]
+      "UPDATE profiles SET display_name = ?, bio = ?, alias = ?, custom_theme_config = ?, updated_at = datetime('now') WHERE user_id = ?",
+      [displayName, bio, alias, customThemeConfig, user.sub]
     );
 
     const updated = getProfileByUserId(user.sub);
@@ -533,6 +673,256 @@ async function processPhotoUpload(fileInfo, user) {
   }
 
   return photoUrl;
+}
+
+/**
+ * Handle PATCH /api/profile/theme
+ * Update the authenticated user's theme customization.
+ */
+export async function handleUpdateTheme(req, res, user) {
+  try {
+    let body;
+    try {
+      body = await parseBody(req);
+    } catch (e) {
+      return errorResponse(res, 400, 'Invalid JSON');
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return errorResponse(res, 422, 'Theme data is required');
+    }
+
+    const validationErrors = validateThemeConfig(body);
+    if (validationErrors.length > 0) {
+      return errorResponse(res, 422, validationErrors.join('; '));
+    }
+
+    const existing = queryOne('SELECT * FROM profiles WHERE user_id = ?', [user.sub]);
+    if (!existing) {
+      return errorResponse(res, 404, 'Profile not found');
+    }
+
+    const currentCustom = existing.custom_theme_config ? JSON.parse(existing.custom_theme_config) : {};
+    const mergedCustom = { ...currentCustom, ...body };
+
+    // Remove null values so they revert to base theme
+    for (const key of Object.keys(mergedCustom)) {
+      if (mergedCustom[key] === null || mergedCustom[key] === undefined) {
+        delete mergedCustom[key];
+      }
+    }
+
+    const customThemeConfig = Object.keys(mergedCustom).length > 0 ? JSON.stringify(mergedCustom) : null;
+
+    execute(
+      "UPDATE profiles SET custom_theme_config = ?, updated_at = datetime('now') WHERE user_id = ?",
+      [customThemeConfig, user.sub]
+    );
+
+    const updated = getProfileByUserId(user.sub);
+    if (!updated) {
+      return errorResponse(res, 404, 'Profile not found');
+    }
+    return jsonResponse(res, 200, updated);
+  } catch (err) {
+    console.error('[PROFILE] Update theme error:', err);
+    return errorResponse(res, 500, 'Internal server error');
+  }
+}
+
+/**
+ * Handle POST /api/profile/background
+ * Upload a profile background image.
+ */
+export function handleUploadBackground(req, res, user) {
+  const contentType = req.headers['content-type'] || '';
+  if (!contentType.includes('multipart/form-data')) {
+    return errorResponse(res, 422, 'Content-Type must be multipart/form-data');
+  }
+
+  const busboy = Busboy({
+    headers: req.headers,
+    limits: {
+      files: 1,
+      fileSize: config.upload.maxFileSize,
+    },
+  });
+
+  let responseSent = false;
+
+  const sendError = (status, message) => {
+    if (!responseSent) {
+      responseSent = true;
+      errorResponse(res, status, message);
+    }
+  };
+
+  const sendSuccess = (data) => {
+    if (!responseSent) {
+      responseSent = true;
+      jsonResponse(res, 200, data);
+    }
+  };
+
+  let fileInfo = null;
+
+  busboy.on('file', (fieldname, file, info) => {
+    if (fieldname !== 'background') {
+      file.resume();
+      sendError(422, 'Field name must be "background"');
+      return;
+    }
+
+    const { filename, mimeType } = info;
+    const uniqueFilename = `${crypto.randomBytes(16).toString('hex')}.webp`;
+    const filePath = resolve(backgroundUploadDir, uniqueFilename);
+
+    const chunks = [];
+    let fileSize = 0;
+    let tooLarge = false;
+
+    file.on('data', (chunk) => {
+      fileSize += chunk.length;
+      if (fileSize > config.upload.maxFileSize) {
+        tooLarge = true;
+        file.resume();
+        sendError(422, `File too large. Maximum size: ${config.upload.maxFileSize / 1024 / 1024}MB`);
+        return;
+      }
+      chunks.push(chunk);
+    });
+
+    file.on('end', () => {
+      if (tooLarge) {
+        console.log('[PROFILE] Background rejected for exceeding size limit:', filename, fileSize, 'bytes');
+        return;
+      }
+      const data = Buffer.concat(chunks);
+      fileInfo = {
+        filename,
+        mimeType,
+        uniqueFilename,
+        filePath,
+        data,
+        fileSize,
+      };
+    });
+
+    file.on('error', (err) => {
+      console.error('[PROFILE] Background file stream error:', err);
+      sendError(500, 'Upload processing failed');
+    });
+  });
+
+  busboy.on('finish', () => {
+    if (!fileInfo && !responseSent) {
+      sendError(422, 'No file uploaded');
+      return;
+    }
+
+    if (fileInfo && !responseSent) {
+      processBackgroundUpload(fileInfo, user)
+        .then((backgroundUrl) => {
+          sendSuccess({
+            message: 'Background uploaded successfully',
+            background_url: backgroundUrl,
+          });
+        })
+        .catch((err) => {
+          const targetPath = fileInfo.filePath;
+          try {
+            if (existsSync(targetPath)) {
+              unlinkSync(targetPath);
+              console.log('[PROFILE] Removed failed background upload:', targetPath);
+            }
+          } catch (cleanupErr) {
+            console.error('[PROFILE] Background cleanup failed:', cleanupErr);
+          }
+          const status = err.status || 422;
+          const message = err.message || 'Failed to process background image.';
+          console.error('[PROFILE] Background upload rejected (' + status + '):', message);
+          sendError(status, message);
+        });
+    }
+  });
+
+  req.pipe(busboy);
+}
+
+/**
+ * Validate and process background upload.
+ */
+async function processBackgroundUpload(fileInfo, user) {
+  const { filename, mimeType, uniqueFilename, filePath, data, fileSize } = fileInfo;
+
+  if (!data || data.length === 0) {
+    const err = new Error('Failed to process background image. Please upload a valid image.');
+    err.status = 422;
+    throw err;
+  }
+
+  let metadata;
+  try {
+    metadata = await sharp(data).metadata();
+  } catch (metaErr) {
+    const err = new Error('Failed to process background image. Please upload a valid image.');
+    err.status = 422;
+    throw err;
+  }
+
+  const detectedFormat = String(metadata.format || '').toLowerCase();
+  const validFormats = ['jpeg', 'jpg', 'png', 'webp'];
+  if (!validFormats.includes(detectedFormat)) {
+    const err = new Error('Failed to process background image. Please upload a valid JPEG, PNG, or WebP image.');
+    err.status = 422;
+    throw err;
+  }
+
+  let optimizedBuffer;
+  try {
+    optimizedBuffer = await sharp(data)
+      .resize({
+        width: 1920,
+        height: 1080,
+        fit: 'inside',
+        withoutEnlargement: true,
+      })
+      .webp({ quality: config.upload.webpQuality })
+      .toBuffer();
+  } catch (resizeErr) {
+    const err = new Error('Failed to process background image. Please upload a valid image.');
+    err.status = 422;
+    throw err;
+  }
+
+  try {
+    writeFileSync(filePath, optimizedBuffer);
+    console.log('[PROFILE] Background image saved:', filePath, optimizedBuffer.length, 'bytes');
+  } catch (writeErr) {
+    const err = new Error('Failed to save background image. Please try again.');
+    err.status = 500;
+    throw err;
+  }
+
+  const backgroundUrl = `/uploads/backgrounds/${uniqueFilename}`;
+
+  // Update profile with background URL in custom_theme_config
+  const existing = queryOne('SELECT custom_theme_config FROM profiles WHERE user_id = ?', [user.sub]);
+  let currentCustom = {};
+  if (existing?.custom_theme_config) {
+    try {
+      currentCustom = JSON.parse(existing.custom_theme_config);
+    } catch (e) {
+      currentCustom = {};
+    }
+  }
+  currentCustom.backgroundImage = backgroundUrl;
+
+  execute(
+    "UPDATE profiles SET custom_theme_config = ?, updated_at = datetime('now') WHERE user_id = ?",
+    [JSON.stringify(currentCustom), user.sub]
+  );
+
+  return backgroundUrl;
 }
 
 /**

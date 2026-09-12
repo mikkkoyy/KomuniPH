@@ -9,10 +9,10 @@ import { resolve, extname } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import config from './config.js';
-import { initDatabase, closeDatabase } from './database.js';
+import { initDatabase, closeDatabase, seedDefaultTheme } from './database.js';
 import { requireAuth } from './auth.js';
 import { handleRegister, handleLogin, handleVerify, handleVerifyEmailLink, handleForgotPassword, handleResetPassword } from './auth.js';
-import { handleGetProfile, handleGetPublicProfile, handleUpdateProfile, handleUploadPhoto } from './profile.js';
+import { handleGetProfile, handleGetPublicProfile, handleUpdateProfile, handleUploadPhoto, handleUpdateTheme, handleUploadBackground } from './profile.js';
 import {
   handleGetFeed,
   handleCreatePost,
@@ -137,6 +137,16 @@ async function handleApi(req, res) {
     const user = requireAuth(req, res);
     if (!user) return;
     return handleUploadPhoto(req, res, user);
+  }
+  if (method === 'PATCH' && path === '/api/profile/theme') {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleUpdateTheme(req, res, user);
+  }
+  if (method === 'POST' && path === '/api/profile/background') {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleUploadBackground(req, res, user);
   }
 
   // Public profile by username
@@ -314,6 +324,9 @@ function start() {
 
   // Initialize database
   initDatabase();
+
+  // PROFILE-02: seed default theme and backfill existing profiles
+  seedDefaultTheme();
 
   // Create HTTP server
   const server = createServer(handleRequest);

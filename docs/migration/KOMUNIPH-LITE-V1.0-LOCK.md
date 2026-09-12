@@ -69,6 +69,12 @@ komuniph/
 - User profile creation (automatic on registration)
 - Profile retrieval (own profile)
 - Public profile by username
+- Default theme assignment (KomuniPH Default, system-owned, free)
+- Theme data included in profile API responses
+- Theme rendered via CSS custom properties on profile card
+- Profile theme customization (colors, background, card styling)
+- Background image upload with Sharp/WebP processing
+- Reset to default theme
 
 ### Feed
 - Post creation with content
@@ -95,7 +101,8 @@ komuniph/
 
 ```sql
 users (id, email, username, password_hash, role, account_status, created_at, updated_at)
-profiles (id, user_id, display_name, real_name, alias, alias_enabled, bio, profile_photo_url, cover_photo_url, created_at, updated_at)
+profiles (id, user_id, display_name, real_name, alias, alias_enabled, bio, profile_photo_url, cover_photo_url, theme_id, custom_theme_config, created_at, updated_at)
+profile_themes (id, name, type, is_free, config, created_at, updated_at)
 posts (id, author_id, content, created_at, updated_at, edited_at)
 comments (id, post_id, author_id, content, created_at, updated_at)
 reactions (id, post_id, user_id, created_at, UNIQUE(post_id, user_id))
@@ -119,9 +126,12 @@ reactions (id, post_id, user_id, created_at, UNIQUE(post_id, user_id))
 | POST | /api/auth/register | No | Register user |
 | POST | /api/auth/login | No | Login |
 | POST | /api/auth/verify | No | Verify email |
-| GET | /api/profile | Yes | Get own profile |
+| GET | /api/profile | Yes | Get own profile (includes merged theme) |
+| PATCH | /api/profile | Yes | Update profile (display_name, bio, alias) |
+| PATCH | /api/profile/theme | Yes | Update theme customization |
 | POST | /api/profile/photo | Yes | Upload profile photo |
-| GET | /api/profile/:username | No | Get public profile |
+| POST | /api/profile/background | Yes | Upload profile background |
+| GET | /api/profile/:username | No | Get public profile (includes merged theme) |
 | GET | /api/feed | Yes | Get paginated feed |
 | POST | /api/feed/posts | Yes | Create post |
 | PATCH | /api/feed/posts/:id | Yes | Update post |
@@ -162,6 +172,8 @@ npm run db:init    # Initialize database
 - Comments work (FEED-05: VERIFIED)
 - Profile retrieval works
 - Profile photo upload works (FEED-06: VERIFIED)
+- Default theme assigned on registration (PROFILE-02: VERIFIED)
+- Profile theme customization works (PROFILE-03: VERIFIED)
 - Frontend loads correctly
 
 ## FEED Feature Status
@@ -522,8 +534,136 @@ npm run db:init    # Initialize database
 - Frontend (`web/`)
 - Configuration (`config/`)
 
+## PROFILE-02 — Default Profile Theme Initialization
+
+**Status: VERIFIED/LOCKED**
+**Date: 2026-09-12**
+
+### Implemented
+- Database: added `profile_themes` table and `theme_id` column to `profiles` via safe `ALTER TABLE` migration
+- System default theme seeded on every server startup: `id='default'`, `name='KomuniPH Default'`, `type='system'`, `is_free=true`, config matches existing KomuniPH design tokens
+- Registration: `POST /api/auth/register` now assigns `theme_id='default'` to the new profile
+- Backfill: `seedDefaultTheme()` runs on startup and sets `theme_id='default'` on any existing profile that has no theme; existing valid themes are never overwritten
+- Profile API: `GET /api/profile` and `GET /api/profile/:username` now return a `theme` object (`id`, `name`, `type`, `is_free`, `config`) alongside profile data
+- Profile rendering: own profile page applies theme config as CSS custom properties on `.profile-card`; text colors also use theme variables with safe fallbacks to existing design tokens
+- Security: theme values are system-controlled JSON strings parsed by the server; no user-generated CSS, JS, or HTML injection possible
+
+### Theme Config Schema (PROFILE-02)
+```json
+{
+  "background": "#fff7ec",
+  "cardBackground": "rgba(255, 247, 236, 0.95)",
+  "accent": "#0e6e6e",
+  "border": "#f0dfc8",
+  "text": "#2a2130",
+  "textSecondary": "#6b6072",
+  "cardRadius": "1.75rem",
+  "cardShadow": "0 20px 60px -20px rgba(42, 33, 48, 0.35)"
+}
+```
+
+### Files Changed
+- `server/database.js` — `profile_themes` table, `profiles.theme_id` column, `seedDefaultTheme()` backfill
+- `server/index.js` — calls `seedDefaultTheme()` on startup
+- `server/auth.js` — registration inserts `theme_id='default'`
+- `server/profile.js` — `PROFILE_SELECT` includes `theme_id`, `handleGetPublicProfile` includes theme, `buildTheme()` helper
+- `web/js/profile.js` — `renderProfileContent()` applies theme CSS custom properties to `.profile-card`
+- `web/css/styles.css` — `.profile-card`, `.profile-name`, `.profile-username`, `.profile-alias`, `.profile-bio` use `--theme-*` variables with fallbacks
+
+### Verification
+- New registration receives default theme: PASS
+- New profile has `theme_id='default'` in DB: PASS
+- Public profile API exposes theme: PASS
+- Existing valid theme not overwritten by backfill: PASS
+- Theme persists across logout/login: PASS
+- Feed/post/like/comment regression: PASS
+- Profile photo upload still works: PASS
+- Profile edit still works: PASS
+
+### Scope Limit
+- No theme marketplace
+- No Creator Studio integration
+- No theme editor or selector UI
+- No background upload
+- No custom CSS/JS injection
+- No visitor counters, widgets, or guestbook
+
+## PROFILE-03 — Profile Theme & Background Customization
+
+**Status: VERIFIED/LOCKED**
+**Date: 2026-09-12**
+
+### Implemented
+- Database: added `custom_theme_config` TEXT column to `profiles` via safe `ALTER TABLE` migration; stores per-user JSON theme overrides without mutating shared system themes
+- Background upload directory: `uploads/backgrounds/` with safe filenames, Sharp validation, WebP conversion, and Windows retry cleanup
+- Server-side theme validation: only allowed fields are persisted; colors must be `#RRGGBB`; position/size/repeat are enum-validated; gradients must start with `linear-gradient(`; opacity 0–1; border radius 0–100px
+- `PATCH /api/profile/theme` (auth required): accepts theme customization fields, merges with base theme config, stores only changed fields in `profiles.custom_theme_config`; sending `null` removes that field so it reverts to the base theme
+- `POST /api/profile/background` (auth required): multipart upload with Busboy + Sharp, max 1920×1080 resize, WebP output, stores URL in custom theme config
+- Profile API: `GET /api/profile` and `GET /api/profile/:username` return merged theme config (`base + custom overrides`) in `profile.theme.config`; `profile.theme.custom` exposes only the user's overrides
+- Profile UI: "Customize Profile" button opens a compact panel with Background (solid/gradient/image), Position/Size/Repeat, Colors (text/muted/accent), Card (color/opacity/border/radius), live preview via CSS variables, Reset to Default, Cancel, Save
+- Live preview: changing any control immediately updates CSS custom properties on `.profile-card`; background image/gradient/color applied directly
+- Reset: sends `null` for all customizable fields, clearing `custom_theme_config` and restoring the system default appearance
+- Security: no arbitrary CSS/JS/HTML injection; all values validated server-side; background images are processed through Sharp and stored outside web root; parameterized SQL throughout
+
+### Theme Config Schema (PROFILE-03)
+```json
+{
+  "background": "#fff7ec",
+  "backgroundImage": "/uploads/backgrounds/xxx.webp",
+  "backgroundGradient": "linear-gradient(135deg, #111827, #312e81)",
+  "backgroundPosition": "center",
+  "backgroundRepeat": "no-repeat",
+  "backgroundSize": "cover",
+  "cardBackground": "rgba(255, 247, 236, 0.95)",
+  "cardOpacity": 0.92,
+  "cardBorderColor": "#f0dfc8",
+  "cardBorderRadius": "1.75rem",
+  "cardShadow": "0 20px 60px -20px rgba(42, 33, 48, 0.35)",
+  "text": "#2a2130",
+  "textSecondary": "#6b6072",
+  "accent": "#0e6e6e",
+  "textColor": "#ffffff",
+  "mutedTextColor": "#94a3b8",
+  "accentColor": "#38bdf8"
+}
+```
+
+### Files Changed
+- `server/config.js` — added `upload.backgroundDir`
+- `server/database.js` — `profiles.custom_theme_config` column migration, safe ALTER TABLE
+- `server/profile.js` — `validateThemeConfig`, `handleUpdateTheme`, `handleUploadBackground`, `processBackgroundUpload`, merged theme in `buildTheme`, `PROFILE_SELECT` includes `custom_theme_config`
+- `server/index.js` — registered `PATCH /api/profile/theme` and `POST /api/profile/background`
+- `web/js/api.js` — `profileApi.updateTheme`, `profileApi.uploadBackground`
+- `web/js/profile.js` — customization panel, live preview, save/reset handlers, background image support in profile rendering
+- `web/css/styles.css` — `.theme-panel`, `.theme-section`, `.theme-field`, `.theme-panel-footer`, background/card CSS variables with fallbacks
+- `docs/migration/KOMUNIPH-LITE-V1.0-LOCK.md` — this section
+
+### Verification
+- New registration receives default theme: PASS
+- Theme customization persists in DB and API: PASS
+- Theme persists after reload/login: PASS
+- Public profile exposes merged custom theme: PASS
+- User isolation (A customization does not affect B): PASS
+- Reset to default clears custom config and restores base theme: PASS
+- Background upload returns valid `/uploads/backgrounds/*.webp` URL: PASS
+- Invalid colors/gradients/positions/sizes rejected (422): PASS
+- Unknown fields rejected (422): PASS
+- Unauthenticated theme modification rejected (401): PASS
+- Feed/post/like/comment regression: PASS
+- Profile photo upload still works: PASS
+- Profile edit still works: PASS
+- Messages regression: PASS
+
+### Scope Limit
+- No theme marketplace
+- No Creator Studio integration
+- No custom CSS/JS injection
+- No visitor counters, widgets, guestbook, MP3, or payments
+
 ---
+
+
 
 **KOMUNIPH LITE v1.0**
 **STATUS: LOCKED**
-**DATE: 2026-09-11**
+**DATE: 2026-09-12**

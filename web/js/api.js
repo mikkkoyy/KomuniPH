@@ -159,6 +159,13 @@ export const profileApi = {
     });
   },
 
+  async updateTheme(data) {
+    return apiRequest('/profile/theme', {
+      method: 'PATCH',
+      body: data,
+    });
+  },
+
   async uploadPhoto(file) {
     const formData = new FormData();
     formData.append('photo', file);
@@ -169,6 +176,35 @@ export const profileApi = {
     }
 
     const response = await fetch(`${API_BASE}/profile/photo`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    const contentType = response.headers.get('content-type') || '';
+    const hasJsonBody = contentType.includes('application/json');
+    const parsedBody = hasJsonBody ? await response.json().catch(() => null) : null;
+
+    if (!response.ok) {
+      const error = new Error(parsedBody?.error?.message || `Upload failed with status ${response.status}`);
+      error.status = response.status;
+      error.body = parsedBody;
+      throw error;
+    }
+
+    return parsedBody;
+  },
+
+  async uploadBackground(file) {
+    const formData = new FormData();
+    formData.append('background', file);
+
+    const headers = {};
+    if (accessToken) {
+      headers['Authorization'] = `Bearer ${accessToken}`;
+    }
+
+    const response = await fetch(`${API_BASE}/profile/background`, {
       method: 'POST',
       headers,
       body: formData,

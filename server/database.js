@@ -61,6 +61,18 @@ export function initDatabase() {
       bio TEXT,
       profile_photo_url TEXT,
       cover_photo_url TEXT,
+      theme_id TEXT REFERENCES profile_themes(id),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Profile themes table (PROFILE-02)
+    CREATE TABLE IF NOT EXISTS profile_themes (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'system',
+      is_free INTEGER NOT NULL DEFAULT 1,
+      config TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -172,6 +184,24 @@ export function initDatabase() {
     // Column already exists or table does not exist yet — both are safe no-ops.
   }
 
+  // PROFILE-02: Add theme_id column to existing profiles tables.
+  // SQLite does not support IF NOT EXISTS on ALTER TABLE, so we attempt and
+  // silently ignore the error if the column already exists.
+  try {
+    database.exec('ALTER TABLE profiles ADD COLUMN theme_id TEXT REFERENCES profile_themes(id)');
+  } catch (err) {
+    // Column already exists or table does not exist yet — both are safe no-ops.
+  }
+
+  // PROFILE-03: Add custom_theme_config column to existing profiles tables.
+  // SQLite does not support IF NOT EXISTS on ALTER TABLE, so we attempt and
+  // silently ignore the error if the column already exists.
+  try {
+    database.exec('ALTER TABLE profiles ADD COLUMN custom_theme_config TEXT');
+  } catch (err) {
+    // Column already exists or table does not exist yet — both are safe no-ops.
+  }
+
   console.log('[DB] Database initialized successfully');
   return database;
 }
@@ -218,6 +248,44 @@ export function transaction(fn) {
   const database = getDb();
   const stmt = database.transaction(fn);
   return stmt();
+}
+
+/**
+ * Seed the default profile theme and backfill existing profiles without a theme.
+ * Safe to call on every startup.
+ */
+export function seedDefaultTheme() {
+  const database = getDb();
+  database.transaction(() => {
+    const defaultThemeId = 'default';
+    const themeName = 'KomuniPH Default';
+    const themeType = 'system';
+    const isFree = 1;
+    const themeConfig = JSON.stringify({
+      background: '#fff7ec',
+      cardBackground: 'rgba(255, 247, 236, 0.95)',
+      accent: '#0e6e6e',
+      border: '#f0dfc8',
+      text: '#2a2130',
+      textSecondary: '#6b6072',
+      cardRadius: '1.75rem',
+      cardShadow: '0 20px 60px -20px rgba(42, 33, 48, 0.35)'
+    });
+
+    execute(
+      `INSERT OR IGNORE INTO profile_themes (id, name, type, is_free, config) VALUES (?, ?, ?, ?, ?)`,
+      [defaultThemeId, themeName, themeType, isFree, themeConfig]
+    );
+
+    const updated = execute(
+      `UPDATE profiles SET theme_id = ? WHERE theme_id IS NULL`,
+      [defaultThemeId]
+    );
+
+    if (updated && updated.changes > 0) {
+      console.log(`[PROFILE-02] Backfilled ${updated.changes} profile(s) with default theme`);
+    }
+  })();
 }
 
 // Run schema initialization when executed directly

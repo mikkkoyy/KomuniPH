@@ -55,6 +55,7 @@ const config = {
     maxFileSize: parseInt(process.env.UPLOAD_MAX_FILE_SIZE || '5242880', 10),
     allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
     profileDir: process.env.UPLOAD_PROFILE_DIR || './uploads/profile',
+    backgroundDir: process.env.UPLOAD_BACKGROUND_DIR || './uploads/backgrounds',
     maxWidth: parseInt(process.env.UPLOAD_PROFILE_MAX_WIDTH || '1024', 10),
     maxHeight: parseInt(process.env.UPLOAD_PROFILE_MAX_HEIGHT || '1024', 10),
     webpQuality: parseInt(process.env.UPLOAD_PROFILE_WEBP_QUALITY || '80', 10),

@@ -145,8 +145,8 @@ export async function handleRegister(req, res) {
     // Create profile
     const profileId = generateId();
     execute(
-      'INSERT INTO profiles (id, user_id, display_name) VALUES (?, ?, ?)',
-      [profileId, userId, username]
+      'INSERT INTO profiles (id, user_id, display_name, theme_id) VALUES (?, ?, ?, ?)',
+      [profileId, userId, username, 'default']
     );
 
     // Generate verification token

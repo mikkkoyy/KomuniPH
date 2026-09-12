@@ -134,6 +134,10 @@ const PROFILE_SELECT = `
     p.id,
     p.user_id,
     u.username,
+    p.first_name,
+    p.middle_name,
+    p.last_name,
+    p.nickname,
     p.display_name,
     p.real_name,
     p.alias,
@@ -196,6 +200,11 @@ function getProfileByUserId(userId) {
   const profile = queryOne(`${PROFILE_SELECT} WHERE p.user_id = ?`, [userId]);
   if (profile) {
     profile.alias_enabled = Boolean(profile.alias_enabled);
+    // PROFILE-04: Ensure identity fields have safe defaults
+    profile.first_name = profile.first_name || '';
+    profile.middle_name = profile.middle_name || '';
+    profile.last_name = profile.last_name || '';
+    profile.nickname = profile.nickname || '';
     profile.theme = buildTheme(profile);
   }
   return profile;
@@ -235,6 +244,10 @@ export function handleGetPublicProfile(req, res, params) {
         p.id,
         p.user_id,
         u.username,
+        p.first_name,
+        p.middle_name,
+        p.last_name,
+        p.nickname,
         p.display_name,
         p.real_name,
         p.alias,
@@ -257,6 +270,11 @@ export function handleGetPublicProfile(req, res, params) {
 
     // Convert alias_enabled from integer to boolean
     profile.alias_enabled = Boolean(profile.alias_enabled);
+    // PROFILE-04: Ensure identity fields have safe defaults
+    profile.first_name = profile.first_name || '';
+    profile.middle_name = profile.middle_name || '';
+    profile.last_name = profile.last_name || '';
+    profile.nickname = profile.nickname || '';
     profile.theme = buildTheme(profile);
 
     jsonResponse(res, 200, profile);
@@ -273,7 +291,8 @@ function isValidAlias(alias) {
 }
 /**
  * Handle PATCH /api/profile
- * Update the authenticated user's own profile (display_name, bio, alias).
+ * Update the authenticated user's own profile (identity, bio, alias).
+ * PROFILE-04: Extended with first_name, middle_name, last_name, nickname.
  */
 export async function handleUpdateProfile(req, res, user) {
   try {
@@ -287,12 +306,17 @@ export async function handleUpdateProfile(req, res, user) {
       return errorResponse(res, 422, 'Profile update data is required');
     }
 
+    const hasFirstName = Object.prototype.hasOwnProperty.call(body, 'first_name');
+    const hasMiddleName = Object.prototype.hasOwnProperty.call(body, 'middle_name');
+    const hasLastName = Object.prototype.hasOwnProperty.call(body, 'last_name');
+    const hasNickname = Object.prototype.hasOwnProperty.call(body, 'nickname');
     const hasDisplayName = Object.prototype.hasOwnProperty.call(body, 'display_name');
     const hasBio = Object.prototype.hasOwnProperty.call(body, 'bio');
     const hasAlias = Object.prototype.hasOwnProperty.call(body, 'alias');
 
-    if (!hasDisplayName && !hasBio && !hasAlias) {
-      return errorResponse(res, 422, 'At least one of display_name, bio, or alias is required');
+    // At least one field must be provided
+    if (!hasFirstName && !hasMiddleName && !hasLastName && !hasNickname && !hasDisplayName && !hasBio && !hasAlias) {
+      return errorResponse(res, 422, 'At least one profile field is required');
     }
 
     const existing = queryOne('SELECT * FROM profiles WHERE user_id = ?', [user.sub]);
@@ -300,10 +324,68 @@ export async function handleUpdateProfile(req, res, user) {
       return errorResponse(res, 404, 'Profile not found');
     }
 
+    let firstName = existing.first_name || '';
+    let middleName = existing.middle_name || '';
+    let lastName = existing.last_name || '';
+    let nickname = existing.nickname || '';
     let displayName = existing.display_name;
     let bio = existing.bio;
     let alias = existing.alias;
     let customThemeConfig = existing.custom_theme_config;
+
+    // PROFILE-04: first_name validation - required when provided, trimmed, 1-100 chars
+    if (hasFirstName) {
+      if (typeof body.first_name !== 'string') {
+        return errorResponse(res, 422, 'First name must be a string');
+      }
+      const trimmed = body.first_name.trim();
+      if (!trimmed) {
+        return errorResponse(res, 422, 'First name is required');
+      }
+      if (trimmed.length > 100) {
+        return errorResponse(res, 422, 'First name must be less than 100 characters');
+      }
+      firstName = trimmed;
+    }
+
+    // PROFILE-04: middle_name validation - optional, trimmed, max 100 chars
+    if (hasMiddleName) {
+      if (body.middle_name !== null && typeof body.middle_name !== 'string') {
+        return errorResponse(res, 422, 'Middle name must be a string or null');
+      }
+      const trimmed = body.middle_name === null ? '' : body.middle_name.trim();
+      if (trimmed.length > 100) {
+        return errorResponse(res, 422, 'Middle name must be less than 100 characters');
+      }
+      middleName = trimmed;
+    }
+
+    // PROFILE-04: last_name validation - required when provided, trimmed, 1-100 chars
+    if (hasLastName) {
+      if (typeof body.last_name !== 'string') {
+        return errorResponse(res, 422, 'Last name must be a string');
+      }
+      const trimmed = body.last_name.trim();
+      if (!trimmed) {
+        return errorResponse(res, 422, 'Last name is required');
+      }
+      if (trimmed.length > 100) {
+        return errorResponse(res, 422, 'Last name must be less than 100 characters');
+      }
+      lastName = trimmed;
+    }
+
+    // PROFILE-04: nickname validation - optional, trimmed, max 50 chars
+    if (hasNickname) {
+      if (body.nickname !== null && typeof body.nickname !== 'string') {
+        return errorResponse(res, 422, 'Nickname must be a string or null');
+      }
+      const trimmed = body.nickname === null ? '' : body.nickname.trim();
+      if (trimmed.length > 50) {
+        return errorResponse(res, 422, 'Nickname must be less than 50 characters');
+      }
+      nickname = trimmed;
+    }
 
     // display_name: required when provided, trimmed, 1-100 chars
     if (hasDisplayName) {
@@ -359,8 +441,8 @@ export async function handleUpdateProfile(req, res, user) {
     }
 
     execute(
-      "UPDATE profiles SET display_name = ?, bio = ?, alias = ?, custom_theme_config = ?, updated_at = datetime('now') WHERE user_id = ?",
-      [displayName, bio, alias, customThemeConfig, user.sub]
+      "UPDATE profiles SET first_name = ?, middle_name = ?, last_name = ?, nickname = ?, display_name = ?, bio = ?, alias = ?, custom_theme_config = ?, updated_at = datetime('now') WHERE user_id = ?",
+      [firstName, middleName, lastName, nickname, displayName, bio, alias, customThemeConfig, user.sub]
     );
 
     const updated = getProfileByUserId(user.sub);

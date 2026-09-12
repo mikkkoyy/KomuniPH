@@ -143,10 +143,11 @@ export async function handleRegister(req, res) {
     );
 
     // Create profile
+    // PROFILE-04: Initialize identity fields with username as temporary display_name
     const profileId = generateId();
     execute(
-      'INSERT INTO profiles (id, user_id, display_name, theme_id) VALUES (?, ?, ?, ?)',
-      [profileId, userId, username, 'default']
+      'INSERT INTO profiles (id, user_id, first_name, last_name, display_name, theme_id) VALUES (?, ?, ?, ?, ?, ?)',
+      [profileId, userId, username, '', username, 'default']
     );
 
     // Generate verification token

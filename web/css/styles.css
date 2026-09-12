@@ -637,39 +637,6 @@ a:hover {
   box-shadow: 0 0 0 3px var(--kp-teal-ring);
 }
 
-
-
-.profile-name {
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: var(--theme-text, var(--kp-ink));
-}
-
-.profile-username {
-  font-size: 0.875rem;
-  color: var(--theme-textSecondary, var(--kp-ink-soft));
-}
-
-.profile-alias {
-  font-size: 0.875rem;
-  color: var(--theme-text, var(--kp-ink));
-  text-align: center;
-}
-
-.profile-alias.empty {
-  color: var(--theme-textSecondary, var(--kp-ink-soft));
-}
-
-.profile-bio {
-  font-size: 0.875rem;
-  color: var(--theme-text, var(--kp-ink));
-  text-align: center;
-}
-
-.profile-bio.empty {
-  color: var(--theme-textSecondary, var(--kp-ink-soft));
-}
-
 /* Theme customization panel */
 .theme-panel {
   margin-top: 1.5rem;
@@ -890,6 +857,323 @@ a:hover {
 
 .upload-status.error {
   color: #dc2626;
+}
+
+/* ============================================
+   PROFILE-04: Friendster-Inspired Profile Layout
+   ============================================ */
+
+/* Profile nickname */
+.profile-nickname {
+  font-size: 0.875rem;
+  font-style: italic;
+  color: var(--theme-text, var(--kp-ink));
+  margin-top: 0.25rem;
+}
+
+/* Profile frame - the main container */
+.profile-frame {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+/* Profile banner - decorative header area */
+.profile-banner {
+  background: var(--theme-background, var(--kp-cream));
+  border: 1px solid var(--theme-card-border-color, var(--kp-border));
+  border-radius: var(--theme-card-radius, var(--kp-card-radius));
+  padding: 1.5rem;
+  text-align: center;
+  margin-bottom: 1rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.profile-banner-inner {
+  position: relative;
+  z-index: 1;
+}
+
+/* Profile title area */
+.profile-title {
+  text-align: center;
+  margin-bottom: 1rem;
+}
+
+.profile-title h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--theme-text, var(--kp-ink));
+  margin: 0;
+}
+
+.profile-title .profile-nickname {
+  font-size: 1rem;
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+  font-style: italic;
+}
+
+/* Profile navigation */
+.profile-nav {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.profile-nav a,
+.profile-nav span {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  color: var(--theme-text, var(--kp-ink));
+  text-decoration: none;
+  border: 1px solid var(--theme-card-border-color, var(--kp-border));
+  border-radius: var(--theme-card-radius, var(--kp-card-radius));
+  background: var(--theme-card-background, white);
+}
+
+.profile-nav a:hover {
+  background: var(--theme-accent, var(--kp-teal));
+  color: white;
+}
+
+.profile-nav .nav-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Status strip */
+.profile-status {
+  text-align: center;
+  padding: 0.75rem;
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+  border-bottom: 1px solid var(--theme-card-border-color, var(--kp-border));
+}
+
+/* Main profile content - two column layout */
+.profile-content {
+  display: grid;
+  grid-template-columns: 590px 280px;
+  gap: 14px;
+  margin-bottom: 1rem;
+}
+
+/* Profile modules */
+.profile-module {
+  background: var(--theme-card-background, white);
+  border: 1px solid var(--theme-card-border-color, var(--kp-border));
+  border-radius: var(--theme-card-radius, var(--kp-card-radius));
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+.profile-module-header {
+  padding: 0.75rem 1rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--theme-text, var(--kp-ink));
+  border-bottom: 1px solid var(--theme-card-border-color, var(--kp-border));
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.profile-module-body {
+  padding: 1rem;
+}
+
+/* Profile info grid */
+.profile-info-grid {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 0.5rem 1rem;
+  font-size: 0.875rem;
+}
+
+.profile-info-label {
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+  font-weight: 500;
+}
+
+.profile-info-value {
+  color: var(--theme-text, var(--kp-ink));
+}
+
+/* Profile photo in module */
+.profile-photo-img {
+  width: 100px;
+  height: 100px;
+  border-radius: var(--theme-card-radius, var(--kp-card-radius));
+  object-fit: cover;
+}
+
+.profile-photo-initials {
+  width: 100px;
+  height: 100px;
+  border-radius: var(--theme-card-radius, var(--kp-card-radius));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  font-weight: 600;
+  color: white;
+  background: var(--theme-accent, var(--kp-teal));
+}
+
+/* Sidebar modules */
+.sidebar-module {
+  background: var(--theme-card-background, white);
+  border: 1px solid var(--theme-card-border-color, var(--kp-border));
+  border-radius: var(--theme-card-radius, var(--kp-card-radius));
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+.sidebar-module-header {
+  padding: 0.5rem 0.75rem;
+  font-weight: 600;
+  font-size: 0.75rem;
+  color: var(--theme-text, var(--kp-ink));
+  border-bottom: 1px solid var(--theme-card-border-color, var(--kp-border));
+}
+
+.sidebar-module-body {
+  padding: 0.75rem;
+}
+
+/* Friends grid */
+.friends-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+}
+
+.friend-item {
+  text-align: center;
+}
+
+.friend-avatar {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: var(--theme-card-radius, var(--kp-card-radius));
+  object-fit: cover;
+}
+
+.friend-initials {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: var(--theme-card-radius, var(--kp-card-radius));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: white;
+  background: var(--theme-accent, var(--kp-teal));
+}
+
+.friend-name {
+  font-size: 0.625rem;
+  color: var(--theme-text, var(--kp-ink));
+  margin-top: 0.25rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Coming soon placeholder */
+.coming-soon {
+  text-align: center;
+  padding: 1.5rem 1rem;
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+  font-size: 0.75rem;
+}
+
+/* Comments section */
+.profile-comments {
+  margin-top: 1rem;
+}
+
+.comment-item {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--theme-card-border-color, var(--kp-border));
+}
+
+.comment-item:last-child {
+  border-bottom: none;
+}
+
+.comment-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.comment-initials {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: white;
+  background: var(--theme-accent, var(--kp-teal));
+  flex-shrink: 0;
+}
+
+.comment-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.comment-author {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--theme-text, var(--kp-ink));
+}
+
+.comment-text {
+  font-size: 0.875rem;
+  color: var(--theme-text, var(--kp-ink));
+  margin-top: 0.25rem;
+}
+
+.comment-date {
+  font-size: 0.625rem;
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+  margin-top: 0.25rem;
+}
+
+/* Profile actions */
+.profile-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  justify-content: center;
+}
+
+/* Profile edit form enhancements */
+.profile-edit-section {
+  margin-bottom: 1.5rem;
+}
+
+.profile-edit-section h4 {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--theme-card-border-color, var(--kp-border));
 }
 
 /* Loading state */

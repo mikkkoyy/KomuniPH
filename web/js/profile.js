@@ -220,9 +220,19 @@ window.loadProfile = async function() {
  * Render profile content
  */
 function renderProfileContent(profile) {
-  const displayName = profile.display_name || profile.username;
+  // Identity fields with safe defaults (PROFILE-04)
+  const firstName = profile.first_name || '';
+  const middleName = profile.middle_name || '';
+  const lastName = profile.last_name || '';
+  const nickname = profile.nickname || '';
+  const displayName = profile.display_name || profile.username || '';
+  const username = profile.username || '';
   const aliasValue = profile.alias || '';
   const bioValue = profile.bio || '';
+
+  // Build full name for display
+  const fullNameParts = [firstName, middleName, lastName].filter(Boolean);
+  const fullName = fullNameParts.join(' ') || displayName;
 
   const theme = profile.theme && profile.theme.config ? profile.theme.config : {};
   const bgImage = theme.backgroundImage || '';
@@ -271,7 +281,8 @@ function renderProfileContent(profile) {
       </div>
       <div id="profile-view">
         <h2 class="profile-name">${escapeHtml(displayName)}</h2>
-        <p class="profile-username">@${profile.username}</p>
+        <p class="profile-username">@${escapeHtml(username)}</p>
+        ${nickname ? `<p class="profile-nickname">"${escapeHtml(nickname)}"</p>` : ''}
         ${profile.alias
           ? `<p class="profile-alias">Alias: ${escapeHtml(profile.alias)}</p>`
           : '<p class="profile-alias empty">No alias set.</p>'
@@ -285,8 +296,24 @@ function renderProfileContent(profile) {
       </div>
       <div id="profile-edit" style="display:none">
         <div class="form-group">
-          <label for="edit-display-name">Display Name</label>
-          <input type="text" id="edit-display-name" maxlength="100" value="${escapeHtml(displayName)}">
+          <label for="edit-first-name">First Name *</label>
+          <input type="text" id="edit-first-name" maxlength="100" value="${escapeHtml(firstName)}" placeholder="Enter your first name">
+        </div>
+        <div class="form-group">
+          <label for="edit-middle-name">Middle Name</label>
+          <input type="text" id="edit-middle-name" maxlength="100" value="${escapeHtml(middleName)}" placeholder="Enter your middle name (optional)">
+        </div>
+        <div class="form-group">
+          <label for="edit-last-name">Last Name *</label>
+          <input type="text" id="edit-last-name" maxlength="100" value="${escapeHtml(lastName)}" placeholder="Enter your last name">
+        </div>
+        <div class="form-group">
+          <label for="edit-nickname">Nickname</label>
+          <input type="text" id="edit-nickname" maxlength="50" value="${escapeHtml(nickname)}" placeholder="Enter a nickname (optional)">
+        </div>
+        <div class="form-group">
+          <label for="edit-display-name">Display Name *</label>
+          <input type="text" id="edit-display-name" maxlength="100" value="${escapeHtml(displayName)}" placeholder="How you want to be known">
         </div>
         <div class="form-group">
           <label for="edit-alias">Alias</label>
@@ -365,13 +392,26 @@ window.cancelEditProfile = function() {
   const error = document.getElementById('edit-profile-error');
   if (!view || !edit) return;
 
+  // PROFILE-04: Include identity fields in cancel restore
+  const firstName = (currentProfile && currentProfile.first_name) || '';
+  const middleName = (currentProfile && currentProfile.middle_name) || '';
+  const lastName = (currentProfile && currentProfile.last_name) || '';
+  const nickname = (currentProfile && currentProfile.nickname) || '';
   const displayName = (currentProfile && (currentProfile.display_name || currentProfile.username)) || '';
   const aliasValue = (currentProfile && currentProfile.alias) || '';
   const bioValue = (currentProfile && currentProfile.bio) || '';
 
+  const firstNameInput = document.getElementById('edit-first-name');
+  const middleNameInput = document.getElementById('edit-middle-name');
+  const lastNameInput = document.getElementById('edit-last-name');
+  const nicknameInput = document.getElementById('edit-nickname');
   const nameInput = document.getElementById('edit-display-name');
   const aliasInput = document.getElementById('edit-alias');
   const bioInput = document.getElementById('edit-bio');
+  if (firstNameInput) firstNameInput.value = firstName;
+  if (middleNameInput) middleNameInput.value = middleName;
+  if (lastNameInput) lastNameInput.value = lastName;
+  if (nicknameInput) nicknameInput.value = nickname;
   if (nameInput) nameInput.value = displayName;
   if (aliasInput) aliasInput.value = aliasValue;
   if (bioInput) bioInput.value = bioValue;
@@ -398,9 +438,46 @@ window.saveProfile = async function() {
     error.style.display = 'block';
   };
 
+  // PROFILE-04: Include identity fields
+  const firstName = (document.getElementById('edit-first-name')?.value || '').trim();
+  const middleName = (document.getElementById('edit-middle-name')?.value || '').trim();
+  const lastName = (document.getElementById('edit-last-name')?.value || '').trim();
+  const nickname = (document.getElementById('edit-nickname')?.value || '').trim();
   const displayName = (document.getElementById('edit-display-name')?.value || '').trim();
   const alias = (document.getElementById('edit-alias')?.value || '').trim();
   const bio = (document.getElementById('edit-bio')?.value || '').trim();
+
+  // PROFILE-04: Validate first_name (required)
+  if (!firstName) {
+    showEditError('First name is required');
+    return;
+  }
+  if (firstName.length > 100) {
+    showEditError('First name must be less than 100 characters');
+    return;
+  }
+
+  // PROFILE-04: Validate last_name (required)
+  if (!lastName) {
+    showEditError('Last name is required');
+    return;
+  }
+  if (lastName.length > 100) {
+    showEditError('Last name must be less than 100 characters');
+    return;
+  }
+
+  // PROFILE-04: Validate middle_name (optional, max 100)
+  if (middleName.length > 100) {
+    showEditError('Middle name must be less than 100 characters');
+    return;
+  }
+
+  // PROFILE-04: Validate nickname (optional, max 50)
+  if (nickname.length > 50) {
+    showEditError('Nickname must be less than 50 characters');
+    return;
+  }
 
   if (!displayName) {
     showEditError('Display name is required');
@@ -431,7 +508,12 @@ window.saveProfile = async function() {
   if (cancelBtn) cancelBtn.disabled = true;
 
   try {
+    // PROFILE-04: Include identity fields in update
     const updated = await profileApi.updateProfile({
+      first_name: firstName,
+      middle_name: middleName || null,
+      last_name: lastName,
+      nickname: nickname || null,
       display_name: displayName,
       alias,
       bio,

@@ -202,6 +202,48 @@ export function initDatabase() {
     // Column already exists or table does not exist yet — both are safe no-ops.
   }
 
+  // PROFILE-04: Add personal identity fields to existing profiles tables.
+  // first_name, middle_name, last_name, nickname for Friendster-style profile.
+  try {
+    database.exec('ALTER TABLE profiles ADD COLUMN first_name TEXT');
+  } catch (err) {
+    // Column already exists — safe no-op.
+  }
+  try {
+    database.exec('ALTER TABLE profiles ADD COLUMN middle_name TEXT');
+  } catch (err) {
+    // Column already exists — safe no-op.
+  }
+  try {
+    database.exec('ALTER TABLE profiles ADD COLUMN last_name TEXT');
+  } catch (err) {
+    // Column already exists — safe no-op.
+  }
+  try {
+    database.exec('ALTER TABLE profiles ADD COLUMN nickname TEXT');
+  } catch (err) {
+    // Column already exists — safe no-op.
+  }
+
+  // PROFILE-04: Backfill existing profiles with identity fields from existing data.
+  // Use existing display_name as first_name fallback, empty string for last_name.
+  try {
+    const updated = database.prepare(`
+      UPDATE profiles 
+      SET first_name = COALESCE(first_name, display_name, ''),
+          last_name = COALESCE(last_name, ''),
+          middle_name = COALESCE(middle_name, ''),
+          nickname = COALESCE(nickname, '')
+      WHERE first_name IS NULL
+    `).run();
+    if (updated && updated.changes > 0) {
+      console.log(`[PROFILE-04] Backfilled ${updated.changes} profile(s) with identity fields`);
+    }
+  } catch (err) {
+    // Migration already applied or table not ready — safe no-op.
+    console.log('[PROFILE-04] Identity fields backfill skipped:', err.message);
+  }
+
   console.log('[DB] Database initialized successfully');
   return database;
 }

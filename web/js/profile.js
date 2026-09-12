@@ -545,23 +545,23 @@ function renderProfileContent(profile) {
   const mutedTextColor = theme.mutedTextColor || theme.textSecondary || '#6b6072';
   const accentColor = theme.accentColor || theme.accent || '#0e6e6e';
 
-  const themeStyle = [
-    '--theme-background: ${bgColor}',
-    '--theme-card-background: ${cardBg}',
-    '--theme-card-opacity: ${cardOpacity}',
-    '--theme-card-border-color: ${cardBorderColor}',
-    '--theme-card-radius: ${cardBorderRadius}',
-    '--theme-card-shadow: ${cardShadow}',
-    '--theme-text: ${textColor}',
-    '--theme-text-secondary: ${mutedTextColor}',
-    '--theme-accent: ${accentColor}'
-  ].join('; ');
-
   const bgStyle = bgImage
     ? `background-image: url(${escapeHtml(bgImage)}); background-position: ${bgPosition}; background-repeat: ${bgRepeat}; background-size: ${bgSize};`
     : bgGradient
       ? `background: ${escapeHtml(bgGradient)};`
       : `background: ${bgColor};`;
+
+  const themeStyle = [
+    `--theme-background: ${bgColor}`,
+    `--theme-card-background: ${cardBg}`,
+    `--theme-card-opacity: ${cardOpacity}`,
+    `--theme-card-border-color: ${cardBorderColor}`,
+    `--theme-card-radius: ${cardBorderRadius}`,
+    `--theme-card-shadow: ${cardShadow}`,
+    `--theme-text: ${textColor}`,
+    `--theme-text-secondary: ${mutedTextColor}`,
+    `--theme-accent: ${accentColor}`
+  ].join('; ');
 
   // Build profile info grid HTML
   let infoGridHtml = '';
@@ -588,7 +588,7 @@ function renderProfileContent(profile) {
   `;
 
   return `
-    <div class="profile-card" style="${themeStyle}">
+    <div class="profile-card" style="${bgStyle} ${themeStyle}">
       <div class="profile-photo-section">
         ${photoHtml}
         <div class="photo-upload-form">
@@ -1072,6 +1072,10 @@ window.handleBackgroundUpload = async function(input) {
     }
 
     window.updatePreview();
+    // Automatically select Background Image mode after upload
+    const imageRadio = document.querySelector('input[name="bg-type"][value="image"]');
+    if (imageRadio) imageRadio.checked = true;
+    window.setBgType('image');
   } catch (err) {
     status.textContent = err.message || 'Upload failed';
     status.className = 'upload-status error';

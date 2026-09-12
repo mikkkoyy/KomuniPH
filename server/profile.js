@@ -701,7 +701,7 @@ export async function handleUpdateTheme(req, res, user) {
       return errorResponse(res, 404, 'Profile not found');
     }
 
-        let currentCustom = {};
+    let currentCustom = {};
     try {
       currentCustom = existing.custom_theme_config ? JSON.parse(existing.custom_theme_config) : {};
     } catch (e) {

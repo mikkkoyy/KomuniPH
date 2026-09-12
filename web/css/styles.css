@@ -637,24 +637,7 @@ a:hover {
   box-shadow: 0 0 0 3px var(--kp-teal-ring);
 }
 
-/* Profile page */
-.profile-page {
-  max-width: 40rem;
-  margin: 0 auto;
-  padding: 2rem 1rem;
-}
 
-.profile-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1rem;
-  background: var(--theme-cardBackground, rgba(255, 247, 236, 0.95));
-  border: 1px solid var(--theme-border, #f0dfc8);
-  border-radius: var(--theme-cardRadius, 1.75rem);
-  box-shadow: var(--theme-cardShadow, 0 20px 60px -20px rgba(42, 33, 48, 0.35));
-  padding: 2rem;
-}
 
 .profile-name {
   font-size: 1.25rem;

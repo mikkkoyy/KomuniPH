@@ -1271,11 +1271,12 @@ a:hover {
    PROFILE-04 — Friendster-Style Personal Profile
    ============================================ */
 
-/* Profile frame - main container */
+/* Profile page backdrop - full-bleed container that carries the user's
+   custom theme background (color / gradient / image) across the entire
+   viewport, edge to edge, regardless of how narrow the centered content
+   column below is. JS (applyProfileBackground / updatePreview) sets the
+   background on this element via #profile-frame. */
 .profile-frame {
-  max-width: calc(1040px);
-  margin: 0 auto;
-  padding: 1rem;
   width: 100%;
   min-height: 100vh;
   min-height: 100dvh;
@@ -1284,9 +1285,19 @@ a:hover {
   background-repeat: no-repeat;
 }
 
-/* Profile frame with max-width responsive */
+/* Profile content frame - centered content column that sits on top of the
+   full-bleed backdrop above. Layout-only: it intentionally carries no
+   background of its own so the backdrop always shows through around it. */
+.profile-content-frame {
+  max-width: calc(1040px);
+  margin: 0 auto;
+  padding: 1rem;
+  width: 100%;
+}
+
+/* Profile content frame with max-width responsive */
 @media (max-width: 1024px) {
-  .profile-frame {
+  .profile-content-frame {
     max-width: calc(100vw - 16px);
   }
 }

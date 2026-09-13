@@ -69,6 +69,7 @@ export function renderProfilePage() {
 
   return `
     <div class="profile-frame" id="profile-frame">
+      <div class="profile-content-frame">
       <!-- Header -->
       <header class="profile-header" id="profile-header">
         <div class="profile-header-inner">
@@ -268,7 +269,7 @@ export function renderProfilePage() {
                 </div>
                 <p class="coming-soon" style="font-size:0.75rem; color:var(--theme-text-secondary, var(--kp-ink-soft));">
                   Coming soon.
-                </div>
+                </p>
               </div>
             </div>
           </div>
@@ -417,6 +418,7 @@ export function renderProfilePage() {
           <button class="btn btn-secondary" onclick="window.closeCustomization()">Cancel</button>
           <button class="btn btn-primary" onclick="window.saveCustomization()">Save</button>
         </div>
+      </div>
       </div>
     </div>
   `;

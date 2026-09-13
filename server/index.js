@@ -13,6 +13,7 @@ import { initDatabase, closeDatabase, seedDefaultTheme } from './database.js';
 import { requireAuth } from './auth.js';
 import { handleRegister, handleLogin, handleVerify, handleVerifyEmailLink, handleForgotPassword, handleResetPassword } from './auth.js';
 import { handleGetProfile, handleGetPublicProfile, handleUpdateProfile, handleUploadPhoto, handleUpdateTheme, handleUploadBackground } from './profile.js';
+import { getAllLocations, getCountries, getCities, getBarangays } from './locations.js';
 import {
   handleGetFeed,
   handleCreatePost,
@@ -108,6 +109,22 @@ async function handleApi(req, res) {
   }
   if (method === 'POST' && path === '/api/auth/login') {
     return handleLogin(req, res);
+  }
+
+  // Locations routes
+  if (method === 'GET' && path === '/api/locations') {
+    return jsonResponse(res, 200, getAllLocations());
+  }
+  if (method === 'GET' && path === '/api/locations/countries') {
+    return jsonResponse(res, 200, getCountries());
+  }
+  const citiesMatch = matchRoute('/api/locations/cities/:country', path);
+  if (method === 'GET' && citiesMatch) {
+    return jsonResponse(res, 200, getCities(citiesMatch.country));
+  }
+  const barangaysMatch = matchRoute('/api/locations/barangays/:country/:city', path);
+  if (method === 'GET' && barangaysMatch) {
+    return jsonResponse(res, 200, getBarangays(barangaysMatch.country, barangaysMatch.city));
   }
   if (method === 'POST' && path === '/api/auth/verify') {
     return handleVerify(req, res);

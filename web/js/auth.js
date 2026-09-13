@@ -62,9 +62,9 @@ export function renderLoginPage() {
       <form id="login-form" class="form" novalidate>
         <div id="login-error" class="error-banner" style="display:none"></div>
         <div class="form-group">
-          <label class="form-label" for="login-email">Email</label>
-          <input type="email" id="login-email" class="form-input" placeholder="Enter your email address" autocomplete="email" required>
-          <div id="login-email-error" class="form-error" style="display:none"></div>
+          <label class="form-label" for="login-identifier">Username or Email</label>
+          <input type="text" id="login-identifier" class="form-input" placeholder="Enter your username or email" autocomplete="username" required>
+          <div id="login-identifier-error" class="form-error" style="display:none"></div>
         </div>
         <div class="form-group">
           <label class="form-label" for="login-password">Password</label>
@@ -287,21 +287,21 @@ export function initLoginForm() {
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
 
-    const email = document.getElementById('login-email').value.trim();
+    const identifier = document.getElementById('login-identifier').value.trim();
     const password = document.getElementById('login-password').value;
     const errorDiv = document.getElementById('login-error');
     const submitBtn = document.getElementById('login-submit');
 
     // Clear previous errors
     errorDiv.style.display = 'none';
-    document.getElementById('login-email-error').style.display = 'none';
+    document.getElementById('login-identifier-error').style.display = 'none';
     document.getElementById('login-password-error').style.display = 'none';
 
     // Validate
     let hasError = false;
-    if (!email) {
-      document.getElementById('login-email-error').textContent = 'Email is required';
-      document.getElementById('login-email-error').style.display = 'block';
+    if (!identifier) {
+      document.getElementById('login-identifier-error').textContent = 'Username or email is required';
+      document.getElementById('login-identifier-error').style.display = 'block';
       hasError = true;
     }
     if (!password) {
@@ -316,11 +316,11 @@ export function initLoginForm() {
     submitBtn.textContent = 'Logging in...';
 
     try {
-      await authApi.login(email, password);
+      await authApi.login(identifier, password);
       await fetchCurrentUserProfile();
       navigate('/home');
     } catch (err) {
-      errorDiv.textContent = err.message || 'Invalid email or password';
+      errorDiv.textContent = err.message || 'Invalid username/email or password';
       errorDiv.style.display = 'block';
       submitBtn.disabled = false;
       submitBtn.textContent = 'Log In';

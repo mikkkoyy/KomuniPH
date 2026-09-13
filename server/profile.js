@@ -134,6 +134,7 @@ const PROFILE_SELECT = `
     p.id,
     p.user_id,
     u.username,
+    u.email,
     p.first_name,
     p.middle_name,
     p.last_name,
@@ -147,6 +148,10 @@ const PROFILE_SELECT = `
     p.cover_photo_url,
     p.theme_id,
     p.custom_theme_config,
+    p.birthday,
+    p.country,
+    p.city,
+    p.barangay,
     p.created_at,
     p.updated_at
   FROM profiles p
@@ -200,11 +205,14 @@ function getProfileByUserId(userId) {
   const profile = queryOne(`${PROFILE_SELECT} WHERE p.user_id = ?`, [userId]);
   if (profile) {
     profile.alias_enabled = Boolean(profile.alias_enabled);
-    // PROFILE-04: Ensure identity fields have safe defaults
     profile.first_name = profile.first_name || '';
     profile.middle_name = profile.middle_name || '';
     profile.last_name = profile.last_name || '';
     profile.nickname = profile.nickname || '';
+    profile.birthday = profile.birthday || null;
+    profile.country = profile.country || null;
+    profile.city = profile.city || null;
+    profile.barangay = profile.barangay || null;
     profile.theme = buildTheme(profile);
   }
   return profile;
@@ -257,6 +265,10 @@ export function handleGetPublicProfile(req, res, params) {
         p.cover_photo_url,
         p.theme_id,
         p.custom_theme_config,
+        p.birthday,
+        p.country,
+        p.city,
+        p.barangay,
         p.created_at,
         p.updated_at
       FROM profiles p
@@ -275,6 +287,10 @@ export function handleGetPublicProfile(req, res, params) {
     profile.middle_name = profile.middle_name || '';
     profile.last_name = profile.last_name || '';
     profile.nickname = profile.nickname || '';
+    profile.birthday = profile.birthday || null;
+    profile.country = profile.country || null;
+    profile.city = profile.city || null;
+    profile.barangay = profile.barangay || null;
     profile.theme = buildTheme(profile);
 
     jsonResponse(res, 200, profile);
@@ -313,9 +329,13 @@ export async function handleUpdateProfile(req, res, user) {
     const hasDisplayName = Object.prototype.hasOwnProperty.call(body, 'display_name');
     const hasBio = Object.prototype.hasOwnProperty.call(body, 'bio');
     const hasAlias = Object.prototype.hasOwnProperty.call(body, 'alias');
+    const hasBirthday = Object.prototype.hasOwnProperty.call(body, 'birthday');
+    const hasCountry = Object.prototype.hasOwnProperty.call(body, 'country');
+    const hasCity = Object.prototype.hasOwnProperty.call(body, 'city');
+    const hasBarangay = Object.prototype.hasOwnProperty.call(body, 'barangay');
 
     // At least one field must be provided
-    if (!hasFirstName && !hasMiddleName && !hasLastName && !hasNickname && !hasDisplayName && !hasBio && !hasAlias) {
+    if (!hasFirstName && !hasMiddleName && !hasLastName && !hasNickname && !hasDisplayName && !hasBio && !hasAlias && !hasBirthday && !hasCountry && !hasCity && !hasBarangay) {
       return errorResponse(res, 422, 'At least one profile field is required');
     }
 
@@ -331,6 +351,10 @@ export async function handleUpdateProfile(req, res, user) {
     let displayName = existing.display_name;
     let bio = existing.bio;
     let alias = existing.alias;
+    let birthday = existing.birthday || null;
+    let country = existing.country || null;
+    let city = existing.city || null;
+    let barangay = existing.barangay || null;
     let customThemeConfig = existing.custom_theme_config;
 
     // PROFILE-04: first_name validation - required when provided, trimmed, 1-100 chars
@@ -414,35 +438,85 @@ export async function handleUpdateProfile(req, res, user) {
       bio = trimmed ? trimmed : null;
     }
 
-    // alias: required when provided per conservative policy, trimmed, 1-50 chars,
-    // predictable charset, unique across profiles (excluding own record)
+    // alias: optional, trimmed, max 50 chars, predictable charset,
+    // unique across profiles (excluding own record). Empty/null clears it.
     if (hasAlias) {
-      if (typeof body.alias !== 'string') {
-        return errorResponse(res, 422, 'Alias must be a string');
+      if (body.alias !== null && typeof body.alias !== 'string') {
+        return errorResponse(res, 422, 'Alias must be a string or null');
       }
-      const trimmed = body.alias.trim();
-      if (!trimmed) {
-        return errorResponse(res, 422, 'Alias is required');
-      }
+      const trimmed = body.alias === null ? '' : body.alias.trim();
       if (trimmed.length > 50) {
         return errorResponse(res, 422, 'Alias must be less than 50 characters');
       }
-      if (!isValidAlias(trimmed)) {
+      if (trimmed && !isValidAlias(trimmed)) {
         return errorResponse(res, 422, 'Alias may only contain letters, numbers, underscore, dot, and hyphen');
       }
-      const conflict = queryOne(
-        'SELECT user_id FROM profiles WHERE alias = ? COLLATE NOCASE AND user_id != ?',
-        [trimmed, user.sub]
-      );
-      if (conflict) {
-        return errorResponse(res, 409, 'Alias is already taken');
+      if (trimmed) {
+        const conflict = queryOne(
+          'SELECT user_id FROM profiles WHERE alias = ? COLLATE NOCASE AND user_id != ?',
+          [trimmed, user.sub]
+        );
+        if (conflict) {
+          return errorResponse(res, 409, 'Alias is already taken');
+        }
       }
-      alias = trimmed;
+      alias = trimmed || null;
+    }
+
+    // birthday: optional, ISO date string (YYYY-MM-DD)
+    if (hasBirthday) {
+      if (body.birthday !== null && typeof body.birthday !== 'string') {
+        return errorResponse(res, 422, 'Birthday must be a date string or null');
+      }
+      if (body.birthday !== null) {
+        const trimmed = body.birthday.trim();
+        if (trimmed && !/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+          return errorResponse(res, 422, 'Birthday must be in YYYY-MM-DD format');
+        }
+        // Validate the date is real (e.g., not Feb 30)
+        if (trimmed) {
+          const parsed = new Date(trimmed + 'T00:00:00');
+          if (isNaN(parsed.getTime())) {
+            return errorResponse(res, 422, 'Birthday is not a valid date');
+          }
+          const parts = trimmed.split('-');
+          if (parseInt(parts[0]) <= 1900 || parseInt(parts[0]) > new Date().getFullYear()) {
+            return errorResponse(res, 422, 'Birthday year must be between 1901 and current year');
+          }
+        }
+        birthday = trimmed || null;
+      } else {
+        birthday = null;
+      }
+    }
+
+    // country: optional, string
+    if (hasCountry) {
+      if (body.country !== null && typeof body.country !== 'string') {
+        return errorResponse(res, 422, 'Country must be a string or null');
+      }
+      country = body.country === null ? null : body.country.trim() || null;
+    }
+
+    // city: optional, string
+    if (hasCity) {
+      if (body.city !== null && typeof body.city !== 'string') {
+        return errorResponse(res, 422, 'City must be a string or null');
+      }
+      city = body.city === null ? null : body.city.trim() || null;
+    }
+
+    // barangay: optional, string
+    if (hasBarangay) {
+      if (body.barangay !== null && typeof body.barangay !== 'string') {
+        return errorResponse(res, 422, 'Barangay must be a string or null');
+      }
+      barangay = body.barangay === null ? null : body.barangay.trim() || null;
     }
 
     execute(
-      "UPDATE profiles SET first_name = ?, middle_name = ?, last_name = ?, nickname = ?, display_name = ?, bio = ?, alias = ?, custom_theme_config = ?, updated_at = datetime('now') WHERE user_id = ?",
-      [firstName, middleName, lastName, nickname, displayName, bio, alias, customThemeConfig, user.sub]
+      "UPDATE profiles SET first_name = ?, middle_name = ?, last_name = ?, nickname = ?, display_name = ?, bio = ?, alias = ?, birthday = ?, country = ?, city = ?, barangay = ?, custom_theme_config = ?, updated_at = datetime('now') WHERE user_id = ?",
+      [firstName, middleName, lastName, nickname, displayName, bio, alias, birthday, country, city, barangay, customThemeConfig, user.sub]
     );
 
     const updated = getProfileByUserId(user.sub);

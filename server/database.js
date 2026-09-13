@@ -62,6 +62,10 @@ export function initDatabase() {
       profile_photo_url TEXT,
       cover_photo_url TEXT,
       theme_id TEXT REFERENCES profile_themes(id),
+      birthday TEXT,
+      country TEXT,
+      city TEXT,
+      barangay TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -225,6 +229,28 @@ export function initDatabase() {
     // Column already exists — safe no-op.
   }
 
+  // PROFILE-06: Add location fields to profiles table.
+  try {
+    database.exec('ALTER TABLE profiles ADD COLUMN birthday TEXT');
+  } catch (err) {
+    // Column already exists — safe no-op.
+  }
+  try {
+    database.exec('ALTER TABLE profiles ADD COLUMN country TEXT');
+  } catch (err) {
+    // Column already exists — safe no-op.
+  }
+  try {
+    database.exec('ALTER TABLE profiles ADD COLUMN city TEXT');
+  } catch (err) {
+    // Column already exists — safe no-op.
+  }
+  try {
+    database.exec('ALTER TABLE profiles ADD COLUMN barangay TEXT');
+  } catch (err) {
+    // Column already exists — safe no-op.
+  }
+
   // PROFILE-04: Backfill existing profiles with identity fields from existing data.
   // Use existing display_name as first_name fallback, empty string for last_name.
   try {
@@ -233,7 +259,11 @@ export function initDatabase() {
       SET first_name = COALESCE(first_name, display_name, ''),
           last_name = COALESCE(last_name, ''),
           middle_name = COALESCE(middle_name, ''),
-          nickname = COALESCE(nickname, '')
+          nickname = COALESCE(nickname, ''),
+          birthday = COALESCE(birthday, NULL),
+          country = COALESCE(country, NULL),
+          city = COALESCE(city, NULL),
+          barangay = COALESCE(barangay, NULL)
       WHERE first_name IS NULL
     `).run();
     if (updated && updated.changes > 0) {

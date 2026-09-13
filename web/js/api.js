@@ -161,10 +161,10 @@ export async function apiRequest(path, options = {}) {
  * Auth API
  */
 export const authApi = {
-  async login(email, password) {
+  async login(identifier, password) {
     const response = await apiRequest('/auth/login', {
       method: 'POST',
-      body: { email, password },
+      body: { identifier, password },
     });
     setTokens(response.access_token, response.refresh_token);
     return response;
@@ -204,6 +204,14 @@ export const authApi = {
 export const profileApi = {
   async getOwnProfile() {
     return apiRequest('/profile');
+  },
+
+  async getPublicProfile(username) {
+    return apiRequest(`/profile/${username}`);
+  },
+
+  async getLocations() {
+    return apiRequest('/locations');
   },
 
   async updateProfile(data) {

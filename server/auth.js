@@ -143,11 +143,11 @@ export async function handleRegister(req, res) {
     );
 
     // Create profile
-    // PROFILE-04: Initialize identity fields with username as temporary display_name
+    // PROFILE-04: Initialize identity fields; username is NOT used as display name
     const profileId = generateId();
     execute(
       'INSERT INTO profiles (id, user_id, first_name, last_name, display_name, theme_id) VALUES (?, ?, ?, ?, ?, ?)',
-      [profileId, userId, username, '', username, 'default']
+      [profileId, userId, '', '', '', 'default']
     );
 
     // Generate verification token
@@ -192,27 +192,34 @@ export async function handleRegister(req, res) {
 
 /**
  * Handle POST /api/auth/login
+ * Accepts either username or email as the identifier.
  */
 export async function handleLogin(req, res) {
   try {
     const body = await parseBody(req);
-    const { email, password } = body;
+    const { identifier, email, password } = body;
+
+    // Accept both "identifier" (new) and "email" (backward compat) as the login value
+    const loginValue = identifier || email;
 
     // Validate input
-    if (!email || !password) {
-      return errorResponse(res, 422, 'Email and password are required');
+    if (!loginValue || !password) {
+      return errorResponse(res, 422, 'Username/email and password are required');
     }
 
-    // Find user
-    const user = queryOne('SELECT * FROM users WHERE email = ?', [email.toLowerCase()]);
+    // Find user by username OR email (case-insensitive)
+    const user = queryOne(
+      'SELECT * FROM users WHERE username = ? OR email = ?',
+      [loginValue.toLowerCase(), loginValue.toLowerCase()]
+    );
     if (!user) {
-      return errorResponse(res, 401, 'Invalid email or password');
+      return errorResponse(res, 401, 'Invalid username/email or password');
     }
 
     // Verify password
     const valid = await verifyPassword(password, user.password_hash);
     if (!valid) {
-      return errorResponse(res, 401, 'Invalid email or password');
+      return errorResponse(res, 401, 'Invalid username/email or password');
     }
 
     // Check account status

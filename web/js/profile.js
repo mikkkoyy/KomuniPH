@@ -2,7 +2,7 @@
  * KomuniPH Lite - Profile UI
  */
 
-import { profileApi, isAuthenticated, getCurrentUserProfile, setCurrentUserProfile } from './api.js';
+import { profileApi, authApi, isAuthenticated, getCurrentUserProfile, setCurrentUserProfile } from './api.js';
 import { navigate } from './app.js';
 
 let currentProfile = null;
@@ -105,31 +105,40 @@ export function renderProfilePage() {
               Profile
               <span></span>
             </div>
-            <div class="profile-module-body" id="profile-module-body">
-              <!-- Large profile photo -->
-              <img class="profile-photo-large" id="profile-photo-large"
-                   src="" alt="Profile photo"
-                   style="display:none">
-              <!-- Fallback initials -->
-              <div class="profile-photo-large" id="profile-photo-initials"
-                   style="display:none; background: var(--theme-accent, var(--kp-teal)); color: white;">
-                ?
-              </div>
-              <div style="clear:both"></div>
+             <div class="profile-module-body">
+               <div id="profile-photo-section">
+                 <img class="profile-photo-large" id="profile-photo-large"
+                      src="" alt="Profile photo"
+                      style="display:none">
+                 <div class="profile-photo-large" id="profile-photo-initials"
+                      style="display:none; background: var(--theme-accent, var(--kp-teal)); color: white;">
+                   ?
+                 </div>
+                 <div style="clear:both"></div>
+                 <button class="profile-action-btn" id="change-photo-btn" onclick="document.getElementById('photo-input').click()" style="display:none">Change Profile Photo</button>
+                 <input type="file" id="photo-input" accept="image/jpeg,image/png,image/webp" style="display:none">
+                 <button class="btn btn-primary" id="upload-btn" style="display:none" onclick="window.uploadPhoto()">Upload Photo</button>
+                 <div id="upload-status" class="upload-status"></div>
+               </div>
 
-              <h2 class="profile-name" id="profile-name"></h2>
-              <p class="profile-username" id="profile-username"></p>
-              <p class="profile-nickname" id="profile-nickname"></p>
+               <div id="profile-view">
+                 <h2 class="profile-name" id="profile-name"></h2>
+                 <p class="profile-username" id="profile-username"></p>
+                 <p class="profile-nickname" id="profile-nickname"></p>
 
-              <div class="profile-info-grid" id="profile-info-grid">
-                <!-- Identity fields will be populated by JS -->
-              </div>
+                 <div class="profile-info-grid" id="profile-info-grid">
+                   <!-- Identity fields will be populated by JS -->
+                 </div>
 
-              <div class="profile-actions" id="profile-actions">
-                <button class="profile-action-btn" onclick="window.startEditProfile()">Edit Profile</button>
-                <button class="profile-action-btn" onclick="window.openCustomization()">Customize Profile</button>
-              </div>
-            </div>
+                 <div class="profile-actions" id="profile-actions">
+                   <button class="profile-action-btn" onclick="window.startEditProfile()">Edit Profile</button>
+                   <button class="profile-action-btn" onclick="window.openCustomization()">Customize Profile</button>
+                 </div>
+               </div>
+               <div id="profile-edit" style="display:none">
+                 <!-- Edit form will be populated by startEditProfile() -->
+               </div>
+             </div>
           </div>
 
           <!-- Personal Information Module -->
@@ -492,90 +501,11 @@ window.loadProfile = async function() {
     const profile = await profileApi.getOwnProfile();
     currentProfile = profile;
     applyProfileBackground(profile);
-    // The profile content is already in the HTML frame,
-    // so we just need to update the data in existing elements
-    const displayName = profile.display_name || profile.username;
-    const nickname = profile.nickname || '';
-    const alias = profile.alias_enabled && profile.alias ? profile.alias : '';
 
-    // Update profile name display in the frame
-    const nameDisplay = profile.display_name || profile.username;
-    const nameEl = document.getElementById('profile-name');
-    const usernameEl = document.getElementById('profile-username');
-    const nicknameEl = document.getElementById('profile-nickname');
-
-    if (nameEl) nameEl.textContent = nameDisplay;
-    if (usernameEl) usernameEl.textContent = `@${profile.username || ''}`;
-    if (nicknameEl) nicknameEl.textContent = nickname ? `"${nickname}"` : '';
-
-    // Update personal info module
-    const infoName = displayName;
-    const infoNickname = nickname;
-    const infoLocation = profile.real_name ? (profile.real_name + ', Philippines') : '';
-    const infoBio = profile.bio || '';
-
-    const infoNameEl = document.getElementById('profile-info-name');
-    const infoNicknameEl = document.getElementById('profile-info-nickname');
-    const infoLocationEl = document.getElementById('profile-info-location');
-    const infoBioEl = document.getElementById('profile-info-bio');
-
-    if (infoNameEl) infoNameEl.textContent = infoName;
-    if (infoNicknameEl) infoNicknameEl.textContent = infoNickname;
-    if (infoLocationEl) infoLocationEl.textContent = infoLocation;
-    if (infoBioEl) infoBioEl.textContent = infoBio;
-
-    // Update friends coming soon visibility
-    const friendsComingSoon = document.getElementById('friends-coming-soon');
-    if (friendsComingSoon) {
-      // Check if there are any friends - for now always show coming soon
-      friendsComingSoon.style.display = 'block';
-    }
-
-    // Update photo large preview
-    const profilePhotoLarge = document.getElementById('profile-photo-large');
-    const profilePhotoInitials = document.getElementById('profile-photo-initials');
-    if (profile.profile_photo_url) {
-      if (profilePhotoLarge) {
-        profilePhotoLarge.src = profile.profile_photo_url;
-        profilePhotoLarge.alt = displayName;
-        profilePhotoLarge.style.display = 'block';
-      }
-      if (profilePhotoInitials) {
-        profilePhotoInitials.style.display = 'none';
-      }
-    } else {
-      if (profilePhotoLarge) profilePhotoLarge.style.display = 'none';
-      if (profilePhotoInitials) {
-        profilePhotoInitials.style.display = 'block';
-        profilePhotoInitials.textContent = (displayName || '?').charAt(0).toUpperCase();
-      }
-    }
-
-    // Update sidebar/avatar references if they exist (for other pages)
-    const sidebarImg = document.getElementById('sidebar-avatar-img');
-    const sidebarInitials = document.getElementById('sidebar-avatar-initials');
-    const sidebarName = document.getElementById('sidebar-display-name');
-    const sidebarAlias = document.getElementById('sidebar-alias');
-
-    if (sidebarImg) {
-      if (profile.profile_photo_url) {
-        sidebarImg.src = profile.profile_photo_url;
-        sidebarImg.alt = displayName;
-        sidebarImg.style.display = 'block';
-      }
-    }
-    if (sidebarInitials) {
-      sidebarInitials.textContent = (displayName || '?').charAt(0).toUpperCase();
-      if (profile.profile_photo_url) {
-        sidebarInitials.style.display = 'none';
-      }
-    }
-    if (sidebarName) sidebarName.textContent = displayName;
-    if (sidebarAlias) sidebarAlias.textContent = alias ? `@${alias}` : '';
+    renderProfileView(profile);
 
   } catch (err) {
     console.error('[PROFILE] Load profile error:', err);
-    // Show error in the status strip
     const statusStrip = document.getElementById('profile-status-strip');
     if (statusStrip) {
       statusStrip.textContent = 'Failed to load profile: ' + (err.message || 'Unknown error');
@@ -585,168 +515,192 @@ window.loadProfile = async function() {
 };
 
 /**
- * Render profile content
+ * Render the profile view (name, username, nickname, photo, personal info)
+ * from the current profile data. Called by loadProfile() and after save.
  */
-function renderProfileContent(profile) {
-  // Identity fields with safe defaults (PROFILE-04)
+function renderProfileView(profile) {
+  if (!profile) return;
+
   const firstName = profile.first_name || '';
-  const middleName = profile.middle_name || '';
   const lastName = profile.last_name || '';
+  const middleName = profile.middle_name || '';
   const nickname = profile.nickname || '';
-  const displayName = profile.display_name || profile.username || '';
   const username = profile.username || '';
-  const aliasValue = profile.alias || '';
-  const bioValue = profile.bio || '';
+  const bio = profile.bio || '';
+  const alias = profile.alias_enabled && profile.alias ? profile.alias : '';
 
-  // Build full name for display
-  const fullNameParts = [firstName, middleName, lastName].filter(Boolean);
-  const fullName = fullNameParts.join(' ') || displayName;
-
-  // Determine the photo URL
-  const photoUrl = profile.profile_photo_url || '';
-
-  // Build name display
-  const nameDisplay = displayName ? displayName : (firstName ? firstName + ' ' + (lastName || '') : username);
-
-  // Nickname display
+  // PROFILE-04: Build the display name from real name fields, NOT username
+  const nameDisplay = getProfileDisplayName(profile) || '';
   const nicknameDisplay = nickname ? `"${nickname}"` : '';
 
-  // Build personal info display
-  const infoName = displayName || (firstName + ' ' + (middleName ? middleName + ' ' : '') + (lastName || ''));
-  const infoNickname = nickname || '';
-  const infoLocation = profile.real_name ? (profile.real_name + ', Philippines') : '';
-  const infoBio = bioValue || '';
+  // Update profile name display in the frame
+  const nameEl = document.getElementById('profile-name');
+  const usernameEl = document.getElementById('profile-username');
+  const nicknameEl = document.getElementById('profile-nickname');
 
-  // Profile photo HTML - large photo
-  let photoHtml = '';
-  if (photoUrl) {
-    photoHtml = `<img class="profile-photo-large" id="profile-photo-large"
-                    src="${escapeHtml(photoUrl)}"
-                    alt="${escapeHtml(displayName)}">`;
+  if (nameEl) nameEl.textContent = nameDisplay;
+  if (usernameEl) usernameEl.textContent = `@${username}`;
+  if (nicknameEl) nicknameEl.textContent = nicknameDisplay;
+
+  // Update personal info module
+  const infoNameEl = document.getElementById('profile-info-name');
+  const infoNicknameEl = document.getElementById('profile-info-nickname');
+  const infoLocationEl = document.getElementById('profile-info-location');
+  const infoBioEl = document.getElementById('profile-info-bio');
+
+  if (infoNameEl) infoNameEl.textContent = nameDisplay;
+  if (infoNicknameEl) infoNicknameEl.textContent = nickname || '';
+  if (infoLocationEl) {
+    const locationParts = [profile.country, profile.city, profile.barangay].filter(Boolean);
+    infoLocationEl.textContent = locationParts.join(', ') || '';
+  }
+  if (infoBioEl) infoBioEl.textContent = bio || '';
+
+  // Update profile photo
+  const profilePhotoLarge = document.getElementById('profile-photo-large');
+  const profilePhotoInitials = document.getElementById('profile-photo-initials');
+  if (profile.profile_photo_url) {
+    if (profilePhotoLarge) {
+      profilePhotoLarge.src = profile.profile_photo_url;
+      profilePhotoLarge.alt = nameDisplay || username;
+      profilePhotoLarge.style.display = 'block';
+    }
+    if (profilePhotoInitials) {
+      profilePhotoInitials.style.display = 'none';
+    }
   } else {
-    photoHtml = `<div class="profile-photo-large" id="profile-photo-initials"
-                   style="width:290px;height:400px;background: var(--theme-accent, var(--kp-teal)); color: white; display:flex; align-items:center; justify-content:center; font-size:2rem;">
-                    ?
-                </div>`;
+    if (profilePhotoLarge) profilePhotoLarge.style.display = 'none';
+    if (profilePhotoInitials) {
+      profilePhotoInitials.style.display = 'block';
+      profilePhotoInitials.textContent = (nameDisplay || username || '?').charAt(0).toUpperCase();
+    }
   }
 
-  // Theme
-  const theme = profile.theme && profile.theme.config ? profile.theme.config : {};
-  const bgImage = theme.backgroundImage || '';
-  const bgGradient = theme.backgroundGradient || '';
-  const bgColor = theme.background || theme.backgroundColor || '#fff7ec';
-  const bgPosition = theme.backgroundPosition || 'center';
-  const bgRepeat = theme.backgroundRepeat || 'no-repeat';
-  const bgSize = theme.backgroundSize || 'cover';
-  const cardBg = theme.cardBackground || 'rgba(255, 247, 236, 0.95)';
-  const cardOpacity = theme.cardOpacity != null ? theme.cardOpacity : 0.95;
-  const cardBgRgba = toRgbaWithOpacity(cardBg, cardOpacity);
-  const cardBorderColor = theme.cardBorderColor || theme.border || '#f0dfc8';
-  const cardBorderRadius = theme.cardBorderRadius || theme.cardRadius || '1.75rem';
-  const cardBorderRadiusValue = typeof cardBorderRadius === 'number' ? `${cardBorderRadius}px` : cardBorderRadius;
-  const cardShadow = theme.cardShadow || '0 20px 60px -20px rgba(42, 33, 48, 0.35)';
-  const textColor = theme.textColor || theme.text || '#2a2130';
-  const mutedTextColor = theme.mutedTextColor || theme.textSecondary || '#6b6072';
-  const accentColor = theme.accentColor || theme.accent || '#0e6e6e';
+  // Update sidebar/avatar references if they exist (for other pages)
+  const sidebarImg = document.getElementById('sidebar-avatar-img');
+  const sidebarInitials = document.getElementById('sidebar-avatar-initials');
+  const sidebarName = document.getElementById('sidebar-display-name');
+  const sidebarAlias = document.getElementById('sidebar-alias');
 
-  const themeStyle = [
-    `--theme-background: ${bgColor}`,
-    `--theme-card-background: ${cardBgRgba}`,
-    `--theme-card-opacity: ${cardOpacity}`,
-    `--theme-card-border-color: ${cardBorderColor}`,
-    `--theme-card-radius: ${cardBorderRadiusValue}`,
-    `--theme-card-shadow: ${cardShadow}`,
-    `--theme-text: ${textColor}`,
-    `--theme-text-secondary: ${mutedTextColor}`,
-    `--theme-accent: ${accentColor}`
-  ].join('; ');
+  if (sidebarImg) {
+    if (profile.profile_photo_url) {
+      sidebarImg.src = profile.profile_photo_url;
+      sidebarImg.alt = nameDisplay;
+      sidebarImg.style.display = 'block';
+    }
+  }
+  if (sidebarInitials) {
+    sidebarInitials.textContent = (nameDisplay || '?').charAt(0).toUpperCase();
+    if (profile.profile_photo_url) {
+      sidebarInitials.style.display = 'none';
+    }
+  }
+  if (sidebarName) sidebarName.textContent = nameDisplay;
+  if (sidebarAlias) sidebarAlias.textContent = alias ? `@${alias}` : '';
+}
 
-  // Build profile info grid HTML
-  let infoGridHtml = '';
-  if (infoName) {
-    infoGridHtml += `<div><span class="profile-info-label">Name:</span> <span class="profile-info-value">${escapeHtml(infoName)}</span></div>`;
-  }
-  if (infoNickname) {
-    infoGridHtml += `<div><span class="profile-info-label">Nickname:</span> <span class="profile-info-value">${escapeHtml(infoNickname)}</span></div>`;
-  }
-  if (infoLocation) {
-    infoGridHtml += `<div><span class="profile-info-label">Location:</span> <span class="profile-info-value">${escapeHtml(infoLocation)}</span></div>`;
-  }
-  if (infoBio) {
-    infoGridHtml += `<div><span class="profile-info-label">About Me:</span> <span class="profile-info-value">${escapeHtml(infoBio)}</span></div>`;
-  }
-  if (!infoName && !infoNickname && !infoLocation && !infoBio) {
-    infoGridHtml = `<div><span class="profile-info-value" style="color:var(--theme-text-secondary, var(--kp-ink-soft));">No information yet.</span></div>`;
+window.onCountryChange = function() {
+  populateCityDropdown();
+};
+
+window.onCityChange = function() {
+  populateBarangayDropdown();
+};
+
+function populateCityDropdown() {
+  const country = document.getElementById('edit-country')?.value || '';
+  const citySelect = document.getElementById('edit-city');
+  const barangaySelect = document.getElementById('edit-barangay');
+  if (!citySelect) return;
+
+  citySelect.innerHTML = '<option value="">Select a city</option>';
+  citySelect.disabled = !country;
+  if (barangaySelect) {
+    barangaySelect.innerHTML = '<option value="">Select a barangay</option>';
+    barangaySelect.disabled = !country;
   }
 
-  // Build action buttons
-  let actionsHtml = `
-    <button class="profile-action-btn" onclick="window.startEditProfile()">Edit Profile</button>
-    <button class="profile-action-btn" onclick="window.openCustomization()">Customize Profile</button>
-  `;
+  if (country && window.locationDataCache) {
+    const cities = window.locationDataCache.cities[country] || [];
+    cities.forEach(city => {
+      const opt = document.createElement('option');
+      opt.value = city;
+      opt.textContent = city;
+      citySelect.appendChild(opt);
+    });
+  }
+}
 
-  return `
-    <div class="profile-card" style="${themeStyle}">
-      <div class="profile-photo-section">
-        ${photoHtml}
-        <div class="photo-upload-form">
-          <input type="file" id="photo-input" accept="image/jpeg,image/png,image/webp" style="display:none">
-          <button class="btn btn-secondary" onclick="document.getElementById('photo-input').click()">Choose Photo</button>
-          <button class="btn btn-primary" id="upload-btn" style="display:none" onclick="window.uploadPhoto()">Upload</button>
-          <div id="upload-status" class="upload-status"></div>
-        </div>
-      </div>
-      <div id="profile-view">
-        <h2 class="profile-name">${escapeHtml(nameDisplay)}</h2>
-        <p class="profile-username">@${escapeHtml(username)}</p>
-        ${nicknameDisplay ? `<p class="profile-nickname">${escapeHtml(nicknameDisplay)}</p>` : ''}
-        ${profile.alias
-          ? `<p class="profile-alias">Alias: ${escapeHtml(profile.alias)}</p>`
-          : '<p class="profile-alias empty">No alias set.</p>'
-        }
-        ${profile.bio
-          ? `<p class="profile-bio">${escapeHtml(profile.bio)}</p>`
-          : '<p class="profile-bio empty">No bio yet.</p>'
-        }
-        ${actionsHtml}
-      </div>
-      <div id="profile-edit" style="display:none">
-        <div class="form-group">
-          <label for="edit-first-name">First Name *</label>
-          <input type="text" id="edit-first-name" maxlength="100" value="${escapeHtml(firstName)}" placeholder="Enter your first name">
-        </div>
-        <div class="form-group">
-          <label for="edit-middle-name">Middle Name</label>
-          <input type="text" id="edit-middle-name" maxlength="100" value="${escapeHtml(middleName)}" placeholder="Enter your middle name (optional)">
-        </div>
-        <div class="form-group">
-          <label for="edit-last-name">Last Name *</label>
-          <input type="text" id="edit-last-name" maxlength="100" value="${escapeHtml(lastName)}" placeholder="Enter your last name">
-        </div>
-        <div class="form-group">
-          <label for="edit-nickname">Nickname</label>
-          <input type="text" id="edit-nickname" maxlength="50" value="${escapeHtml(nickname)}" placeholder="Enter a nickname (optional)">
-        </div>
-        <div class="form-group">
-          <label for="edit-display-name">Display Name *</label>
-          <input type="text" id="edit-display-name" maxlength="100" value="${escapeHtml(displayName)}" placeholder="How you want to be known">
-        </div>
-        <div class="form-group">
-          <label for="edit-alias">Alias</label>
-          <input type="text" id="edit-alias" maxlength="50" value="${escapeHtml(aliasValue)}">
-        </div>
-        <div class="form-group">
-          <label for="edit-bio">Bio</label>
-          <textarea id="edit-bio" rows="3" maxlength="500">${escapeHtml(bioValue)}</textarea>
-        </div>
-        <div id="edit-profile-error" class="error-banner" style="display:none"></div>
-        <div class="edit-actions">
-          <button class="btn btn-primary" id="save-profile-btn" onclick="window.saveProfile()">Save Changes</button>
-          <button class="btn btn-secondary" id="cancel-profile-btn" onclick="window.cancelEditProfile()">Cancel</button>
-        </div>
-      </div>
-    </div>
-  `;
+function populateBarangayDropdown() {
+  const country = document.getElementById('edit-country')?.value || '';
+  const city = document.getElementById('edit-city')?.value || '';
+  const barangaySelect = document.getElementById('edit-barangay');
+  if (!barangaySelect) return;
+
+  barangaySelect.innerHTML = '<option value="">Select a barangay</option>';
+  barangaySelect.disabled = !country || !city;
+
+  if (country && city && window.locationDataCache) {
+    const barangays = (window.locationDataCache.barangays[country] && window.locationDataCache.barangays[country][city]) || [];
+    barangays.forEach(bg => {
+      const opt = document.createElement('option');
+      opt.value = bg;
+      opt.textContent = bg;
+      barangaySelect.appendChild(opt);
+    });
+  }
+}
+
+async function populateLocationDropdowns(selectedCountry, selectedCity, selectedBarangay) {
+  try {
+    const locationData = await profileApi.getLocations();
+    window.locationDataCache = locationData;
+
+    const countrySelect = document.getElementById('edit-country');
+    const citySelect = document.getElementById('edit-city');
+    const barangaySelect = document.getElementById('edit-barangay');
+
+    countrySelect.innerHTML = '<option value="">Select a country</option>';
+    if (locationData.countries && locationData.countries.length) {
+      locationData.countries.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c;
+        opt.textContent = c;
+        if (c === selectedCountry) opt.selected = true;
+        countrySelect.appendChild(opt);
+      });
+    }
+
+    citySelect.innerHTML = '<option value="">Select a city</option>';
+    citySelect.disabled = !selectedCountry;
+
+    barangaySelect.innerHTML = '<option value="">Select a barangay</option>';
+    barangaySelect.disabled = !selectedCountry || !selectedCity;
+
+    if (selectedCountry) {
+      const cities = locationData.cities[selectedCountry] || [];
+      cities.forEach(city => {
+        const opt = document.createElement('option');
+        opt.value = city;
+        opt.textContent = city;
+        if (city === selectedCity) opt.selected = true;
+        citySelect.appendChild(opt);
+      });
+
+      if (selectedCity) {
+        const barangays = locationData.barangays[selectedCountry] && locationData.barangays[selectedCountry][selectedCity] || [];
+        barangays.forEach(bg => {
+          const opt = document.createElement('option');
+          opt.value = bg;
+          opt.textContent = bg;
+          if (bg === selectedBarangay) opt.selected = true;
+          barangaySelect.appendChild(opt);
+        });
+      }
+    }
+  } catch (err) {
+    console.error('[PROFILE] Failed to load locations:', err);
+  }
 }
 
 /**
@@ -760,44 +714,17 @@ function escapeHtml(str) {
 }
 
 /**
- * Wire up the profile-photo file input: show the Upload button only when
- * a file has been selected. This must be (re)run after every render of
- * renderProfileContent() because the inputs are recreated each time.
- *
- * Defensive: if the elements don't exist yet (e.g. content area still being
- * built) the function simply returns without error.
+ * Build the profile display name from identity fields.
+ * Falls back to username if no name fields are set.
  */
-function setupPhotoInput() {
-  const photoInput = document.getElementById('photo-input');
-  const uploadBtn = document.getElementById('upload-btn');
-  if (!photoInput || !uploadBtn) return;
-
-  // Ensure the upload button reflects the current selection
-  const hasFile = !!(photoInput.files && photoInput.files.length > 0);
-  uploadBtn.style.display = hasFile ? 'inline-block' : 'none';
-
-  photoInput.addEventListener('change', function () {
-    const fileSelected = !!(this.files && this.files.length > 0);
-    uploadBtn.style.display = fileSelected ? 'inline-block' : 'none';
-  });
+function getProfileDisplayName(profile) {
+  if (!profile) return '';
+  const firstName = profile.first_name || '';
+  const middleName = profile.middle_name || '';
+  const lastName = profile.last_name || '';
+  const fullNameParts = [firstName, middleName, lastName].filter(Boolean);
+  return fullNameParts.join(' ') || profile.username || '';
 }
-
-/**
- * Enter edit mode (FEED-07)
- */
-window.startEditProfile = function() {
-  const view = document.getElementById('profile-view');
-  const edit = document.getElementById('profile-edit');
-  const error = document.getElementById('edit-profile-error');
-  if (!view || !edit) return;
-
-  if (error) {
-    error.style.display = 'none';
-    error.textContent = '';
-  }
-  view.style.display = 'none';
-  edit.style.display = 'block';
-};
 
 /**
  * Restore pre-edit values and leave edit mode (FEED-07)
@@ -808,29 +735,33 @@ window.cancelEditProfile = function() {
   const error = document.getElementById('edit-profile-error');
   if (!view || !edit) return;
 
-  // PROFILE-04: Include identity fields in cancel restore
   const firstName = (currentProfile && currentProfile.first_name) || '';
   const middleName = (currentProfile && currentProfile.middle_name) || '';
   const lastName = (currentProfile && currentProfile.last_name) || '';
   const nickname = (currentProfile && currentProfile.nickname) || '';
-  const displayName = (currentProfile && (currentProfile.display_name || currentProfile.username)) || '';
   const aliasValue = (currentProfile && currentProfile.alias) || '';
   const bioValue = (currentProfile && currentProfile.bio) || '';
+  const birthdayValue = (currentProfile && currentProfile.birthday) || '';
+  const countryValue = (currentProfile && currentProfile.country) || '';
+  const cityValue = (currentProfile && currentProfile.city) || '';
+  const barangayValue = (currentProfile && currentProfile.barangay) || '';
 
   const firstNameInput = document.getElementById('edit-first-name');
   const middleNameInput = document.getElementById('edit-middle-name');
   const lastNameInput = document.getElementById('edit-last-name');
   const nicknameInput = document.getElementById('edit-nickname');
-  const nameInput = document.getElementById('edit-display-name');
   const aliasInput = document.getElementById('edit-alias');
   const bioInput = document.getElementById('edit-bio');
+  const birthdayInput = document.getElementById('edit-birthday');
   if (firstNameInput) firstNameInput.value = firstName;
   if (middleNameInput) middleNameInput.value = middleName;
   if (lastNameInput) lastNameInput.value = lastName;
   if (nicknameInput) nicknameInput.value = nickname;
-  if (nameInput) nameInput.value = displayName;
   if (aliasInput) aliasInput.value = aliasValue;
   if (bioInput) bioInput.value = bioValue;
+  if (birthdayInput) birthdayInput.value = birthdayValue;
+
+  populateLocationDropdowns(countryValue, cityValue, barangayValue);
 
   if (error) {
     error.style.display = 'none';
@@ -854,16 +785,18 @@ window.saveProfile = async function() {
     error.style.display = 'block';
   };
 
-  // PROFILE-04: Include identity fields
   const firstName = (document.getElementById('edit-first-name')?.value || '').trim();
   const middleName = (document.getElementById('edit-middle-name')?.value || '').trim();
   const lastName = (document.getElementById('edit-last-name')?.value || '').trim();
   const nickname = (document.getElementById('edit-nickname')?.value || '').trim();
-  const displayName = (document.getElementById('edit-display-name')?.value || '').trim();
   const alias = (document.getElementById('edit-alias')?.value || '').trim();
   const bio = (document.getElementById('edit-bio')?.value || '').trim();
+  const birthday = (document.getElementById('edit-birthday')?.value || '').trim();
+  const country = (document.getElementById('edit-country')?.value || '').trim();
+  const city = (document.getElementById('edit-city')?.value || '').trim();
+  const barangay = (document.getElementById('edit-barangay')?.value || '').trim();
 
-  // PROFILE-04: Validate first_name (required)
+  // Validate first_name (required)
   if (!firstName) {
     showEditError('First name is required');
     return;
@@ -873,7 +806,7 @@ window.saveProfile = async function() {
     return;
   }
 
-  // PROFILE-04: Validate last_name (required)
+  // Validate last_name (required)
   if (!lastName) {
     showEditError('Last name is required');
     return;
@@ -883,36 +816,31 @@ window.saveProfile = async function() {
     return;
   }
 
-  // PROFILE-04: Validate middle_name (optional, max 100)
+  // Validate middle_name (optional, max 100)
   if (middleName.length > 100) {
     showEditError('Middle name must be less than 100 characters');
     return;
   }
 
-  // PROFILE-04: Validate nickname (optional, max 50)
+  // Validate nickname (optional, max 50)
   if (nickname.length > 50) {
     showEditError('Nickname must be less than 50 characters');
     return;
   }
 
-  if (!displayName) {
-    showEditError('Display name is required');
-    return;
-  }
-  if (displayName.length > 100) {
-    showEditError('Display name must be less than 100 characters');
-    return;
-  }
-  if (!alias) {
-    showEditError('Alias is required');
-    return;
-  }
+  // Validate alias (optional, max 50)
   if (alias.length > 50) {
     showEditError('Alias must be less than 50 characters');
     return;
   }
+
   if (bio.length > 500) {
     showEditError('Bio must be less than 500 characters');
+    return;
+  }
+
+  if (birthday && !isValidDate(birthday)) {
+    showEditError('Please enter a valid date');
     return;
   }
 
@@ -924,19 +852,24 @@ window.saveProfile = async function() {
   if (cancelBtn) cancelBtn.disabled = true;
 
   try {
-    // PROFILE-04: Include identity fields in update
     const updated = await profileApi.updateProfile({
       first_name: firstName,
       middle_name: middleName || null,
       last_name: lastName,
       nickname: nickname || null,
-      display_name: displayName,
-      alias,
-      bio,
+      alias: alias || null,
+      bio: bio || null,
+      birthday: birthday || null,
+      country: country || null,
+      city: city || null,
+      barangay: barangay || null,
     });
 
     currentProfile = updated;
     applyProfileBackground(updated);
+
+    // Refresh the profile view with updated values
+    renderProfileView(updated);
   } catch (err) {
     showEditError(err.message || 'Failed to update profile');
   } finally {
@@ -947,6 +880,11 @@ window.saveProfile = async function() {
     if (cancelBtn) cancelBtn.disabled = false;
   }
 };
+
+function isValidDate(dateString) {
+  const date = new Date(dateString);
+  return date instanceof Date && !isNaN(date);
+}
 
 /**
  * Open theme customization panel
@@ -1317,10 +1255,8 @@ window.uploadPhoto = async function() {
     currentProfile = updatedProfile;
     applyProfileBackground(updatedProfile);
 
-    const displayName = updatedProfile.display_name || updatedProfile.username;
+    const displayName = getProfileDisplayName(updatedProfile);
     const alias = updatedProfile.alias_enabled && updatedProfile.alias ? updatedProfile.alias : '';
-
-    // Update PROFILE-04 profile photo in the profile module
     const profilePhotoLarge = document.getElementById('profile-photo-large');
     const profilePhotoInitials = document.getElementById('profile-photo-initials');
     if (updatedProfile.profile_photo_url) {

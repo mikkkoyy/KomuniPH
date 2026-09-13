@@ -28,7 +28,8 @@ export function getCountries() {
 
 export function getCities(country) {
   const data = loadLocations();
-  return data[country] || [];
+  const cityList = data[country] || [];
+  return cityList.map(c => c.name);
 }
 
 export function getBarangays(country, city) {

@@ -160,10 +160,15 @@ export function renderProfilePage() {
                 <span class="profile-info-value" id="profile-info-nickname"></span>
                 <br>
                 <div>
-                  <span class="profile-info-label">Location:</span>
-                </div>
-                <span class="profile-info-value" id="profile-info-location"></span>
-                <br>
+                   <span class="profile-info-label">Location:</span>
+                 </div>
+                 <span class="profile-info-value" id="profile-info-location"></span>
+                 <br>
+                 <div>
+                   <span class="profile-info-label">Birthday:</span>
+                 </div>
+                 <span class="profile-info-value" id="profile-info-birthday"></span>
+                 <br>
                 <div>
                   <span class="profile-info-label">About Me:</span>
                 </div>
@@ -550,11 +555,15 @@ function renderProfileView(profile) {
 
   if (infoNameEl) infoNameEl.textContent = nameDisplay;
   if (infoNicknameEl) infoNicknameEl.textContent = nickname || '';
-  if (infoLocationEl) {
-    const locationParts = [profile.country, profile.city, profile.barangay].filter(Boolean);
-    infoLocationEl.textContent = locationParts.join(', ') || '';
-  }
-  if (infoBioEl) infoBioEl.textContent = bio || '';
+   if (infoLocationEl) {
+     const locationParts = [profile.country, profile.city, profile.barangay].filter(Boolean);
+     infoLocationEl.textContent = locationParts.join(', ') || '';
+   }
+   const infoBirthdayEl = document.getElementById('profile-info-birthday');
+   if (infoBirthdayEl) {
+     infoBirthdayEl.textContent = profile.birthday || '';
+   }
+   if (infoBioEl) infoBioEl.textContent = bio || '';
 
   // Update profile photo
   const profilePhotoLarge = document.getElementById('profile-photo-large');

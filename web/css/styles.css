@@ -1277,7 +1277,8 @@ a:hover {
   margin: 0 auto;
   padding: 1rem;
   width: 100%;
-  min-height: calc(100vh - 2rem);
+  min-height: 100vh;
+  min-height: 100dvh;
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;

@@ -924,7 +924,7 @@ a:hover {
   text-decoration: none;
   border: 1px solid var(--theme-card-border-color, var(--kp-border));
   border-radius: var(--theme-card-radius, var(--kp-card-radius));
-  background: var(--theme-card-background, white);
+  background: var(--theme-card-background, rgba(255, 247, 236, 0.95));
 }
 
 .profile-nav a:hover {
@@ -957,7 +957,7 @@ a:hover {
 
 /* Profile modules */
 .profile-module {
-  background: var(--theme-card-background, white);
+  background: var(--theme-card-background, rgba(255, 247, 236, 0.95));
   border: 1px solid var(--theme-card-border-color, var(--kp-border));
   border-radius: var(--theme-card-radius, var(--kp-card-radius));
   margin-bottom: 1rem;
@@ -1019,7 +1019,7 @@ a:hover {
 
 /* Sidebar modules */
 .sidebar-module {
-  background: var(--theme-card-background, white);
+  background: var(--theme-card-background, rgba(255, 247, 236, 0.95));
   border: 1px solid var(--theme-card-border-color, var(--kp-border));
   border-radius: var(--theme-card-radius, var(--kp-card-radius));
   margin-bottom: 1rem;
@@ -1277,6 +1277,10 @@ a:hover {
   margin: 0 auto;
   padding: 1rem;
   width: 100%;
+  min-height: calc(100vh - 2rem);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
 }
 
 /* Profile frame with max-width responsive */
@@ -1288,7 +1292,7 @@ a:hover {
 
 /* Profile header */
 .profile-header {
-  background: var(--theme-background, var(--kp-cream));
+  background: transparent;
   border: 1px solid var(--theme-card-border-color, var(--kp-border));
   border-radius: var(--theme-card-radius, var(--kp-card-radius));
   padding: 1rem;
@@ -1346,7 +1350,7 @@ a:hover {
 
 /* Profile main module */
 .profile-module {
-  background: var(--theme-card-background, white);
+  background: var(--theme-card-background, rgba(255, 247, 236, 0.95));
   border: 1px solid var(--theme-card-border-color, var(--kp-border));
   border-radius: var(--theme-card-radius, var(--kp-card-radius));
   margin-bottom: 1rem;
@@ -1451,7 +1455,7 @@ a:hover {
 
 /* Right sidebar modules */
 .sidebar-module {
-  background: var(--theme-card-background, white);
+  background: var(--theme-card-background, rgba(255, 247, 236, 0.95));
   border: 1px solid var(--theme-card-border-color, var(--kp-border));
   border-radius: var(--theme-card-radius, var(--kp-card-radius));
   margin-bottom: 1rem;

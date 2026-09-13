@@ -4,26 +4,80 @@
  */
 
 const API_BASE = '/api';
+const TOKEN_STORAGE_KEY = 'komuniph_auth_tokens';
 
 let accessToken = null;
 let refreshToken = null;
 let currentUserProfile = null;
 
 /**
- * Set auth tokens
+ * Restore auth tokens from localStorage into memory.
+ * Safe to call on every page load; returns true if tokens were found.
+ */
+export function restoreTokens() {
+  try {
+    const stored = localStorage.getItem(TOKEN_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (parsed && parsed.access) {
+        accessToken = parsed.access;
+        refreshToken = parsed.refresh || null;
+        return true;
+      }
+    }
+  } catch (e) {
+    console.warn('[AUTH] Failed to restore tokens from localStorage:', e);
+  }
+  return false;
+}
+
+/**
+ * Set auth tokens (in memory + localStorage)
  */
 export function setTokens(access, refresh) {
   accessToken = access;
   refreshToken = refresh;
+  try {
+    localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify({ access, refresh }));
+  } catch (e) {
+    console.warn('[AUTH] Failed to persist tokens to localStorage:', e);
+  }
 }
 
 /**
- * Clear auth tokens
+ * Clear auth tokens (from memory + localStorage)
  */
 export function clearTokens() {
   accessToken = null;
   refreshToken = null;
   currentUserProfile = null;
+  try {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+  } catch (e) {
+    console.warn('[AUTH] Failed to clear tokens from localStorage:', e);
+  }
+}
+
+/**
+ * Initialize authentication on app load.
+ * Restores tokens from localStorage and verifies the access token
+ * by fetching the current user profile. Resolves to true if the user
+ * is authenticated, false otherwise.
+ */
+export async function initAuth() {
+  restoreTokens();
+  if (!isAuthenticated()) {
+    return false;
+  }
+  try {
+    const profile = await apiRequest('/profile');
+    setCurrentUserProfile(profile);
+    return true;
+  } catch (err) {
+    console.warn('[AUTH] Session check failed, clearing tokens:', err.message || err);
+    clearTokens();
+    return false;
+  }
 }
 
 /**

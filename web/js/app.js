@@ -3,7 +3,7 @@
  * Router and app initialization
  */
 
-import { isAuthenticated, clearTokens } from './api.js';
+import { isAuthenticated, clearTokens, initAuth } from './api.js';
 import { renderLoginPage, renderRegisterPage, renderVerifyEmailPage, renderForgotPasswordPage, renderResetPasswordPage, renderResetPasswordSuccessPage, initLoginForm, initRegisterForm, initForgotPasswordForm, initResetPasswordForm } from './auth.js';
 import { renderHomePage, initHomePage, renderPlaceholderPage, initPlaceholderPage } from './feed.js';
 import { renderProfilePage, initProfilePage } from './profile.js';
@@ -136,5 +136,7 @@ function render() {
 // Listen for hash changes
 window.addEventListener('hashchange', render);
 
-// Initial render
-render();
+// Initial render — restore auth first, then route
+initAuth().then(() => {
+  render();
+});

@@ -115,7 +115,7 @@ export function renderProfilePage() {
                    ?
                  </div>
                  <div style="clear:both"></div>
-                 <button class="profile-action-btn" id="change-photo-btn" onclick="document.getElementById('photo-input').click()" style="display:none">Change Profile Photo</button>
+                  <button class="profile-action-btn" id="change-photo-btn" onclick="document.getElementById('photo-input').click()">Change Profile Photo</button>
                  <input type="file" id="photo-input" accept="image/jpeg,image/png,image/webp" style="display:none">
                  <button class="btn btn-primary" id="upload-btn" style="display:none" onclick="window.uploadPhoto()">Upload Photo</button>
                  <div id="upload-status" class="upload-status"></div>
@@ -599,6 +599,91 @@ function renderProfileView(profile) {
   if (sidebarAlias) sidebarAlias.textContent = alias ? `@${alias}` : '';
 }
 
+/**
+ * Enter edit mode
+ */
+window.startEditProfile = async function() {
+  const view = document.getElementById('profile-view');
+  const edit = document.getElementById('profile-edit');
+  const error = document.getElementById('edit-profile-error');
+  if (!view || !edit) return;
+
+  if (error) {
+    error.style.display = 'none';
+    error.textContent = '';
+  }
+
+  const firstName = (currentProfile && currentProfile.first_name) || '';
+  const middleName = (currentProfile && currentProfile.middle_name) || '';
+  const lastName = (currentProfile && currentProfile.last_name) || '';
+  const nickname = (currentProfile && currentProfile.nickname) || '';
+  const aliasValue = (currentProfile && currentProfile.alias) || '';
+  const bioValue = (currentProfile && currentProfile.bio) || '';
+  const birthdayValue = (currentProfile && currentProfile.birthday) || '';
+  const countryValue = (currentProfile && currentProfile.country) || '';
+  const cityValue = (currentProfile && currentProfile.city) || '';
+  const barangayValue = (currentProfile && currentProfile.barangay) || '';
+
+  edit.innerHTML = `
+    <div class="form-group">
+      <label for="edit-first-name">First Name *</label>
+      <input type="text" id="edit-first-name" maxlength="100" value="${escapeHtml(firstName)}" placeholder="Enter your first name">
+    </div>
+    <div class="form-group">
+      <label for="edit-middle-name">Middle Name</label>
+      <input type="text" id="edit-middle-name" maxlength="100" value="${escapeHtml(middleName)}" placeholder="Enter your middle name (optional)">
+    </div>
+    <div class="form-group">
+      <label for="edit-last-name">Last Name *</label>
+      <input type="text" id="edit-last-name" maxlength="100" value="${escapeHtml(lastName)}" placeholder="Enter your last name">
+    </div>
+    <div class="form-group">
+      <label for="edit-nickname">Nickname</label>
+      <input type="text" id="edit-nickname" maxlength="50" value="${escapeHtml(nickname)}" placeholder="Enter a nickname (optional)">
+    </div>
+    <div class="form-group">
+      <label for="edit-bio">Bio</label>
+      <textarea id="edit-bio" rows="3" maxlength="500">${escapeHtml(bioValue)}</textarea>
+    </div>
+    <div class="form-group">
+      <label for="edit-birthday">Birthday</label>
+      <input type="date" id="edit-birthday" value="${escapeHtml(birthdayValue)}">
+    </div>
+    <div class="form-group">
+      <label for="edit-country">Country</label>
+      <select id="edit-country" onchange="window.onCountryChange()">
+        <option value="">Select a country</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="edit-city">City</label>
+      <select id="edit-city" onchange="window.onCityChange()">
+        <option value="">Select a city</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="edit-barangay">Barangay</label>
+      <select id="edit-barangay">
+        <option value="">Select a barangay</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="edit-alias">Alias</label>
+      <input type="text" id="edit-alias" maxlength="50" value="${escapeHtml(aliasValue)}" placeholder="Optional">
+    </div>
+    <div id="edit-profile-error" class="error-banner" style="display:none"></div>
+    <div class="edit-actions">
+      <button class="btn btn-primary" id="save-profile-btn" onclick="window.saveProfile()">Save Changes</button>
+      <button class="btn btn-secondary" id="cancel-profile-btn" onclick="window.cancelEditProfile()">Cancel</button>
+    </div>
+  `;
+
+  view.style.display = 'none';
+  edit.style.display = 'block';
+
+  populateLocationDropdowns(countryValue, cityValue, barangayValue);
+};
+
 window.onCountryChange = function() {
   populateCityDropdown();
 };
@@ -870,6 +955,12 @@ window.saveProfile = async function() {
 
     // Refresh the profile view with updated values
     renderProfileView(updated);
+
+    // Switch back to profile view
+    const view = document.getElementById('profile-view');
+    const edit = document.getElementById('profile-edit');
+    if (view) view.style.display = 'block';
+    if (edit) edit.style.display = 'none';
   } catch (err) {
     showEditError(err.message || 'Failed to update profile');
   } finally {

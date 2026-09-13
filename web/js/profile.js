@@ -23,8 +23,8 @@ function toRgbaWithOpacity(color, opacity) {
   if (color.startsWith('#')) {
     const hex = color.slice(1);
     const r = parseInt(hex.slice(0, 2), 16);
-    const g = parseInt(hex.slice(2, 2), 16);
-    const b = parseInt(hex.slice(4, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
     return `rgba(${r}, ${g}, ${b}, ${opacity})`;
   }
   return color;
@@ -442,8 +442,11 @@ function applyProfileBackground(profile) {
   const bgSize = custom.backgroundSize || theme.backgroundSize || 'cover';
 
   const cardBg = custom.cardBackground || theme.cardBackground || 'rgba(255, 247, 236, 0.95)';
-  const cardOpacity = custom.cardOpacity != null ? custom.cardOpacity : 0.95;
-  const cardBgRgba = toRgbaWithOpacity(cardBg, cardOpacity);
+  const hasBackground = !!bgImage || !!bgGradient;
+  const defaultCardOpacity = hasBackground ? 0.8 : 0.95;
+  const cardOpacity = custom.cardOpacity != null ? custom.cardOpacity : defaultCardOpacity;
+  const effectiveCardOpacity = hasBackground ? Math.min(cardOpacity, 0.85) : cardOpacity;
+  const cardBgRgba = toRgbaWithOpacity(cardBg, effectiveCardOpacity);
   const cardBorderColor = custom.cardBorderColor || theme.border || '#f0dfc8';
   const cardBorderRadius = custom.cardBorderRadius || theme.cardRadius || '1.75rem';
   const cardShadow = theme.cardShadow || '0 20px 60px -20px rgba(42, 33, 48, 0.35)';
@@ -454,7 +457,7 @@ function applyProfileBackground(profile) {
   // Set CSS variables on the frame so all child elements inherit them
   frame.style.setProperty('--theme-background', bgColor);
   frame.style.setProperty('--theme-card-background', cardBgRgba);
-  frame.style.setProperty('--theme-card-opacity', cardOpacity);
+  frame.style.setProperty('--theme-card-opacity', effectiveCardOpacity);
   frame.style.setProperty('--theme-card-border-color', cardBorderColor);
   frame.style.setProperty('--theme-card-radius', cardBorderRadius);
   frame.style.setProperty('--theme-card-shadow', cardShadow);
@@ -467,6 +470,7 @@ function applyProfileBackground(profile) {
   frame.style.background = '';
   if (bgImage) {
     frame.style.backgroundImage = `url(${bgImage})`;
+    frame.style.backgroundColor = bgColor;
     frame.style.backgroundPosition = bgPosition;
     frame.style.backgroundRepeat = bgRepeat;
     frame.style.backgroundSize = bgSize;
@@ -961,7 +965,8 @@ window.openCustomization = function() {
   const mutedTextColor = custom.mutedTextColor || theme.textSecondary || '#6b6072';
   const accentColor = custom.accentColor || theme.accent || '#0e6e6e';
   const cardBg = custom.cardBackground || theme.cardBackground || '#fff7ec';
-  const cardOpacity = custom.cardOpacity != null ? custom.cardOpacity : 0.95;
+  const hasBackground = !!custom.backgroundImage || !!custom.backgroundGradient;
+  const cardOpacity = custom.cardOpacity != null ? custom.cardOpacity : (hasBackground ? 0.8 : 0.95);
   const cardBorderColor = custom.cardBorderColor || theme.border || '#f0dfc8';
   const cardBorderRadius = custom.cardBorderRadius || parseInt(theme.cardRadius) || 28;
 
@@ -1072,8 +1077,11 @@ window.updatePreview = function() {
   const mutedTextColor = document.getElementById('theme-mutedTextColor')?.value || '#6b6072';
   const accentColor = document.getElementById('theme-accentColor')?.value || '#0e6e6e';
   const cardBg = document.getElementById('theme-cardBackground')?.value || '#fff7ec';
-  const cardOpacity = parseFloat(document.getElementById('theme-cardOpacity')?.value || '0.95');
-  const cardBgRgba = toRgbaWithOpacity(cardBg, cardOpacity);
+  const hasBackground = bgType === 'image' || (bgType === 'gradient' && bgGradient);
+  const defaultCardOpacity = hasBackground ? 0.8 : 0.95;
+  const cardOpacity = parseFloat(document.getElementById('theme-cardOpacity')?.value || String(defaultCardOpacity));
+  const effectiveCardOpacity = hasBackground ? Math.min(cardOpacity, 0.85) : cardOpacity;
+  const cardBgRgba = toRgbaWithOpacity(cardBg, effectiveCardOpacity);
   const cardBorderColor = document.getElementById('theme-cardBorderColor')?.value || '#f0dfc8';
   const cardBorderRadius = parseInt(document.getElementById('theme-cardBorderRadius')?.value || '28', 10);
 
@@ -1091,7 +1099,7 @@ window.updatePreview = function() {
   // Set CSS variables on the frame so all profile elements inherit them
   frame.style.setProperty('--theme-background', backgroundValue);
   frame.style.setProperty('--theme-card-background', cardBgRgba);
-  frame.style.setProperty('--theme-card-opacity', cardOpacity);
+  frame.style.setProperty('--theme-card-opacity', effectiveCardOpacity);
   frame.style.setProperty('--theme-card-border-color', cardBorderColor);
   frame.style.setProperty('--theme-card-radius', `${cardBorderRadius}px`);
   frame.style.setProperty('--theme-text', textColor);
@@ -1105,6 +1113,7 @@ window.updatePreview = function() {
     const bgImage = currentProfile?.theme?.custom?.backgroundImage || currentProfile?.theme?.config?.backgroundImage || '';
     if (bgImage) {
       frame.style.backgroundImage = `url(${bgImage})`;
+      frame.style.backgroundColor = bgColor;
       frame.style.backgroundPosition = bgPosition;
       frame.style.backgroundRepeat = bgRepeat;
       frame.style.backgroundSize = bgSize;

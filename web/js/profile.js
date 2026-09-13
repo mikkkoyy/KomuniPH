@@ -451,6 +451,7 @@ function applyProfileBackground(profile) {
   const cardBgRgba = toRgbaWithOpacity(cardBg, effectiveCardOpacity);
   const cardBorderColor = custom.cardBorderColor || theme.border || '#f0dfc8';
   const cardBorderRadius = custom.cardBorderRadius || theme.cardRadius || '1.75rem';
+  const cardBorderRadiusValue = typeof cardBorderRadius === 'number' ? `${cardBorderRadius}px` : cardBorderRadius;
   const cardShadow = theme.cardShadow || '0 20px 60px -20px rgba(42, 33, 48, 0.35)';
   const textColor = custom.textColor || theme.text || '#2a2130';
   const mutedTextColor = custom.mutedTextColor || theme.textSecondary || '#6b6072';
@@ -461,7 +462,7 @@ function applyProfileBackground(profile) {
   frame.style.setProperty('--theme-card-background', cardBgRgba);
   frame.style.setProperty('--theme-card-opacity', effectiveCardOpacity);
   frame.style.setProperty('--theme-card-border-color', cardBorderColor);
-  frame.style.setProperty('--theme-card-radius', cardBorderRadius);
+  frame.style.setProperty('--theme-card-radius', cardBorderRadiusValue);
   frame.style.setProperty('--theme-card-shadow', cardShadow);
   frame.style.setProperty('--theme-text', textColor);
   frame.style.setProperty('--theme-text-secondary', mutedTextColor);
@@ -642,6 +643,7 @@ function renderProfileContent(profile) {
   const cardBgRgba = toRgbaWithOpacity(cardBg, cardOpacity);
   const cardBorderColor = theme.cardBorderColor || theme.border || '#f0dfc8';
   const cardBorderRadius = theme.cardBorderRadius || theme.cardRadius || '1.75rem';
+  const cardBorderRadiusValue = typeof cardBorderRadius === 'number' ? `${cardBorderRadius}px` : cardBorderRadius;
   const cardShadow = theme.cardShadow || '0 20px 60px -20px rgba(42, 33, 48, 0.35)';
   const textColor = theme.textColor || theme.text || '#2a2130';
   const mutedTextColor = theme.mutedTextColor || theme.textSecondary || '#6b6072';
@@ -652,7 +654,7 @@ function renderProfileContent(profile) {
     `--theme-card-background: ${cardBgRgba}`,
     `--theme-card-opacity: ${cardOpacity}`,
     `--theme-card-border-color: ${cardBorderColor}`,
-    `--theme-card-radius: ${cardBorderRadius}`,
+    `--theme-card-radius: ${cardBorderRadiusValue}`,
     `--theme-card-shadow: ${cardShadow}`,
     `--theme-text: ${textColor}`,
     `--theme-text-secondary: ${mutedTextColor}`,

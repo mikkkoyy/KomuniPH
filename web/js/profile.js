@@ -48,6 +48,16 @@ function toHexColor(color) {
 }
 
 /**
+ * Resolve a stored backgroundSize value to a real CSS background-size value.
+ * 'stretch' isn't a CSS keyword — it means "fill the frame exactly, ignoring
+ * aspect ratio", which maps to `100% 100%`. Everything else (cover/contain/
+ * auto) is already a valid CSS value and passes through unchanged.
+ */
+function resolveBackgroundSizeCss(bgSize) {
+  return bgSize === 'stretch' ? '100% 100%' : bgSize;
+}
+
+/**
  * Create avatar HTML
  */
 function createAvatar(username, displayName, photoUrl, size = 5) {
@@ -116,7 +126,7 @@ export function renderProfilePage() {
                  </div>
                  <div style="clear:both"></div>
                   <button class="profile-action-btn" id="change-photo-btn" onclick="document.getElementById('photo-input').click()">Change Profile Photo</button>
-                  <input type="file" id="photo-input" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="window.handlePhotoSelect()">
+                 <input type="file" id="photo-input" accept="image/jpeg,image/png,image/webp" style="display:none">
                  <button class="btn btn-primary" id="upload-btn" style="display:none" onclick="window.uploadPhoto()">Upload Photo</button>
                  <div id="upload-status" class="upload-status"></div>
                </div>
@@ -367,8 +377,9 @@ export function renderProfilePage() {
               <div class="theme-field">
                 <label class="theme-label">Size</label>
                 <select id="theme-backgroundSize" onchange="window.updatePreview()">
-                  <option value="cover">Cover</option>
-                  <option value="contain">Contain</option>
+                  <option value="cover">Cover (crop to fill)</option>
+                  <option value="contain">Contain (fit inside)</option>
+                  <option value="stretch">Stretch (fill exactly)</option>
                   <option value="auto">Auto</option>
                 </select>
               </div>
@@ -490,7 +501,7 @@ function applyProfileBackground(profile) {
     frame.style.backgroundColor = bgColor;
     frame.style.backgroundPosition = bgPosition;
     frame.style.backgroundRepeat = bgRepeat;
-    frame.style.backgroundSize = bgSize;
+    frame.style.backgroundSize = resolveBackgroundSizeCss(bgSize);
   } else if (bgGradient) {
     frame.style.background = bgGradient;
   } else {
@@ -1158,7 +1169,7 @@ window.updatePreview = function() {
       frame.style.backgroundColor = bgColor;
       frame.style.backgroundPosition = bgPosition;
       frame.style.backgroundRepeat = bgRepeat;
-      frame.style.backgroundSize = bgSize;
+      frame.style.backgroundSize = resolveBackgroundSizeCss(bgSize);
     } else {
       frame.style.background = backgroundValue;
     }
@@ -1326,38 +1337,6 @@ export function initProfilePage() {
 }
 
 /**
- * Handle photo file selection
- */
-window.handlePhotoSelect = function() {
-  const photoInput = document.getElementById('photo-input');
-  const uploadBtn = document.getElementById('upload-btn');
-  const status = document.getElementById('upload-status');
-
-  const file = photoInput.files[0];
-  if (!file) return;
-
-  const validTypes = ['image/jpeg', 'image/png', 'image/webp'];
-  if (!validTypes.includes(file.type)) {
-    status.textContent = 'Please select a valid image file (JPEG, PNG, WEBP)';
-    status.className = 'upload-status error';
-    return;
-  }
-
-  const maxSize = 5 * 1024 * 1024;
-  if (file.size > maxSize) {
-    status.textContent = 'Image must be less than 5MB';
-    status.className = 'upload-status error';
-    return;
-  }
-
-  if (uploadBtn) uploadBtn.style.display = 'inline-block';
-  if (status) {
-    status.textContent = '';
-    status.className = 'upload-status';
-  }
-};
-
-/**
  * Upload photo
  */
 window.uploadPhoto = async function() {
@@ -1382,19 +1361,18 @@ window.uploadPhoto = async function() {
     status.textContent = 'Photo uploaded successfully!';
     status.className = 'upload-status success';
 
-     const updatedProfile = await profileApi.getOwnProfile();
-     setCurrentUserProfile(updatedProfile);
-     currentProfile = updatedProfile;
-     applyProfileBackground(updatedProfile);
+    const updatedProfile = await profileApi.getOwnProfile();
+    setCurrentUserProfile(updatedProfile);
+    currentProfile = updatedProfile;
+    applyProfileBackground(updatedProfile);
 
-     const displayName = getProfileDisplayName(updatedProfile);
-     const alias = updatedProfile.alias_enabled && updatedProfile.alias ? updatedProfile.alias : '';
-     const photoUrl = updatedProfile.profile_photo_url ? updatedProfile.profile_photo_url + '?t=' + Date.now() : '';
-     const profilePhotoLarge = document.getElementById('profile-photo-large');
-     const profilePhotoInitials = document.getElementById('profile-photo-initials');
-     if (photoUrl) {
+    const displayName = getProfileDisplayName(updatedProfile);
+    const alias = updatedProfile.alias_enabled && updatedProfile.alias ? updatedProfile.alias : '';
+    const profilePhotoLarge = document.getElementById('profile-photo-large');
+    const profilePhotoInitials = document.getElementById('profile-photo-initials');
+    if (updatedProfile.profile_photo_url) {
       if (profilePhotoLarge) {
-         profilePhotoLarge.src = photoUrl;
+        profilePhotoLarge.src = updatedProfile.profile_photo_url;
         profilePhotoLarge.alt = displayName;
         profilePhotoLarge.style.display = 'block';
       }
@@ -1414,8 +1392,7 @@ window.uploadPhoto = async function() {
     const sidebarAlias = document.getElementById('sidebar-alias');
 
     if (sidebarImg) {
-       if (photoUrl) {
-         sidebarImg.src = photoUrl;
+      if (updatedProfile.profile_photo_url) {
         sidebarImg.src = updatedProfile.profile_photo_url;
         sidebarImg.alt = displayName;
         sidebarImg.style.display = 'block';

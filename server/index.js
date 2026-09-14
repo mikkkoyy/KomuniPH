@@ -82,10 +82,13 @@ function serveStatic(req, res) {
 
   try {
     const content = readFileSync(fullPath);
-    res.writeHead(200, {
-      'Content-Type': contentType,
-      'Cache-Control': 'no-cache'
-    });
+    // No caching headers were being sent at all, so browsers were free to
+    // reuse a previously cached copy of index.html/app.js/profile.js/
+    // styles.css indefinitely (even across normal reloads), which is why
+    // fixes saved to disk were not always visible in the browser. These
+    // are small, frequently-edited app files, not versioned/hashed build
+    // output, so always revalidate instead of letting the browser guess.
+    res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-cache' });
     res.end(content);
   } catch (err) {
     errorResponse(res, 500, 'Error reading file');

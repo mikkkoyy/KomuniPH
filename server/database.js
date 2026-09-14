@@ -333,8 +333,9 @@ export function seedDefaultTheme() {
     const themeName = 'KomuniPH Default';
     const themeType = 'system';
     const isFree = 1;
-    const themeConfig = JSON.stringify({
+     const themeConfig = JSON.stringify({
       background: '#fff7ec',
+      backgroundGradient: 'linear-gradient(135deg, #0f172a 0%, #334155 50%, #475569 100%)',
       cardBackground: 'rgba(255, 247, 236, 0.95)',
       accent: '#0e6e6e',
       border: '#f0dfc8',
@@ -347,6 +348,12 @@ export function seedDefaultTheme() {
     execute(
       `INSERT OR IGNORE INTO profile_themes (id, name, type, is_free, config) VALUES (?, ?, ?, ?, ?)`,
       [defaultThemeId, themeName, themeType, isFree, themeConfig]
+    );
+
+    // Ensure the default theme config has backgroundGradient for existing rows
+    execute(
+      `UPDATE profile_themes SET config = ? WHERE id = ? AND (config IS NULL OR json_extract(config, '$.backgroundGradient') IS NULL)`,
+      [themeConfig, defaultThemeId]
     );
 
     const updated = execute(

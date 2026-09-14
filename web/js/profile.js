@@ -454,6 +454,9 @@ export function renderProfilePage() {
  * Sets CSS variables and background-image on .profile-frame
  * so the user's background covers the entire profile page.
  */
+// Default Gradient Slate theme — used when no custom background is set
+const DEFAULT_BACKGROUND_GRADIENT = 'linear-gradient(135deg, #0f172a 0%, #334155 50%, #475569 100%)';
+
 function applyProfileBackground(profile) {
   const frame = document.getElementById('profile-frame');
   if (!frame) return;
@@ -462,14 +465,21 @@ function applyProfileBackground(profile) {
   const custom = profile?.theme && profile.theme.custom ? profile.theme.custom : {};
 
   const bgImage = custom.backgroundImage || theme.backgroundImage || '';
-  const bgGradient = custom.backgroundGradient || theme.backgroundGradient || '';
-  const bgColor = custom.backgroundColor || theme.background || theme.backgroundColor || '#fff7ec';
+  const customGradient = custom.backgroundGradient || '';
+  const themeGradient = theme.backgroundGradient || '';
+  const customColor = custom.backgroundColor || '';
+  const bgColor = theme.background || theme.backgroundColor || '#fff7ec';
   const bgPosition = custom.backgroundPosition || theme.backgroundPosition || 'center';
   const bgRepeat = custom.backgroundRepeat || theme.backgroundRepeat || 'no-repeat';
   const bgSize = custom.backgroundSize || theme.backgroundSize || 'cover';
 
   const cardBg = custom.cardBackground || theme.cardBackground || 'rgba(255, 247, 236, 0.95)';
-  const hasBackground = !!bgImage || !!bgGradient;
+  const hasImageBackground = !!bgImage;
+  const hasCustomGradient = !!customGradient;
+  const hasCustomColor = !!customColor;
+  const hasThemeGradient = !!themeGradient;
+  // Treat gradient as a background for card opacity purposes
+  const hasBackground = hasImageBackground || hasCustomGradient || hasThemeGradient;
   const defaultCardOpacity = hasBackground ? 0.8 : 0.95;
   const cardOpacity = custom.cardOpacity != null ? custom.cardOpacity : defaultCardOpacity;
   const effectiveCardOpacity = hasBackground ? Math.min(cardOpacity, 0.85) : cardOpacity;
@@ -493,7 +503,8 @@ function applyProfileBackground(profile) {
   frame.style.setProperty('--theme-text-secondary', mutedTextColor);
   frame.style.setProperty('--theme-accent', accentColor);
 
-  // Apply the background to the frame (the profile page), NOT the card
+  // Apply background to #profile-frame (the full-bleed container).
+  // Priority: uploaded image > custom gradient > custom color > theme gradient > theme color
   frame.style.backgroundImage = '';
   frame.style.background = '';
   if (bgImage) {
@@ -502,8 +513,12 @@ function applyProfileBackground(profile) {
     frame.style.backgroundPosition = bgPosition;
     frame.style.backgroundRepeat = bgRepeat;
     frame.style.backgroundSize = resolveBackgroundSizeCss(bgSize);
-  } else if (bgGradient) {
-    frame.style.background = bgGradient;
+  } else if (hasCustomGradient) {
+    frame.style.background = customGradient;
+  } else if (hasCustomColor) {
+    frame.style.background = customColor;
+  } else if (hasThemeGradient) {
+    frame.style.background = themeGradient;
   } else {
     frame.style.background = bgColor;
   }
@@ -1130,7 +1145,10 @@ window.updatePreview = function() {
   const mutedTextColor = document.getElementById('theme-mutedTextColor')?.value || '#6b6072';
   const accentColor = document.getElementById('theme-accentColor')?.value || '#0e6e6e';
   const cardBg = document.getElementById('theme-cardBackground')?.value || '#fff7ec';
-  const hasBackground = bgType === 'image' || (bgType === 'gradient' && bgGradient);
+  const themeGradient = currentProfile?.theme?.config?.backgroundGradient || '';
+  const customTheme = currentProfile?.theme?.custom || {};
+  const hasCustomBg = customTheme.backgroundColor || customTheme.backgroundGradient || customTheme.backgroundImage;
+  const hasBackground = bgType === 'image' || (bgType === 'gradient' && bgGradient) || (!hasCustomBg && !!themeGradient);
   const defaultCardOpacity = hasBackground ? 0.8 : 0.95;
   const cardOpacity = parseFloat(document.getElementById('theme-cardOpacity')?.value || String(defaultCardOpacity));
   const effectiveCardOpacity = hasBackground ? Math.min(cardOpacity, 0.85) : cardOpacity;
@@ -1147,6 +1165,8 @@ window.updatePreview = function() {
   let backgroundValue = bgColor;
   if (bgType === 'gradient' && bgGradient) {
     backgroundValue = bgGradient;
+  } else if (bgType === 'color' && !hasCustomBg && themeGradient) {
+    backgroundValue = themeGradient;
   }
 
   // Set CSS variables on the frame so all profile elements inherit them
@@ -1250,10 +1270,16 @@ window.saveCustomization = async function() {
   const cardBorderColor = document.getElementById('theme-cardBorderColor')?.value || '#f0dfc8';
   const cardBorderRadius = parseInt(document.getElementById('theme-cardBorderRadius')?.value || '28', 10);
 
+  // Don't save backgroundColor when it matches the theme default — this keeps
+  // the Gradient Slate default active for profiles that haven't explicitly set
+  // a custom color
+  const themeDefaultBg = currentProfile?.theme?.config?.background || '#fff7ec';
+  const isDefaultColor = bgColor === themeDefaultBg || bgColor === '#fff7ec';
+
   const payload = {
     backgroundImage: bgType === 'image' ? (currentProfile?.theme?.custom?.backgroundImage || null) : null,
     backgroundGradient: bgType === 'gradient' ? bgGradient : null,
-    backgroundColor: bgType === 'color' ? bgColor : null,
+    backgroundColor: (bgType === 'color' && !isDefaultColor) ? bgColor : null,
     backgroundPosition: bgPosition,
     backgroundRepeat: bgRepeat,
     backgroundSize: bgSize,

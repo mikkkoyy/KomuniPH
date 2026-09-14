@@ -134,6 +134,7 @@ export async function apiRequest(path, options = {}) {
 
   const requestInit = {
     method,
+    cache: 'no-store',
     headers,
   };
 

@@ -13,6 +13,7 @@ import { initDatabase, closeDatabase, seedDefaultTheme } from './database.js';
 import { requireAuth } from './auth.js';
 import { handleRegister, handleLogin, handleVerify, handleVerifyEmailLink, handleForgotPassword, handleResetPassword } from './auth.js';
 import { handleGetProfile, handleGetPublicProfile, handleUpdateProfile, handleUploadPhoto, handleUpdateTheme, handleUploadBackground } from './profile.js';
+import { handleGetTestimonials, handleCreateTestimonial, handleDeleteTestimonial, handleGetUserTestimonials } from './testimonials.js';
 import { getAllLocations, getCountries, getCities, getBarangays } from './locations.js';
 import {
   handleGetFeed,
@@ -166,11 +167,30 @@ async function handleApi(req, res) {
     if (!user) return;
     return handleUpdateTheme(req, res, user);
   }
-  if (method === 'POST' && path === '/api/profile/background') {
-    const user = requireAuth(req, res);
-    if (!user) return;
-    return handleUploadBackground(req, res, user);
-  }
+   if (method === 'POST' && path === '/api/profile/background') {
+     const user = requireAuth(req, res);
+     if (!user) return;
+     return handleUploadBackground(req, res, user);
+   }
+
+   // Testimonials routes
+   const testimonialsMatch = matchRoute('/api/profiles/:username/testimonials', path);
+   if (method === 'GET' && testimonialsMatch) {
+     return handleGetTestimonials(req, res, testimonialsMatch);
+   }
+
+   if (method === 'POST' && path === '/api/testimonials') {
+     const user = requireAuth(req, res);
+     if (!user) return;
+     return handleCreateTestimonial(req, res, user);
+   }
+
+   const testimonialMatch = matchRoute('/api/testimonials/:id', path);
+   if (method === 'DELETE' && testimonialMatch) {
+     const user = requireAuth(req, res);
+     if (!user) return;
+     return handleDeleteTestimonial(req, res, user, testimonialMatch);
+   }
 
   // Public profile by username
   const publicProfileMatch = matchRoute('/api/profile/:username', path);

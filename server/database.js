@@ -145,6 +145,22 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_token_hash ON email_verification_tokens(token_hash);
     CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_expires_at ON email_verification_tokens(expires_at);
 
+    -- TESTIMONIALS-01: Testimonials table
+    CREATE TABLE IF NOT EXISTS testimonials (
+      id TEXT PRIMARY KEY,
+      profile_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      author_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      message TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      status TEXT NOT NULL DEFAULT 'active'
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_testimonials_profile_user_id ON testimonials(profile_user_id);
+    CREATE INDEX IF NOT EXISTS idx_testimonials_author_user_id ON testimonials(author_user_id);
+    CREATE INDEX IF NOT EXISTS idx_testimonials_status ON testimonials(status);
+    CREATE INDEX IF NOT EXISTS idx_testimonials_created_at ON testimonials(created_at DESC);
+
     -- MESSAGE-01: Messaging tables
     CREATE TABLE IF NOT EXISTS conversations (
       id TEXT PRIMARY KEY,

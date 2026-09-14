@@ -2,7 +2,7 @@
  * KomuniPH Lite - Profile UI
  */
 
-import { profileApi, authApi, isAuthenticated, getCurrentUserProfile, setCurrentUserProfile } from './api.js';
+import { profileApi, testimonialsApi, authApi, isAuthenticated, getCurrentUserProfile, setCurrentUserProfile } from './api.js';
 import { navigate } from './app.js';
 
 let currentProfile = null;
@@ -71,15 +71,16 @@ function createAvatar(username, displayName, photoUrl, size = 5) {
 /**
  * Render the profile page
  */
-export function renderProfilePage() {
+export function renderProfilePage(viewUsername = null) {
+  const isPublicView = !!viewUsername;
   if (!isAuthenticated()) {
     navigate('/login');
     return '';
   }
 
-  return `
-    <div class="profile-frame" id="profile-frame">
-      <div class="profile-content-frame">
+    return `
+     <div class="profile-frame" id="profile-frame" data-view="${isPublicView ? 'public' : 'own'}">
+       <div class="profile-content-frame">
       <!-- Header -->
       <header class="profile-header" id="profile-header">
         <div class="profile-header-inner">
@@ -116,41 +117,72 @@ export function renderProfilePage() {
               <span></span>
             </div>
              <div class="profile-module-body">
-               <div id="profile-photo-section">
-                 <img class="profile-photo-large" id="profile-photo-large"
-                      src="" alt="Profile photo"
-                      style="display:none">
-                 <div class="profile-photo-large" id="profile-photo-initials"
-                      style="display:none; background: var(--theme-accent, var(--kp-teal)); color: white;">
-                   ?
-                 </div>
-                 <div style="clear:both"></div>
-                  <button class="profile-action-btn" id="change-photo-btn" onclick="document.getElementById('photo-input').click()">Change Profile Photo</button>
-                 <input type="file" id="photo-input" accept="image/jpeg,image/png,image/webp" style="display:none">
-                 <button class="btn btn-primary" id="upload-btn" style="display:none" onclick="window.uploadPhoto()">Upload Photo</button>
-                 <div id="upload-status" class="upload-status"></div>
+                <div id="profile-photo-section">${isPublicView ? '' : `
+                  <img class="profile-photo-large" id="profile-photo-large"
+                       src="" alt="Profile photo"
+                       style="display:none">
+                  <div class="profile-photo-large" id="profile-photo-initials"
+                       style="display:none; background: var(--theme-accent, var(--kp-teal)); color: white;">
+                    ?
+                  </div>
+                  <div style="clear:both"></div>
+                   <button class="profile-action-btn" id="change-photo-btn" onclick="document.getElementById('photo-input').click()">Change Profile Photo</button>
+                  <input type="file" id="photo-input" accept="image/jpeg,image/png,image/webp" style="display:none">
+                  <button class="btn btn-primary" id="upload-btn" style="display:none" onclick="window.uploadPhoto()">Upload Photo</button>
+                  <div id="upload-status" class="upload-status"></div>
+                `}${isPublicView ? `
+                  <div class="profile-photo-display" id="profile-photo-display"></div>
+                ` : ''}
+                <div id="profile-view">
+                  <h2 class="profile-name" id="profile-name"></h2>
+                  <p class="profile-username" id="profile-username"></p>
+                  <p class="profile-nickname" id="profile-nickname"></p>
+
+                  <div class="profile-info-grid" id="profile-info-grid">
+                    <!-- Identity fields will be populated by JS -->
+                  </div>${isPublicView ? '' : `
+                  <div class="profile-actions" id="profile-actions">
+                    <button class="profile-action-btn" onclick="window.startEditProfile()">Edit Profile</button>
+                    <button class="profile-action-btn" onclick="window.openCustomization()">Customize Profile</button>
+                  </div>`}
+                </div>${isPublicView ? '' : `
+                <div id="profile-edit" style="display:none">
+                  <!-- Edit form will be populated by startEditProfile() -->
+                </div>`}
+              </div>
+         </div>
+
+           <!-- Testimonials Module -->
+           <div class="profile-module" id="testimonials-module">
+             <div class="profile-module-header">
+               Testimonials
+               <span></span>
+             </div>
+             <div class="profile-module-body" id="testimonials-body">
+               <div id="testimonials-empty" class="testimonials-empty" style="display:none">
+                 No testimonials yet.
+                 <br>Be the first to leave one.
                </div>
-
-               <div id="profile-view">
-                 <h2 class="profile-name" id="profile-name"></h2>
-                 <p class="profile-username" id="profile-username"></p>
-                 <p class="profile-nickname" id="profile-nickname"></p>
-
-                 <div class="profile-info-grid" id="profile-info-grid">
-                   <!-- Identity fields will be populated by JS -->
-                 </div>
-
-                 <div class="profile-actions" id="profile-actions">
-                   <button class="profile-action-btn" onclick="window.startEditProfile()">Edit Profile</button>
-                   <button class="profile-action-btn" onclick="window.openCustomization()">Customize Profile</button>
-                 </div>
+               <div id="testimonials-list" class="testimonials-list">
+                 <!-- Testimonials will appear here -->
                </div>
-               <div id="profile-edit" style="display:none">
-                 <!-- Edit form will be populated by startEditProfile() -->
+               <div id="testimonial-form-container" style="display:none">
+                 <form id="testimonial-form" class="form" novalidate>
+                   <div id="testimonial-error" class="error-banner" style="display:none"></div>
+                   <div id="testimonial-success" class="success-banner" style="display:none"></div>
+                   <div class="form-group">
+                     <label class="form-label" for="testimonial-message">Your testimonial for <span id="testimonial-target-name"></span></label>
+                     <textarea id="testimonial-message" rows="3" maxlength="1000" placeholder="Share your experience..."></textarea>
+                     <div id="testimonial-char-count" class="char-count">0 / 1000</div>
+                   </div>
+                   <div class="edit-actions">
+                     <button type="submit" class="btn btn-primary" id="testimonial-submit-btn">Submit Testimonial</button>
+                   </div>
+                 </form>
                </div>
              </div>
-          </div>
-
+           </div>
+         </div>
           <!-- Personal Information Module -->
           <div class="profile-module" id="personal-info-module">
             <div class="profile-module-header">
@@ -534,6 +566,7 @@ window.loadProfile = async function() {
     applyProfileBackground(profile);
 
     renderProfileView(profile);
+    await loadAndRenderTestimonials(profile.username, false);
 
   } catch (err) {
     console.error('[PROFILE] Load profile error:', err);
@@ -544,6 +577,50 @@ window.loadProfile = async function() {
     }
   }
 };
+
+window.loadPublicProfile = async function(username) {
+  try {
+    const profile = await profileApi.getPublicProfile(username);
+    currentProfile = profile;
+    applyProfileBackground(profile);
+    renderProfileView(profile);
+
+    const formContainer = document.getElementById('testimonial-form-container');
+    if (formContainer) {
+      formContainer.style.display = 'block';
+    }
+    const targetName = document.getElementById('testimonial-target-name');
+    if (targetName) {
+      targetName.textContent = getProfileDisplayName(profile) || profile.username;
+    }
+
+    await loadAndRenderTestimonials(profile.username, true);
+    initTestimonialForm();
+
+  } catch (err) {
+    console.error('[PROFILE] Load public profile error:', err);
+    const statusStrip = document.getElementById('profile-status-strip');
+    if (statusStrip) {
+      statusStrip.textContent = 'Failed to load profile: ' + (err.message || 'Unknown error');
+      statusStrip.style.color = '#dc2626';
+    }
+  }
+};
+
+async function loadAndRenderTestimonials(username, showForm) {
+  try {
+    const response = await testimonialsApi.getTestimonials(username);
+    renderTestimonials(response.testimonials || []);
+
+    if (showForm) {
+      const formContainer = document.getElementById('testimonial-form-container');
+      if (formContainer) formContainer.style.display = 'block';
+    }
+  } catch (err) {
+    console.error('[TESTIMONIALS] Failed to load testimonials:', err);
+    renderTestimonials([]);
+  }
+}
 
 /**
  * Render the profile view (name, username, nickname, photo, personal info)
@@ -591,7 +668,7 @@ function renderProfileView(profile) {
    }
    if (infoBioEl) infoBioEl.textContent = bio || '';
 
-  // Update profile photo
+  // Update profile photo (own profile)
   const profilePhotoLarge = document.getElementById('profile-photo-large');
   const profilePhotoInitials = document.getElementById('profile-photo-initials');
   if (profile.profile_photo_url) {
@@ -608,6 +685,16 @@ function renderProfileView(profile) {
     if (profilePhotoInitials) {
       profilePhotoInitials.style.display = 'block';
       profilePhotoInitials.textContent = (nameDisplay || username || '?').charAt(0).toUpperCase();
+    }
+  }
+
+  // Update public profile photo display
+  const publicPhotoDisplay = document.getElementById('profile-photo-display');
+  if (publicPhotoDisplay) {
+    if (profile.profile_photo_url) {
+      publicPhotoDisplay.innerHTML = `<img src="${escapeHtmlAttr(profile.profile_photo_url)}" alt="${escapeHtmlAttr(nameDisplay || username)}" class="profile-photo-public">`;
+    } else {
+      publicPhotoDisplay.innerHTML = `<div class="profile-photo-public-initials" style="background: var(--theme-accent, var(--kp-teal)); color: white;">${(nameDisplay || username || '?').charAt(0).toUpperCase()}</div>`;
     }
   }
 
@@ -1355,11 +1442,189 @@ window.handleLogout = function() {
   navigate('/login');
 };
 
+function formatTestimonialDate(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '';
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+}
+
+function escapeHtmlAttr(str) {
+  if (!str) return '';
+  return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function renderTestimonialCard(testimonial) {
+  const author = testimonial.author || {};
+  const displayName = author.display_name || author.username || 'Anonymous';
+  const authorUsername = author.username || '';
+  const photoUrl = author.profile_photo_url;
+
+  const avatarInitial = (displayName || authorUsername || '?').charAt(0).toUpperCase();
+
+  let avatarHtml;
+  if (photoUrl) {
+    avatarHtml = `<img src="${escapeHtmlAttr(photoUrl)}" alt="${escapeHtmlAttr(displayName)}" class="testimonial-avatar">`;
+  } else {
+    avatarHtml = `<div class="testimonial-avatar-initials">${avatarInitial}</div>`;
+  }
+
+  const formattedDate = formatTestimonialDate(testimonial.created_at);
+  const escapedMessage = escapeHtml(testimonial.message || '');
+
+  return `
+    <div class="testimonial-card" data-testimonial-id="${escapeHtmlAttr(testimonial.id)}">
+      <div class="testimonial-avatar-container">
+        ${avatarHtml}
+      </div>
+      <div class="testimonial-content">
+        <div class="testimonial-message">${escapedMessage}</div>
+        <div class="testimonial-author">
+          <span class="testimonial-author-name">${escapeHtml(displayName)}</span>
+          <span class="testimonial-author-handle">@${escapeHtml(authorUsername)}</span>
+          <span class="testimonial-date">${formattedDate}</span>
+        </div>
+        ${testimonial.is_current_user_author ? `<button class="testimonial-delete-btn" onclick="window.deleteTestimonial('${escapeHtmlAttr(testimonial.id)}')">Delete</button>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function renderTestimonials(testimonials) {
+  const listEl = document.getElementById('testimonials-list');
+  const emptyEl = document.getElementById('testimonials-empty');
+
+  if (!listEl || !emptyEl) return;
+
+  if (!testimonials || testimonials.length === 0) {
+    listEl.style.display = 'none';
+    emptyEl.style.display = 'block';
+    return;
+  }
+
+  emptyEl.style.display = 'none';
+  listEl.style.display = 'block';
+  listEl.innerHTML = testimonials.map(renderTestimonialCard).join('');
+}
+
+window.deleteTestimonial = async function(testimonialId) {
+  if (!confirm('Delete this testimonial?')) return;
+
+  try {
+    await testimonialsApi.deleteTestimonial(testimonialId);
+    const card = document.querySelector(`.testimonial-card[data-testimonial-id="${CSS.escape(testimonialId)}"]`);
+    if (card) card.remove();
+
+    const listEl = document.getElementById('testimonials-list');
+    const emptyEl = document.getElementById('testimonials-empty');
+    if (listEl && listEl.children.length === 0) {
+      listEl.style.display = 'none';
+      if (emptyEl) emptyEl.style.display = 'block';
+    }
+  } catch (err) {
+    console.error('[TESTIMONIALS] Delete error:', err);
+    alert(err.message || 'Failed to delete testimonial');
+  }
+};
+
+window.initTestimonialForm = function() {
+  const form = document.getElementById('testimonial-form');
+  if (!form) return;
+
+  const textarea = document.getElementById('testimonial-message');
+  const charCount = document.getElementById('testimonial-char-count');
+  const submitBtn = document.getElementById('testimonial-submit-btn');
+
+  if (textarea) {
+    textarea.addEventListener('input', function() {
+      if (charCount) {
+        charCount.textContent = `${this.value.length} / 1000`;
+        charCount.className = 'char-count' + (this.value.length > 950 ? ' char-count-warning' : '');
+      }
+    });
+  }
+
+  form.addEventListener('submit', async function(e) {
+    e.preventDefault();
+
+    const message = textarea ? textarea.value.trim() : '';
+    const targetName = document.getElementById('testimonial-target-name');
+    const targetUsername = targetName ? targetName.textContent.replace('@', '') : '';
+
+    const errorMsg = document.getElementById('testimonial-error');
+    const successMsg = document.getElementById('testimonial-success');
+
+    if (errorMsg) {
+      errorMsg.style.display = 'none';
+      errorMsg.textContent = '';
+    }
+    if (successMsg) {
+      successMsg.style.display = 'none';
+      successMsg.textContent = '';
+    }
+
+    if (!message) {
+      if (errorMsg) {
+        errorMsg.textContent = 'Testimonial message is required';
+        errorMsg.style.display = 'block';
+      }
+      return;
+    }
+
+    if (message.length > 1000) {
+      if (errorMsg) {
+        errorMsg.textContent = 'Testimonial must be 1000 characters or less';
+        errorMsg.style.display = 'block';
+      }
+      return;
+    }
+
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Submitting...';
+    }
+
+    try {
+      const result = await testimonialsApi.createTestimonial(
+        currentProfile.username,
+        message
+      );
+
+      if (successMsg) {
+        successMsg.textContent = 'Testimonial submitted successfully!';
+        successMsg.style.display = 'block';
+      }
+
+      if (textarea) textarea.value = '';
+      if (charCount) charCount.textContent = '0 / 1000';
+
+      await loadAndRenderTestimonials(currentProfile.username, true);
+    } catch (err) {
+      if (errorMsg) {
+        errorMsg.textContent = err.message || 'Failed to submit testimonial';
+        errorMsg.style.display = 'block';
+      }
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Submit Testimonial';
+      }
+    }
+  });
+};
+
 /**
  * Initialize profile page
  */
 export function initProfilePage() {
-  window.loadProfile();
+  const hash = window.location.hash.slice(1) || '/login';
+  const publicMatch = hash.match(/^\/profile\/(.+)$/);
+  if (publicMatch) {
+    window.loadPublicProfile(publicMatch[1]);
+  } else {
+    window.loadProfile();
+  }
 }
 
 /**

@@ -376,8 +376,30 @@ export const feedApi = {
     });
   },
 
-  async deleteComment(commentId) {
+   async deleteComment(commentId) {
     return apiRequest(`/feed/comments/${commentId}`, {
+      method: 'DELETE',
+    });
+  },
+};
+
+/**
+ * Testimonials API
+ */
+export const testimonialsApi = {
+  async getTestimonials(username, limit = 50, offset = 0) {
+    return apiRequest(`/profiles/${username}/testimonials?limit=${limit}&offset=${offset}`);
+  },
+
+  async createTestimonial(targetUsername, message) {
+    return apiRequest('/testimonials', {
+      method: 'POST',
+      body: { target_username: targetUsername, message },
+    });
+  },
+
+  async deleteTestimonial(testimonialId) {
+    return apiRequest(`/testimonials/${testimonialId}`, {
       method: 'DELETE',
     });
   },

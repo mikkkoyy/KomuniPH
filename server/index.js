@@ -82,7 +82,10 @@ function serveStatic(req, res) {
 
   try {
     const content = readFileSync(fullPath);
-    res.writeHead(200, { 'Content-Type': contentType });
+    res.writeHead(200, {
+      'Content-Type': contentType,
+      'Cache-Control': 'no-cache'
+    });
     res.end(content);
   } catch (err) {
     errorResponse(res, 500, 'Error reading file');

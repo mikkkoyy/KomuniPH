@@ -1276,21 +1276,39 @@ a:hover {
    custom theme background (color / gradient / image) across the entire
    viewport, edge to edge, regardless of how narrow the centered content
    column below is. JS (applyProfileBackground / updatePreview) sets the
-   background on this element via #profile-frame. */
+   background on #profile-background-layer (a fixed viewport layer) so the
+   background stays anchored while the profile content scrolls above it. */
 .profile-frame {
+  position: relative;
   width: 100vw;
   min-height: 100vh;
   min-height: 100dvh;
+}
+
+/* Fixed background layer — anchored to the viewport so it does not scroll
+   with the profile content. The image is always cover-sized against the
+   viewport, never stretched to document height. */
+.profile-background-layer {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  pointer-events: none;
+  z-index: 0;
+
   background: linear-gradient(135deg, #0f172a 0%, #334155 50%, #475569 100%);
   background-size: cover;
-  background-position: center;
+  background-position: center center;
   background-repeat: no-repeat;
 }
 
 /* Profile content frame - centered content column that sits on top of the
-   full-bleed backdrop above. Layout-only: it intentionally carries no
+   fixed backdrop above. Layout-only: it intentionally carries no
    background of its own so the backdrop always shows through around it. */
 .profile-content-frame {
+  position: relative;
+  z-index: 1;
   max-width: calc(1040px);
   margin: 0 auto;
   padding: 1rem;

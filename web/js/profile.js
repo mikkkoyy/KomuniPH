@@ -79,8 +79,9 @@ export function renderProfilePage(viewUsername = null) {
   }
 
     return `
-     <div class="profile-frame" id="profile-frame" data-view="${isPublicView ? 'public' : 'own'}">
-       <div class="profile-content-frame">
+      <div class="profile-frame" id="profile-frame" data-view="${isPublicView ? 'public' : 'own'}">
+        <div class="profile-background-layer" id="profile-background-layer" aria-hidden="true"></div>
+        <div class="profile-content-frame">
       <!-- Header -->
       <header class="profile-header" id="profile-header">
         <div class="profile-header-inner">
@@ -150,71 +151,72 @@ export function renderProfilePage(viewUsername = null) {
                   <!-- Edit form will be populated by startEditProfile() -->
                 </div>`}
               </div>
-         </div>
+          </div>
 
-           <!-- Testimonials Module -->
-           <div class="profile-module" id="testimonials-module">
+           <!-- Personal Information Module -->
+           <div class="profile-module" id="personal-info-module">
              <div class="profile-module-header">
-               Testimonials
+               Personal Information
                <span></span>
              </div>
-             <div class="profile-module-body" id="testimonials-body">
-               <div id="testimonials-empty" class="testimonials-empty" style="display:none">
-                 No testimonials yet.
-                 <br>Be the first to leave one.
-               </div>
-               <div id="testimonials-list" class="testimonials-list">
-                 <!-- Testimonials will appear here -->
-               </div>
-               <div id="testimonial-form-container" style="display:none">
-                 <form id="testimonial-form" class="form" novalidate>
-                   <div id="testimonial-error" class="error-banner" style="display:none"></div>
-                   <div id="testimonial-success" class="success-banner" style="display:none"></div>
-                   <div class="form-group">
-                     <label class="form-label" for="testimonial-message">Your testimonial for <span id="testimonial-target-name"></span></label>
-                     <textarea id="testimonial-message" rows="3" maxlength="1000" placeholder="Share your experience..."></textarea>
-                     <div id="testimonial-char-count" class="char-count">0 / 1000</div>
-                   </div>
-                   <div class="edit-actions">
-                     <button type="submit" class="btn btn-primary" id="testimonial-submit-btn">Submit Testimonial</button>
-                   </div>
-                 </form>
+             <div class="profile-module-body" id="personal-info-body">
+               <div class="profile-info-grid">
+                 <div>
+                   <span class="profile-info-label">Name:</span>
+                 </div>
+                 <span class="profile-info-value" id="profile-info-name"></span>
+                 <br>
+                 <div>
+                   <span class="profile-info-label">Nickname:</span>
+                 </div>
+                 <span class="profile-info-value" id="profile-info-nickname"></span>
+                 <br>
+                 <div>
+                    <span class="profile-info-label">Location:</span>
+                  </div>
+                  <span class="profile-info-value" id="profile-info-location"></span>
+                  <br>
+                  <div>
+                    <span class="profile-info-label">Birthday:</span>
+                  </div>
+                  <span class="profile-info-value" id="profile-info-birthday"></span>
+                  <br>
+                 <div>
+                   <span class="profile-info-label">About Me:</span>
+                 </div>
+                 <span class="profile-info-value" id="profile-info-bio"></span>
                </div>
              </div>
            </div>
-         </div>
-          <!-- Personal Information Module -->
-          <div class="profile-module" id="personal-info-module">
-            <div class="profile-module-header">
-              Personal Information
-              <span></span>
-            </div>
-            <div class="profile-module-body" id="personal-info-body">
-              <div class="profile-info-grid">
-                <div>
-                  <span class="profile-info-label">Name:</span>
+
+            <!-- Testimonials Module -->
+            <div class="profile-module" id="testimonials-module">
+              <div class="profile-module-header">
+                Testimonials
+                <span></span>
+              </div>
+              <div class="profile-module-body" id="testimonials-body">
+                <div id="testimonials-empty" class="testimonials-empty" style="display:none">
+                  No testimonials yet.
+                  <br>Be the first to leave one.
                 </div>
-                <span class="profile-info-value" id="profile-info-name"></span>
-                <br>
-                <div>
-                  <span class="profile-info-label">Nickname:</span>
+                <div id="testimonials-list" class="testimonials-list">
+                  <!-- Testimonials will appear here -->
                 </div>
-                <span class="profile-info-value" id="profile-info-nickname"></span>
-                <br>
-                <div>
-                   <span class="profile-info-label">Location:</span>
-                 </div>
-                 <span class="profile-info-value" id="profile-info-location"></span>
-                 <br>
-                 <div>
-                   <span class="profile-info-label">Birthday:</span>
-                 </div>
-                 <span class="profile-info-value" id="profile-info-birthday"></span>
-                 <br>
-                <div>
-                  <span class="profile-info-label">About Me:</span>
+                <div id="testimonial-form-container" style="display:none">
+                  <form id="testimonial-form" class="form" novalidate>
+                    <div id="testimonial-error" class="error-banner" style="display:none"></div>
+                    <div id="testimonial-success" class="success-banner" style="display:none"></div>
+                    <div class="form-group">
+                      <label class="form-label" for="testimonial-message">Your testimonial for <span id="testimonial-target-name"></span></label>
+                      <textarea id="testimonial-message" rows="3" maxlength="1000" placeholder="Share your experience..."></textarea>
+                      <div id="testimonial-char-count" class="char-count">0 / 1000</div>
+                    </div>
+                    <div class="edit-actions">
+                      <button type="submit" class="btn btn-primary" id="testimonial-submit-btn">Submit Testimonial</button>
+                    </div>
+                  </form>
                 </div>
-                <span class="profile-info-value" id="profile-info-bio"></span>
               </div>
             </div>
           </div>
@@ -492,6 +494,7 @@ const DEFAULT_BACKGROUND_GRADIENT = 'linear-gradient(135deg, #0f172a 0%, #334155
 function applyProfileBackground(profile) {
   const frame = document.getElementById('profile-frame');
   if (!frame) return;
+  const bgLayer = document.getElementById('profile-background-layer');
 
   const theme = profile?.theme && profile.theme.config ? profile.theme.config : {};
   const custom = profile?.theme && profile.theme.custom ? profile.theme.custom : {};
@@ -510,7 +513,6 @@ function applyProfileBackground(profile) {
   const hasCustomGradient = !!customGradient;
   const hasCustomColor = !!customColor;
   const hasThemeGradient = !!themeGradient;
-  // Treat gradient as a background for card opacity purposes
   const hasBackground = hasImageBackground || hasCustomGradient || hasThemeGradient;
   const defaultCardOpacity = hasBackground ? 0.8 : 0.95;
   const cardOpacity = custom.cardOpacity != null ? custom.cardOpacity : defaultCardOpacity;
@@ -535,24 +537,26 @@ function applyProfileBackground(profile) {
   frame.style.setProperty('--theme-text-secondary', mutedTextColor);
   frame.style.setProperty('--theme-accent', accentColor);
 
-  // Apply background to #profile-frame (the full-bleed container).
+  // Apply background to the fixed viewport layer, NOT the scrolling frame.
   // Priority: uploaded image > custom gradient > custom color > theme gradient > theme color
-  frame.style.backgroundImage = '';
-  frame.style.background = '';
-  if (bgImage) {
-    frame.style.backgroundImage = `url(${bgImage})`;
-    frame.style.backgroundColor = bgColor;
-    frame.style.backgroundPosition = bgPosition;
-    frame.style.backgroundRepeat = bgRepeat;
-    frame.style.backgroundSize = resolveBackgroundSizeCss(bgSize);
-  } else if (hasCustomGradient) {
-    frame.style.background = customGradient;
-  } else if (hasCustomColor) {
-    frame.style.background = customColor;
-  } else if (hasThemeGradient) {
-    frame.style.background = themeGradient;
-  } else {
-    frame.style.background = bgColor;
+  if (bgLayer) {
+    bgLayer.style.backgroundImage = '';
+    bgLayer.style.background = '';
+    if (bgImage) {
+      bgLayer.style.backgroundImage = `url(${bgImage})`;
+      bgLayer.style.backgroundColor = bgColor;
+      bgLayer.style.backgroundPosition = bgPosition;
+      bgLayer.style.backgroundRepeat = bgRepeat;
+      bgLayer.style.backgroundSize = resolveBackgroundSizeCss(bgSize);
+    } else if (hasCustomGradient) {
+      bgLayer.style.background = customGradient;
+    } else if (hasCustomColor) {
+      bgLayer.style.background = customColor;
+    } else if (hasThemeGradient) {
+      bgLayer.style.background = themeGradient;
+    } else {
+      bgLayer.style.background = bgColor;
+    }
   }
 }
 
@@ -1235,6 +1239,7 @@ window.setBgType = function(type) {
 window.updatePreview = function() {
   const frame = document.getElementById('profile-frame');
   if (!frame) return;
+  const bgLayer = document.getElementById('profile-background-layer');
 
   const bgType = document.querySelector('input[name="bg-type"]:checked')?.value || 'color';
   const bgColor = document.getElementById('theme-backgroundColor')?.value || '#fff7ec';
@@ -1280,22 +1285,24 @@ window.updatePreview = function() {
   frame.style.setProperty('--theme-text-secondary', mutedTextColor);
   frame.style.setProperty('--theme-accent', accentColor);
 
-  // Apply background to the profile frame (the page), NOT the card
-  frame.style.backgroundImage = '';
-  frame.style.background = '';
-  if (bgType === 'image') {
-    const bgImage = currentProfile?.theme?.custom?.backgroundImage || currentProfile?.theme?.config?.backgroundImage || '';
-    if (bgImage) {
-      frame.style.backgroundImage = `url(${bgImage})`;
-      frame.style.backgroundColor = bgColor;
-      frame.style.backgroundPosition = bgPosition;
-      frame.style.backgroundRepeat = bgRepeat;
-      frame.style.backgroundSize = resolveBackgroundSizeCss(bgSize);
+  // Apply background to the fixed viewport layer, NOT the scrolling frame
+  if (bgLayer) {
+    bgLayer.style.backgroundImage = '';
+    bgLayer.style.background = '';
+    if (bgType === 'image') {
+      const bgImage = currentProfile?.theme?.custom?.backgroundImage || currentProfile?.theme?.config?.backgroundImage || '';
+      if (bgImage) {
+        bgLayer.style.backgroundImage = `url(${bgImage})`;
+        bgLayer.style.backgroundColor = bgColor;
+        bgLayer.style.backgroundPosition = bgPosition;
+        bgLayer.style.backgroundRepeat = bgRepeat;
+        bgLayer.style.backgroundSize = resolveBackgroundSizeCss(bgSize);
+      } else {
+        bgLayer.style.background = backgroundValue;
+      }
     } else {
-      frame.style.background = backgroundValue;
+      bgLayer.style.background = backgroundValue;
     }
-  } else {
-    frame.style.background = backgroundValue;
   }
 
   customizationDirty = true;

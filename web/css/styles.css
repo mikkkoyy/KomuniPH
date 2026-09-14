@@ -27,6 +27,7 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+  overflow-x: hidden;
 }
 
 body {
@@ -1277,7 +1278,7 @@ a:hover {
    column below is. JS (applyProfileBackground / updatePreview) sets the
    background on this element via #profile-frame. */
 .profile-frame {
-  width: 100%;
+  width: 100vw;
   min-height: 100vh;
   min-height: 100dvh;
   background-size: cover;

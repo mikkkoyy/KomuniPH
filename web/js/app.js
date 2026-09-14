@@ -86,19 +86,6 @@ function render() {
       html = renderProfilePage();
       initFn = initProfilePage;
       break;
-    default:
-      const publicProfileMatch = route.match(/^\/profile\/(.+)$/);
-      if (publicProfileMatch) {
-        if (!isAuthenticated()) {
-          navigate('/login');
-          return;
-        }
-        html = renderProfilePage(publicProfileMatch[1]);
-        initFn = initProfilePage;
-        break;
-      }
-      navigate('/login');
-      return;
     case '/messages':
       if (!isAuthenticated()) {
         navigate('/login');
@@ -132,6 +119,12 @@ function render() {
       initFn = initPlaceholderPage;
       break;
     default:
+      const publicProfileMatch = route.match(/^\/profile\/(.+)$/);
+      if (publicProfileMatch) {
+        html = renderProfilePage(publicProfileMatch[1]);
+        initFn = initProfilePage;
+        break;
+      }
       navigate('/login');
       return;
   }

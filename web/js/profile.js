@@ -73,7 +73,7 @@ function createAvatar(username, displayName, photoUrl, size = 5) {
  */
 export function renderProfilePage(viewUsername = null) {
   const isPublicView = !!viewUsername;
-  if (!isAuthenticated()) {
+  if (!isPublicView && !isAuthenticated()) {
     navigate('/login');
     return '';
   }
@@ -89,17 +89,17 @@ export function renderProfilePage(viewUsername = null) {
         </div>
       </header>
 
-      <!-- Navigation -->
-      <nav class="profile-nav" id="profile-nav">
-        <a href="#/home" class="profile-nav-link">Home</a>
-        <a href="#/profile" class="profile-nav-link profile-nav-active">My Profile ▼</a>
-        <a href="#/connections" class="profile-nav-link">My Connections ▼</a>
-        <a href="#/explore" class="profile-nav-link">Explore ▼</a>
-        <a href="#/search" class="profile-nav-link">Search</a>
-        <a href="#/messages" class="profile-nav-link">Messages</a>
-        <a href="#/settings" class="profile-nav-link">Settings</a>
-        <button class="profile-nav-link profile-nav-link-logout" onclick="window.handleLogout()">Log Out</button>
-      </nav>
+       <!-- Navigation -->
+       ${isPublicView && !isAuthenticated() ? '' : `<nav class="profile-nav" id="profile-nav">
+         <a href="#/home" class="profile-nav-link">Home</a>
+         <a href="#/profile" class="profile-nav-link profile-nav-active">My Profile ▼</a>
+         <a href="#/connections" class="profile-nav-link">My Connections ▼</a>
+         <a href="#/explore" class="profile-nav-link">Explore ▼</a>
+         <a href="#/search" class="profile-nav-link">Search</a>
+         <a href="#/messages" class="profile-nav-link">Messages</a>
+         <a href="#/settings" class="profile-nav-link">Settings</a>
+         <button class="profile-nav-link profile-nav-link-logout" onclick="window.handleLogout()">Log Out</button>
+       </nav>`}
 
       <!-- Quote/Status Strip -->
       <div class="profile-status-strip" id="profile-status-strip">
@@ -586,16 +586,30 @@ window.loadPublicProfile = async function(username) {
     renderProfileView(profile);
 
     const formContainer = document.getElementById('testimonial-form-container');
-    if (formContainer) {
-      formContainer.style.display = 'block';
-    }
     const targetName = document.getElementById('testimonial-target-name');
-    if (targetName) {
-      targetName.textContent = getProfileDisplayName(profile) || profile.username;
-    }
 
-    await loadAndRenderTestimonials(profile.username, true);
-    initTestimonialForm();
+    if (isAuthenticated()) {
+      if (formContainer) {
+        formContainer.style.display = 'block';
+      }
+      if (targetName) {
+        targetName.textContent = getProfileDisplayName(profile) || profile.username;
+      }
+      await loadAndRenderTestimonials(profile.username, true);
+      initTestimonialForm();
+    } else {
+      if (formContainer) {
+        const loginPrompt = formContainer.querySelector('.testimonial-login-prompt');
+        if (!loginPrompt) {
+          const prompt = document.createElement('div');
+          prompt.className = 'testimonial-login-prompt';
+          prompt.innerHTML = '<p style="color: var(--theme-text-secondary, #6b6072); font-size: 0.875rem;">Log in to leave a testimonial.</p>';
+          formContainer.appendChild(prompt);
+        }
+        formContainer.style.display = 'block';
+      }
+      await loadAndRenderTestimonials(profile.username, false);
+    }
 
   } catch (err) {
     console.error('[PROFILE] Load public profile error:', err);

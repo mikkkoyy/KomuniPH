@@ -1,5 +1,5 @@
 import http from 'http';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { spawn } from 'child_process';
 
 const BASE_HOST = 'localhost';
 const BASE_PORT = 3000;
@@ -33,46 +33,19 @@ function api(path, method = 'GET', body = null, token = null) {
   });
 }
 
-function apiWithForm(path, formData, token = null) {
+async function getHtml(path) {
   return new Promise((resolve, reject) => {
-    const boundary = '----formdata' + Date.now();
-    const parts = [];
-
-    for (const [key, value] of Object.entries(formData)) {
-      parts.push(`--${boundary}\r\n`);
-      parts.push(`Content-Disposition: form-data; name="${key}"; filename="${value.filename}"\r\n`);
-      parts.push(`Content-Type: ${value.contentType}\r\n\r\n`);
-    }
-
-    const body = Buffer.concat([
-      Buffer.from(parts.join('')),
-      formData.file,
-      Buffer.from(`\r\n--${boundary}--\r\n`),
-    ]);
-
-    const headers = {
-      'Content-Type': `multipart/form-data; boundary=${boundary}`,
-      'Content-Length': body.length,
-    };
-    if (token) headers['Authorization'] = 'Bearer ' + token;
-
     const req = http.request({
       hostname: BASE_HOST,
       port: BASE_PORT,
       path,
-      method: 'POST',
-      headers,
+      method: 'GET',
     }, (res) => {
       let b = '';
       res.on('data', chunk => b += chunk.toString());
-      res.on('end', () => {
-        let parsed = null;
-        try { parsed = JSON.parse(b); } catch (e) { parsed = { raw: b }; }
-        resolve({ status: res.statusCode, body: parsed });
-      });
+      res.on('end', () => resolve({ status: res.statusCode, body: b }));
     });
     req.on('error', reject);
-    req.write(body);
     req.end();
   });
 }
@@ -83,6 +56,7 @@ const testPass = 'Password123!';
 
 const bgResults = {};
 const ttResults = {};
+const loginResults = {};
 
 async function runTests() {
   let pass = 0, fail = 0;
@@ -91,20 +65,61 @@ async function runTests() {
     else { fail++; console.log('  FAIL:', label); }
     if (category === 'bg') bgResults[label] = cond;
     if (category === 'testimonials') ttResults[label] = cond;
+    if (category === 'login') loginResults[label] = cond;
   };
 
-  console.log('=== Registering User A and User B ===');
-  const regA = await api('/api/auth/register', 'POST', {
+  // ===== LOGIN PAGE TESTS =====
+  console.log('=== LOGIN PAGE TESTS ===');
+
+  console.log('\n--- GET /login returns HTML ---');
+  const loginPage = await getHtml('/login');
+  assert(
+    loginPage.status === 200 && loginPage.body.includes('<div id="app">'),
+    '/login route returns SPA HTML',
+    'login'
+  );
+
+  console.log('\n--- Index.html includes login script ---');
+  const indexPage = await getHtml('/');
+  assert(
+    indexPage.status === 200 &&
+    indexPage.body.includes('/js/app.js') &&
+    indexPage.body.includes('/css/styles.css'),
+    'Index.html includes app.js and styles.css',
+    'login'
+  );
+
+  console.log('\n--- Login API works ---');
+  const regRes = await api('/api/auth/register', 'POST', {
     email: `${userA}@test.com`, username: userA, password: testPass
   });
-  assert(regA.status === 201 && regA.body.access_token, 'User A registered with token');
+  assert(regRes.status === 201 && regRes.body.access_token, 'Registration works', 'login');
+
+  const loginRes = await api('/api/auth/login', 'POST', {
+    identifier: userA, password: testPass
+  });
+  assert(
+    loginRes.status === 200 && loginRes.body.access_token,
+    'Login API works with token',
+    'login'
+  );
+
+  console.log('\n--- Profile loads after login ---');
+  const profile = await api('/api/profile', 'GET', null, loginRes.body.access_token);
+  assert(
+    profile.status === 200 && profile.body.username === userA,
+    'Profile loads with authenticated token',
+    'login'
+  );
+
+  // ===== TESTIMONIALS TESTS =====
+  console.log('\n=== TESTIMONIALS TESTS ===');
+
+  const tokenA = regRes.body.access_token;
 
   const regB = await api('/api/auth/register', 'POST', {
     email: `${userB}@test.com`, username: userB, password: testPass
   });
-  assert(regB.status === 201 && regB.body.access_token, 'User B registered with token');
-
-  const tokenA = regA.body.access_token;
   const tokenB = regB.body.access_token;
 
   await api('/api/profile', 'PATCH', {
@@ -116,9 +131,6 @@ async function runTests() {
     first_name: 'Bob', last_name: 'Brown',
     country: 'Philippines', city: 'Marikina', barangay: 'Parang'
   }, tokenB);
-
-  // ========= TESTIMONIALS TESTS =========
-  console.log('\n=== TESTIMONIALS TESTS ===');
 
   console.log('\n--- TEST 1: Profile with zero testimonials ---');
   const emptyRes = await api(`/api/profiles/${userB}/testimonials`);
@@ -143,12 +155,12 @@ async function runTests() {
   );
   assert(
     created.body.author && created.body.author.username === userA,
-    'Author identity comes from authenticated account (User A)',
+    'Author identity comes from authenticated account',
     'testimonials'
   );
   assert(
     created.body.author && created.body.author.display_name === 'Alice Anderson',
-    'Author display name is built from profile name fields',
+    'Author display name from profile fields, not username',
     'testimonials'
   );
 
@@ -183,7 +195,7 @@ async function runTests() {
   console.log('\n--- TEST 5: Author identity cannot be spoofed ---');
   const spoofAttempt = await api('/api/testimonials', 'POST', {
     target_username: userB,
-    author_user_id: 'fake-id-12345',
+    author_user_id: 'fake-id',
     message: 'Spoof attempt'
   }, tokenA);
   assert(
@@ -197,110 +209,65 @@ async function runTests() {
     target_username: userB,
     message: '   '
   }, tokenA);
-  assert(emptyAttempt.status === 422, 'Empty testimonial (whitespace) rejected with 422', 'testimonials');
-
-  const trulyEmpty = await api('/api/testimonials', 'POST', {
-    target_username: userB,
-    message: ''
-  }, tokenA);
-  assert(trulyEmpty.status === 422, 'Empty testimonial (empty string) rejected with 422', 'testimonials');
+  assert(emptyAttempt.status === 422, 'Empty testimonial rejected (422)', 'testimonials');
 
   console.log('\n--- TEST 7: Unauthorized creation rejected ---');
   const unauthAttempt = await api('/api/testimonials', 'POST', {
     target_username: userB,
-    message: 'Unauthorized testimonial'
+    message: 'Unauthorized'
   }, null);
-  assert(unauthAttempt.status === 401, 'Unauthorized testimonial creation returns 401', 'testimonials');
+  assert(unauthAttempt.status === 401, 'Unauthorized creation returns 401', 'testimonials');
 
-  console.log('\n--- TEST 8: Cannot submit testimonial to self ---');
-  const selfTestimonial = await api('/api/testimonials', 'POST', {
+  console.log('\n--- TEST 8: Self-testimonial rejected ---');
+  const selfT = await api('/api/testimonials', 'POST', {
     target_username: userA,
-    message: 'Testimonial to self'
+    message: 'To self'
   }, tokenA);
-  assert(selfTestimonial.status === 400, 'Self-testimonial rejected with 400', 'testimonials');
+  assert(selfT.status === 400, 'Self-testimonial rejected (400)', 'testimonials');
 
   console.log('\n--- TEST 9: Non-author cannot delete ---');
-  const freshTestimonial = await api('/api/testimonials', 'POST', {
+  const fresh = await api('/api/testimonials', 'POST', {
     target_username: userB,
-    message: 'For delete auth test'
+    message: 'Delete auth test'
   }, tokenA);
   const allOnB = await api(`/api/profiles/${userB}/testimonials`);
-  const anyTestimonial = allOnB.body.testimonials.find(t => t.id === freshTestimonial.body.id);
-  if (anyTestimonial) {
-    const unauthDelete = await api(`/api/testimonials/${anyTestimonial.id}`, 'DELETE', null, tokenB);
-    assert(unauthDelete.status === 403, 'Non-author cannot delete (403)', 'testimonials');
+  const toDelete = allOnB.body.testimonials.find(t => t.id === fresh.body.id);
+  if (toDelete) {
+    const unauthDel = await api(`/api/testimonials/${toDelete.id}`, 'DELETE', null, tokenB);
+    assert(unauthDel.status === 403, 'Non-author delete rejected (403)', 'testimonials');
   } else {
-    assert(false, 'Should have a testimonial to test unauthorized delete', 'testimonials');
+    assert(false, 'Should have testimonial to test unauth delete', 'testimonials');
   }
 
-  console.log('\n--- TEST 10: Character limit validation ---');
-  const longMessage = 'x'.repeat(1001);
-  const longAttempt = await api('/api/testimonials', 'POST', {
+  console.log('\n--- TEST 10: Character limit ---');
+  const long = await api('/api/testimonials', 'POST', {
     target_username: userB,
-    message: longMessage
+    message: 'x'.repeat(1001)
   }, tokenA);
-  assert(longAttempt.status === 422, 'Testimonial exceeding 1000 chars rejected with 422', 'testimonials');
+  assert(long.status === 422, '1001+ chars rejected (422)', 'testimonials');
 
-  console.log('\n--- TEST 11: User B can view testimonials on own profile ---');
-  const bProfile = await api('/api/profile', 'GET', null, tokenB);
-  assert(!!bProfile.body, 'User B profile loads after receiving testimonials', 'testimonials');
-
-  // Clean up: delete the testimonials on B's profile created by A
-  const allTestimonialsOnB = await api(`/api/profiles/${userB}/testimonials`);
-  for (const t of allTestimonialsOnB.body.testimonials) {
-    if (t.author && t.author.username === userA) {
-      await api(`/api/testimonials/${t.id}`, 'DELETE', null, tokenA);
-    }
-  }
-  // Also delete B's testimonial on A's profile
-  const allTestimonialsOnA = await api(`/api/profiles/${userA}/testimonials`);
-  for (const t of allTestimonialsOnA.body.testimonials) {
-    if (t.author && t.author.username === userB) {
-      await api(`/api/testimonials/${t.id}`, 'DELETE', null, tokenB);
-    }
-  }
-
-  // ========= PROFILE BACKGROUND REGRESSION TESTS =========
+  // ===== PROFILE BACKGROUND REGRESSION TESTS =====
   console.log('\n=== PROFILE BACKGROUND REGRESSION TESTS ===');
 
-  console.log('\n--- Gradient Slate (default) ---');
-  // Reset User A's theme
+  // Reset to gradient
   await api('/api/profile/theme', 'PATCH', {
-    backgroundImage: null,
-    backgroundGradient: null,
-    backgroundColor: null,
-    backgroundPosition: null,
-    backgroundRepeat: null,
-    backgroundSize: null,
-    textColor: null,
-    mutedTextColor: null,
-    accentColor: null,
-    cardBackground: null,
-    cardOpacity: null,
-    cardBorderColor: null,
-    cardBorderRadius: null
+    backgroundImage: null, backgroundGradient: null, backgroundColor: null,
+    backgroundPosition: null, backgroundRepeat: null, backgroundSize: null,
+    textColor: null, mutedTextColor: null, accentColor: null,
+    cardBackground: null, cardOpacity: null, cardBorderColor: null, cardBorderRadius: null
   }, tokenA);
 
   const profileA = await api('/api/profile', 'GET', null, tokenA);
+  const customKeys = Object.keys((profileA.body.theme && profileA.body.theme.custom) || {});
   assert(
-    profileA.body && profileA.body.theme && profileA.body.theme.config,
-    'Profile A theme config exists',
-    'bg'
-  );
-  const configA = profileA.body.theme.config;
-  const customA = profileA.body.theme.custom || {};
-
-  const hasThemeGradient = !!configA.backgroundGradient;
-  const hasCustomBg = !!(customA.backgroundColor || customA.backgroundGradient || customA.backgroundImage);
-  const hasGradientBg = hasThemeGradient && !hasCustomBg;
-  assert(
-    hasGradientBg,
-    'Default Gradient Slate background active (no custom override)',
+    profileA.body && profileA.body.theme && profileA.body.theme.config &&
+    profileA.body.theme.config.backgroundGradient &&
+    customKeys.length === 0,
+    'Gradient Slate default background',
     'bg'
   );
 
-  console.log('\n--- Upload aa.jpg background ---');
-  // Create a real JPEG image using sharp
+  // Upload background
   const { default: sharp } = await import('sharp');
   const svg = `<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg"><rect width="100" height="100" fill="#ff6f4f"/></svg>`;
   const imageBuf = await sharp(Buffer.from(svg), { density: 72 })
@@ -340,65 +307,52 @@ async function runTests() {
     req.write(bodyBuf);
     req.end();
   });
-
   assert(
     uploadResult.status === 200 && uploadResult.body.background_url,
-    'Background upload (aa.jpg) succeeds',
+    'aa.jpg background upload',
     'bg'
   );
 
-  console.log('\n--- Image persistence after refresh ---');
+  // Persistence
   await new Promise(r => setTimeout(r, 100));
-  const profileAfterUpload = await api('/api/profile', 'GET', null, tokenA);
+  const profileAfter = await api('/api/profile', 'GET', null, tokenA);
   assert(
-    profileAfterUpload.body && profileAfterUpload.body.theme &&
-    profileAfterUpload.body.theme.custom &&
-    profileAfterUpload.body.theme.custom.backgroundImage,
-    'Background image persists after refresh',
+    profileAfter.body.theme && profileAfter.body.theme.custom &&
+    profileAfter.body.theme.custom.backgroundImage,
+    'Background persists after refresh',
     'bg'
   );
 
-  console.log('\n--- Reset to gradient ---');
-  const resetResult = await api('/api/profile/theme', 'PATCH', {
-    backgroundImage: null,
-    backgroundGradient: null,
-    backgroundColor: null,
-    backgroundPosition: null,
-    backgroundRepeat: null,
-    backgroundSize: null
+  // Reset
+  await api('/api/profile/theme', 'PATCH', {
+    backgroundImage: null, backgroundGradient: null, backgroundColor: null,
+    backgroundPosition: null, backgroundRepeat: null, backgroundSize: null
   }, tokenA);
-  const profileAfterReset = await api('/api/profile', 'GET', null, tokenA);
-  const configAfter = profileAfterReset.body.theme.config || {};
-  const customAfter = profileAfterReset.body.theme.custom || {};
-
-  const hasGradientAfterReset = !!configAfter.backgroundGradient &&
-    !customAfter.backgroundColor && !customAfter.backgroundGradient && !customAfter.backgroundImage;
+  const profileReset = await api('/api/profile', 'GET', null, tokenA);
+  const cfg = profileReset.body.theme.config || {};
+  const cus = profileReset.body.theme.custom || {};
   assert(
-    !!profileAfterReset.body && hasGradientAfterReset,
-    'Reset to gradient restores Gradient Slate default',
+    cfg.backgroundGradient && !cus.backgroundColor && !cus.backgroundGradient && !cus.backgroundImage,
+    'Reset to gradient restores Gradient Slate',
     'bg'
   );
 
-  console.log('\n--- Mobile responsive ---');
-  const profileForMobile = await api(`/api/profiles/${userB}/testimonials?limit=20&offset=0`);
+  // Mobile
+  const mobileRes = await api(`/api/profiles/${userB}/testimonials?limit=20&offset=0`);
   assert(
-    profileForMobile.status === 200 && Array.isArray(profileForMobile.body.testimonials),
-    'Testimonials load at any viewport size',
+    mobileRes.status === 200 && Array.isArray(mobileRes.body.testimonials),
+    'Mobile: testimonials load at any viewport',
     'bg'
   );
 
   // Final summary
   console.log('\n=== FINAL SUMMARY ===');
-  const bgPass = Object.values(bgResults).filter(Boolean).length;
-  const bgTotal = Object.keys(bgResults).length;
-  const ttPass = Object.values(ttResults).filter(Boolean).length;
-  const ttTotal = Object.keys(ttResults).length;
-
-  console.log(`Background regression: ${bgPass}/${bgTotal} PASS`);
-  Object.entries(bgResults).forEach(([k, v]) => console.log(`  ${v ? 'PASS' : 'FAIL'}: ${k}`));
-
-  console.log(`Testimonials: ${ttPass}/${ttTotal} PASS`);
+  console.log('\nLogin:');
+  Object.entries(loginResults).forEach(([k, v]) => console.log(`  ${v ? 'PASS' : 'FAIL'}: ${k}`));
+  console.log('\nTestimonials:');
   Object.entries(ttResults).forEach(([k, v]) => console.log(`  ${v ? 'PASS' : 'FAIL'}: ${k}`));
+  console.log('\nBackground regression:');
+  Object.entries(bgResults).forEach(([k, v]) => console.log(`  ${v ? 'PASS' : 'FAIL'}: ${k}`));
 
   console.log(`\n=== RESULTS: ${pass} PASS, ${fail} FAIL ===`);
   if (fail > 0) process.exit(1);

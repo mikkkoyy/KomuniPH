@@ -14,6 +14,7 @@ import config from './config.js';
 import { queryOne, execute } from './database.js';
 import { jsonResponse, errorResponse, parseBody } from './utils.js';
 import { seedDefaultTheme } from './database.js';
+import { getAllLocations } from './locations.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -512,6 +513,31 @@ export async function handleUpdateProfile(req, res, user) {
         return errorResponse(res, 422, 'Barangay must be a string or null');
       }
       barangay = body.barangay === null ? null : body.barangay.trim() || null;
+    }
+
+    // Location hierarchy validation: country -> city -> barangay
+    // Use the existing location dataset to verify consistency.
+    if (country || city || barangay) {
+      const locationData = getAllLocations();
+      const countries = locationData.countries || [];
+      const citiesByCountry = locationData.cities || {};
+      const barangaysByCity = locationData.barangays || {};
+
+      if (country && !countries.includes(country)) {
+        return errorResponse(res, 400, `Invalid country: '${country}'`);
+      }
+      if (country && city) {
+        const countryCities = citiesByCountry[country] || [];
+        if (!countryCities.includes(city)) {
+          return errorResponse(res, 400, `Invalid city '${city}' for country '${country}'`);
+        }
+      }
+      if (country && city && barangay) {
+        const cityBarangays = (barangaysByCity[country] && barangaysByCity[country][city]) || [];
+        if (!cityBarangays.includes(barangay)) {
+          return errorResponse(res, 400, `Invalid barangay '${barangay}' for city '${city}', country '${country}'`);
+        }
+      }
     }
 
     execute(

@@ -2409,14 +2409,24 @@ export async function initGalleryPage(username) {
   const profileUsername = username || params.username || galleryRoutes.username;
 
   try {
-    const [albumResponse, photos] = await Promise.all([
-      albumsApi.getAlbums(profileUsername),
-      fetchGalleryPhotos(profileUsername),
-    ]);
+    // PROFILE-PICTURES-ALBUM-01: the Profile Pictures album row is created
+    // lazily by GET /api/profile/profile-pictures-album. Fetch it for the
+    // owner so a brand-new account (no album row yet) still sees the
+    // Profile Pictures card on its gallery page.
+    const ownProfile = galleryRoutes.isOwnProfile || isOwnUsername(profileUsername);
+    const requests = [albumsApi.getAlbums(profileUsername), fetchGalleryPhotos(profileUsername)];
+    if (ownProfile) {
+      requests.push(albumsApi.getProfilePicturesAlbum().catch(() => null));
+    }
+    const [albumResponse, photos, ownProfileAlbum] = await Promise.all(requests);
 
     galleryRoutes.albums = albumResponse.albums || [];
+    if (ownProfileAlbum?.album &&
+        !galleryRoutes.albums.some(a => a.id === ownProfileAlbum.album.id)) {
+      galleryRoutes.albums = [ownProfileAlbum.album, ...galleryRoutes.albums];
+    }
     galleryRoutes.photos = photos;
-    galleryRoutes.isOwnProfile = galleryRoutes.isOwnProfile || !!albumResponse.is_own_profile;
+    galleryRoutes.isOwnProfile = ownProfile || !!albumResponse.is_own_profile;
   } catch (err) {
     console.error('[GALLERY] Failed to load gallery page:', err);
     setGalleryStatus(`Failed to load gallery: ${err.message || 'Unknown error'}`, true);

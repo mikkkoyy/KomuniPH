@@ -1,0 +1,14 @@
+=== PHOTO GALLERY TESTS ===
+
+--- Setup: Create users ---
+  PASS: User A registration
+  PASS: User B registration
+
+--- TEST 1: Empty gallery ---
+  PASS: Profile B has zero photos initially
+
+--- TEST 2: Authenticated upload ---
+  FAIL: Photo upload successful
+TypeError: Cannot read properties of undefined (reading 'image_url')
+    at runTests (file:///D:/FILES/project/KomuniPH/test_photo_gallery.mjs:143:24)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)

@@ -1,0 +1,30 @@
+=== REAL BROWSER FLOW TESTS ===
+  PASS: 1. Home -> Profile renders main photo
+  PASS: 1a. Main photo uses dedicated profile-header class only
+  PASS: 1b. Own profile mode
+  PASS: 1d. Profile background layer present
+  PASS: 1e. Testimonials module present
+  PASS: 2. Profile -> Gallery navigates
+  PASS: 2a. Gallery lists album cards
+  PASS: 2b. Back to Profile: main photo IDENTICAL
+  PASS: 3. Gallery has album links
+  PASS: 3a. Album page renders header
+  PASS: 3b. No page errors so far
+  PASS: 3c. Back to Profile (via album): main photo IDENTICAL
+  PASS: 4. Gallery exposes Profile Pictures album link
+  PASS: 4a. Profile Pictures album page loads
+  PASS: 4b. Back to Profile (via Profile Pictures): main photo IDENTICAL
+  PASS: 5. Two photos uploaded into Profile Pictures album (API)
+  PASS: 5a. Album grid shows both photos
+  PASS: 5b. Grid thumbs use gallery thumb classes only
+  PASS: 5c. Album page exposes upload input
+  PASS: 5d. Multi-upload adds both photos to grid
+  PASS: 6. Lightbox opens on photo click
+  PASS: 6a. Lightbox next navigates
+  PASS: 6b. Lightbox closes (Escape)
+  PASS: 7. Final Back to Profile: main photo IDENTICAL
+  PASS: 7a. Background layer still present
+  PASS: 8. Logout redirects to login page with form
+  PASS: 9. Zero page errors across all flows
+
+=== RESULTS: 27 PASS, 0 FAIL ===

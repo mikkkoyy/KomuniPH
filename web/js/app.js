@@ -6,7 +6,10 @@
 import { isAuthenticated, clearTokens, initAuth } from './api.js';
 import { renderLoginPage, renderRegisterPage, renderVerifyEmailPage, renderForgotPasswordPage, renderResetPasswordPage, renderResetPasswordSuccessPage, initLoginForm, initRegisterForm, initForgotPasswordForm, initResetPasswordForm } from './auth.js';
 import { renderHomePage, initHomePage, renderPlaceholderPage, initPlaceholderPage } from './feed.js';
-import { renderProfilePage, initProfilePage, renderGalleryPage, initGalleryPage, renderAlbumPage, initAlbumPage } from './profile.js';
+import { renderProfilePage, initProfilePage } from './profile.js';
+// PHASE-3 GALLERY-SPLIT-01: gallery/album pages live in their own modules
+import { renderGalleryPage, initGalleryPage } from './gallery.js';
+import { renderAlbumPage, initAlbumPage } from './albums.js';
 import { renderMessagesPage, initMessagesPage, destroyMessagesPage } from './messages.js';
 
 const app = document.getElementById('app');

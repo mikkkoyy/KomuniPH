@@ -1,0 +1,118 @@
+photo upload status: 201
+registered as repro031257 token? true
+
+=== STATE A: Home -> Profile ===
+{
+  "hash": "#/profile",
+  "dataView": "own",
+  "large": {
+    "tag": "IMG",
+    "className": "profile-photo-large",
+    "id": "profile-photo-large",
+    "inlineStyle": "display:none",
+    "width": "290px",
+    "height": "400px",
+    "borderRadius": "28px",
+    "objectFit": "cover",
+    "objectPosition": "50% 50%",
+    "display": "none",
+    "border": "1px solid rgb(240, 223, 200)",
+    "src": ""
+  },
+  "initials": {
+    "tag": "DIV",
+    "className": "profile-photo-large",
+    "id": "profile-photo-initials",
+    "inlineStyle": "display: block; background: var(--theme-accent, var(--kp-teal)); color: white;",
+    "width": "290px",
+    "height": "400px",
+    "borderRadius": "28px",
+    "objectFit": "cover",
+    "objectPosition": "50% 50%",
+    "display": "block",
+    "border": "1px solid rgb(240, 223, 200)",
+    "src": ""
+  },
+  "publicDisplay": null
+}
+
+=== STATE B: Gallery ===
+{
+  "hash": "#/profile/repro031257/photos",
+  "albumLinks": [
+    "#/profile/repro031257/photos/20170a438a30a5f959446758cea5880e"
+  ]
+}
+
+Profile Pictures album hash: #/profile/repro031257/photos/20170a438a30a5f959446758cea5880e
+
+=== STATE C: Profile Pictures album ===
+{
+  "hash": "#/profile/repro031257/photos/20170a438a30a5f959446758cea5880e",
+  "title": "Profile Pictures",
+  "meta": "0 photos ┬╖ @repro031257",
+  "photos": 0
+}
+
+=== STATE D: Back to Profile ===
+{
+  "hash": "#/profile/repro031257",
+  "dataView": "own",
+  "large": {
+    "tag": "IMG",
+    "className": "profile-photo-large",
+    "id": "profile-photo-large",
+    "inlineStyle": "display:none",
+    "width": "290px",
+    "height": "400px",
+    "borderRadius": "28px",
+    "objectFit": "cover",
+    "objectPosition": "50% 50%",
+    "display": "none",
+    "border": "1px solid rgb(240, 223, 200)",
+    "src": ""
+  },
+  "initials": {
+    "tag": "DIV",
+    "className": "profile-photo-large",
+    "id": "profile-photo-initials",
+    "inlineStyle": "display: block; background: var(--theme-accent, var(--kp-teal)); color: white;",
+    "width": "290px",
+    "height": "400px",
+    "borderRadius": "28px",
+    "objectFit": "cover",
+    "objectPosition": "50% 50%",
+    "display": "block",
+    "border": "1px solid rgb(240, 223, 200)",
+    "src": ""
+  },
+  "publicDisplay": null
+}
+
+=== STATE E: History Back (album -> profile) ===
+{
+  "hash": "#/profile/repro031257/photos/20170a438a30a5f959446758cea5880e",
+  "dataView": "own",
+  "large": null,
+  "initials": null,
+  "publicDisplay": null
+}
+
+=== DIFF A(home) vs D(back) ===
+  IDENTICAL OK
+
+=== DIFF A(home) vs E(history-back) ===
+MISSING ELEMENT {
+  tag: 'IMG',
+  className: 'profile-photo-large',
+  id: 'profile-photo-large',
+  inlineStyle: 'display:none',
+  width: '290px',
+  height: '400px',
+  borderRadius: '28px',
+  objectFit: 'cover',
+  objectPosition: '50% 50%',
+  display: 'none',
+  border: '1px solid rgb(240, 223, 200)',
+  src: ''
+} null

@@ -2,7 +2,7 @@
  * KomuniPH Lite - Profile UI
  */
 
-import { profileApi, testimonialsApi, authApi, isAuthenticated, getCurrentUserProfile, setCurrentUserProfile } from './api.js';
+import { profileApi, testimonialsApi, galleryApi, authApi, isAuthenticated, getCurrentUserProfile, setCurrentUserProfile } from './api.js';
 import { navigate } from './app.js';
 
 let currentProfile = null;
@@ -246,10 +246,18 @@ export function renderProfilePage(viewUsername = null) {
               Photo Gallery
             </div>
             <div class="sidebar-module-body" id="photo-gallery-body">
+              ${isPublicView ? '' : `
+                <div class="photo-gallery-upload" id="photo-gallery-upload">
+                  <input type="file" id="gallery-photo-input" accept="image/jpeg,image/png,image/webp" style="display:none">
+                  <button class="btn btn-primary btn-sm" onclick="document.getElementById('gallery-photo-input').click()">Upload Photo</button>
+                  <div id="gallery-upload-status" class="upload-status"></div>
+                </div>
+              `}
               <div class="photo-gallery" id="photo-gallery">
                 <div class="photo-gallery-empty" id="photo-gallery-empty">
                   No photos yet.
                 </div>
+                <div class="photo-gallery-grid" id="photo-gallery-grid" style="display:none"></div>
               </div>
             </div>
           </div>
@@ -571,6 +579,7 @@ window.loadProfile = async function() {
 
     renderProfileView(profile);
     await loadAndRenderTestimonials(profile.username, false);
+    await loadAndRenderGallery(profile.username, true);
 
   } catch (err) {
     console.error('[PROFILE] Load profile error:', err);
@@ -614,6 +623,8 @@ window.loadPublicProfile = async function(username) {
       }
       await loadAndRenderTestimonials(profile.username, false);
     }
+
+    await loadAndRenderGallery(profile.username, false);
 
   } catch (err) {
     console.error('[PROFILE] Load public profile error:', err);
@@ -1727,3 +1738,256 @@ window.uploadPhoto = async function() {
     photoInput.value = '';
   }
 };
+
+/**
+ * Load and render photo gallery
+ */
+async function loadAndRenderGallery(username, isOwnProfile) {
+  try {
+    let response;
+    if (isOwnProfile) {
+      response = await galleryApi.getOwnPhotos();
+    } else {
+      response = await galleryApi.getPhotos(username);
+    }
+    renderGallery(response.photos || [], isOwnProfile);
+    initGalleryUpload();
+  } catch (err) {
+    console.error('[GALLERY] Failed to load gallery:', err);
+    renderGallery([], isOwnProfile);
+  }
+}
+
+/**
+ * Render photo gallery grid
+ */
+function renderGallery(photos, isOwnProfile) {
+  const gridEl = document.getElementById('photo-gallery-grid');
+  const emptyEl = document.getElementById('photo-gallery-empty');
+  const uploadEl = document.getElementById('photo-gallery-upload');
+
+  if (!gridEl || !emptyEl) return;
+
+  if (!photos || photos.length === 0) {
+    gridEl.style.display = 'none';
+    emptyEl.style.display = 'block';
+    if (uploadEl) uploadEl.style.display = isOwnProfile ? 'block' : 'none';
+    return;
+  }
+
+  emptyEl.style.display = 'none';
+  gridEl.style.display = 'grid';
+  if (uploadEl) uploadEl.style.display = isOwnProfile ? 'block' : 'none';
+
+  gridEl.innerHTML = photos.map(photo => `
+    <div class="photo-gallery-item" data-photo-id="${escapeHtmlAttr(photo.id)}">
+      <img src="${escapeHtmlAttr(photo.thumbnail_url)}" alt="${escapeHtmlAttr(photo.caption || 'Gallery photo')}" class="photo-gallery-thumb" loading="lazy">
+      ${isOwnProfile ? `
+        <button class="photo-gallery-delete" onclick="window.deleteGalleryPhoto('${escapeHtmlAttr(photo.id)}')" title="Delete photo">&times;</button>
+      ` : ''}
+      ${photo.caption ? `<div class="photo-gallery-caption">${escapeHtml(photo.caption)}</div>` : ''}
+    </div>
+  `).join('');
+
+  // Add click handlers for lightbox
+  gridEl.querySelectorAll('.photo-gallery-item').forEach((item, index) => {
+    item.addEventListener('click', (e) => {
+      if (e.target.classList.contains('photo-gallery-delete')) return;
+      openLightbox(photos, index);
+    });
+  });
+}
+
+/**
+ * Initialize gallery upload handler
+ */
+function initGalleryUpload() {
+  const input = document.getElementById('gallery-photo-input');
+  if (!input) return;
+
+  // Remove existing listener if any
+  input.replaceWith(input.cloneNode(true));
+  const newInput = document.getElementById('gallery-photo-input');
+
+  newInput.addEventListener('change', async function() {
+    const file = this.files[0];
+    if (!file) return;
+
+    const status = document.getElementById('gallery-upload-status');
+    const uploadBtn = document.querySelector('#photo-gallery-upload .btn');
+
+    if (!file.type.startsWith('image/')) {
+      status.textContent = 'Invalid file type. Allowed: JPEG, PNG, WebP';
+      status.className = 'upload-status error';
+      this.value = '';
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      status.textContent = 'File too large. Maximum size: 5MB';
+      status.className = 'upload-status error';
+      this.value = '';
+      return;
+    }
+
+    if (uploadBtn) {
+      uploadBtn.disabled = true;
+      uploadBtn.textContent = 'Uploading...';
+    }
+    status.textContent = 'Uploading...';
+    status.className = 'upload-status';
+
+    try {
+      const result = await galleryApi.uploadPhoto(file);
+      status.textContent = 'Photo uploaded!';
+      status.className = 'upload-status success';
+
+      // Reload gallery
+      if (currentProfile) {
+        await loadAndRenderGallery(currentProfile.username, true);
+      }
+    } catch (err) {
+      status.textContent = err.message || 'Upload failed';
+      status.className = 'upload-status error';
+    } finally {
+      if (uploadBtn) {
+        uploadBtn.disabled = false;
+        uploadBtn.textContent = 'Upload Photo';
+      }
+      this.value = '';
+    }
+  });
+}
+
+/**
+ * Lightbox state
+ */
+let lightboxPhotos = [];
+let lightboxIndex = 0;
+
+/**
+ * Open lightbox with photos array and starting index
+ */
+function openLightbox(photos, index) {
+  lightboxPhotos = photos;
+  lightboxIndex = index;
+
+  // Create lightbox if not exists
+  let lightbox = document.getElementById('gallery-lightbox');
+  if (!lightbox) {
+    lightbox = document.createElement('div');
+    lightbox.id = 'gallery-lightbox';
+    lightbox.className = 'gallery-lightbox';
+    lightbox.innerHTML = `
+      <div class="gallery-lightbox-overlay" onclick="closeLightbox()"></div>
+      <div class="gallery-lightbox-content">
+        <button class="gallery-lightbox-close" onclick="closeLightbox()" aria-label="Close">&times;</button>
+        <button class="gallery-lightbox-nav gallery-lightbox-prev" onclick="lightboxPrev()" aria-label="Previous">&#8249;</button>
+        <button class="gallery-lightbox-nav gallery-lightbox-next" onclick="lightboxNext()" aria-label="Next">&#8250;</button>
+        <img id="gallery-lightbox-image" src="" alt="">
+        <div class="gallery-lightbox-caption" id="gallery-lightbox-caption"></div>
+      </div>
+    `;
+    document.body.appendChild(lightbox);
+  }
+
+  updateLightboxImage();
+  lightbox.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+
+  // Add keyboard handlers
+  document.addEventListener('keydown', handleLightboxKeydown);
+}
+
+/**
+ * Close lightbox
+ */
+function closeLightbox() {
+  const lightbox = document.getElementById('gallery-lightbox');
+  if (lightbox) {
+    lightbox.style.display = 'none';
+  }
+  document.body.style.overflow = '';
+  document.removeEventListener('keydown', handleLightboxKeydown);
+}
+
+/**
+ * Handle keyboard navigation in lightbox
+ */
+function handleLightboxKeydown(e) {
+  if (e.key === 'Escape') {
+    closeLightbox();
+  } else if (e.key === 'ArrowLeft') {
+    lightboxPrev();
+  } else if (e.key === 'ArrowRight') {
+    lightboxNext();
+  }
+}
+
+/**
+ * Show previous image in lightbox
+ */
+function lightboxPrev() {
+  if (lightboxPhotos.length === 0) return;
+  lightboxIndex = (lightboxIndex - 1 + lightboxPhotos.length) % lightboxPhotos.length;
+  updateLightboxImage();
+}
+
+/**
+ * Show next image in lightbox
+ */
+function lightboxNext() {
+  if (lightboxPhotos.length === 0) return;
+  lightboxIndex = (lightboxIndex + 1) % lightboxPhotos.length;
+  updateLightboxImage();
+}
+
+/**
+ * Update lightbox image and caption
+ */
+function updateLightboxImage() {
+  if (lightboxPhotos.length === 0) return;
+  const photo = lightboxPhotos[lightboxIndex];
+  const img = document.getElementById('gallery-lightbox-image');
+  const caption = document.getElementById('gallery-lightbox-caption');
+  const prevBtn = document.querySelector('.gallery-lightbox-prev');
+  const nextBtn = document.querySelector('.gallery-lightbox-next');
+
+  if (img) {
+    img.src = photo.image_url;
+    img.alt = photo.caption || 'Gallery photo';
+  }
+  if (caption) {
+    caption.textContent = photo.caption || '';
+    caption.style.display = photo.caption ? 'block' : 'none';
+  }
+  // Hide nav buttons if only one photo
+  if (prevBtn && nextBtn) {
+    const showNav = lightboxPhotos.length > 1;
+    prevBtn.style.display = showNav ? 'flex' : 'none';
+    nextBtn.style.display = showNav ? 'flex' : 'none';
+  }
+}
+
+/**
+ * Delete gallery photo (owner only)
+ */
+window.deleteGalleryPhoto = async function(photoId) {
+  if (!confirm('Delete this photo?')) return;
+
+  try {
+    await galleryApi.deletePhoto(photoId);
+    // Reload gallery
+    if (currentProfile) {
+      await loadAndRenderGallery(currentProfile.username, true);
+    }
+  } catch (err) {
+    console.error('[GALLERY] Delete error:', err);
+    alert(err.message || 'Failed to delete photo');
+  }
+};
+
+// Expose lightbox functions globally
+window.closeLightbox = closeLightbox;
+window.lightboxPrev = lightboxPrev;
+window.lightboxNext = lightboxNext;

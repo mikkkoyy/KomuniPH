@@ -14,6 +14,7 @@ import { requireAuth } from './auth.js';
 import { handleRegister, handleLogin, handleVerify, handleVerifyEmailLink, handleForgotPassword, handleResetPassword } from './auth.js';
 import { handleGetProfile, handleGetPublicProfile, handleUpdateProfile, handleUploadPhoto, handleUpdateTheme, handleUploadBackground } from './profile.js';
 import { handleGetTestimonials, handleCreateTestimonial, handleDeleteTestimonial, handleGetUserTestimonials } from './testimonials.js';
+import { handleGetPhotos, handleUploadPhoto as handleGalleryUploadPhoto, handleDeletePhoto, handleGetOwnPhotos } from './gallery.js';
 import { getAllLocations, getCountries, getCities, getBarangays } from './locations.js';
 import {
   handleGetFeed,
@@ -173,7 +174,7 @@ async function handleApi(req, res) {
      return handleUploadBackground(req, res, user);
    }
 
-   // Testimonials routes
+// Testimonials routes
    const testimonialsMatch = matchRoute('/api/profiles/:username/testimonials', path);
    if (method === 'GET' && testimonialsMatch) {
      return handleGetTestimonials(req, res, testimonialsMatch);
@@ -192,7 +193,33 @@ async function handleApi(req, res) {
      return handleDeleteTestimonial(req, res, user, testimonialMatch);
    }
 
-  // Public profile by username
+   // Photo Gallery routes
+   const photosMatch = matchRoute('/api/profiles/:username/photos', path);
+   if (method === 'GET' && photosMatch) {
+     return handleGetPhotos(req, res, photosMatch);
+   }
+
+   if (method === 'POST' && path === '/api/profile/photos') {
+     const user = requireAuth(req, res);
+     if (!user) return;
+     return handleGalleryUploadPhoto(req, res, user);
+   }
+
+   const ownPhotosMatch = matchRoute('/api/profile/photos', path);
+   if (method === 'GET' && ownPhotosMatch) {
+     const user = requireAuth(req, res);
+     if (!user) return;
+     return handleGetOwnPhotos(req, res, user);
+   }
+
+   const photoMatch = matchRoute('/api/profile/photos/:id', path);
+   if (method === 'DELETE' && photoMatch) {
+     const user = requireAuth(req, res);
+     if (!user) return;
+     return handleDeletePhoto(req, res, user, photoMatch);
+   }
+
+   // Public profile by username
   const publicProfileMatch = matchRoute('/api/profile/:username', path);
   if (method === 'GET' && publicProfileMatch) {
     return handleGetPublicProfile(req, res, publicProfileMatch);

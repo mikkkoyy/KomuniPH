@@ -404,3 +404,51 @@ export const testimonialsApi = {
     });
   },
 };
+
+/**
+ * Photo Gallery API
+ */
+export const galleryApi = {
+  async getPhotos(username, limit = 50, offset = 0) {
+    return apiRequest(`/profiles/${username}/photos?limit=${limit}&offset=${offset}`);
+  },
+
+  async getOwnPhotos(limit = 50, offset = 0) {
+    return apiRequest(`/profile/photos?limit=${limit}&offset=${offset}`);
+  },
+
+  async uploadPhoto(file) {
+    const formData = new FormData();
+    formData.append('photo', file);
+
+    const headers = {};
+    if (accessToken) {
+      headers['Authorization'] = `Bearer ${accessToken}`;
+    }
+
+    const response = await fetch(`${API_BASE}/profile/photos`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    const contentType = response.headers.get('content-type') || '';
+    const hasJsonBody = contentType.includes('application/json');
+    const parsedBody = hasJsonBody ? await response.json().catch(() => null) : null;
+
+    if (!response.ok) {
+      const error = new Error(parsedBody?.error?.message || `Upload failed with status ${response.status}`);
+      error.status = response.status;
+      error.body = parsedBody;
+      throw error;
+    }
+
+    return parsedBody;
+  },
+
+  async deletePhoto(photoId) {
+    return apiRequest(`/profile/photos/${photoId}`, {
+      method: 'DELETE',
+    });
+  },
+};

@@ -161,6 +161,21 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_testimonials_status ON testimonials(status);
     CREATE INDEX IF NOT EXISTS idx_testimonials_created_at ON testimonials(created_at DESC);
 
+    -- PHOTO-GALLERY-01: Profile photo gallery
+    CREATE TABLE IF NOT EXISTS profile_photos (
+      id TEXT PRIMARY KEY,
+      profile_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      file_path TEXT NOT NULL,
+      caption TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      status TEXT NOT NULL DEFAULT 'active'
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_profile_photos_profile_user_id ON profile_photos(profile_user_id);
+    CREATE INDEX IF NOT EXISTS idx_profile_photos_status ON profile_photos(status);
+    CREATE INDEX IF NOT EXISTS idx_profile_photos_created_at ON profile_photos(created_at DESC);
+
     -- MESSAGE-01: Messaging tables
     CREATE TABLE IF NOT EXISTS conversations (
       id TEXT PRIMARY KEY,

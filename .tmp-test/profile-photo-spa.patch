@@ -1,0 +1,32 @@
+diff --git a/web/js/profile.js b/web/js/profile.js
+index a2531ff..c62774d 100644
+--- a/web/js/profile.js
++++ b/web/js/profile.js
+@@ -72,7 +72,13 @@ function createAvatar(username, displayName, photoUrl, size = 5) {
+  * Render the profile page
+  */
+ export function renderProfilePage(viewUsername = null) {
+-  const isPublicView = !!viewUsername;
++  // PROFILE-PHOTO-SPA-01: the signed-in owner's own profile must ALWAYS render
++  // in own mode, even when the URL is #/profile/:username (the "Profile" link
++  // on the gallery / album pages). Only other users' profiles get the public
++  // view with the small circular avatar. This keeps the header photo identical
++  // no matter which path led here (Home -> Profile, Gallery -> Back,
++  // Album -> Back, refresh, Back/Forward).
++  const isPublicView = !!viewUsername && !isOwnUsername(viewUsername);
+   if (!isPublicView && !isAuthenticated()) {
+     navigate('/login');
+     return '';
+@@ -1676,7 +1682,11 @@ export function initProfilePage() {
+   // GALLERY-ROUTES-01: only a bare /profile/:username is a profile page.
+   // `(.+)` would also match /profile/:user/photos[/:albumId].
+   const publicMatch = hash.match(/^\/profile\/([^/]+)$/);
+-  if (publicMatch) {
++  // PROFILE-PHOTO-SPA-01: when the username in the URL belongs to the signed-in
++  // user, load through the authenticated endpoint so the page mounts the own
++  // view (camera button, rectangular profile-photo-large) — identical to
++  // #/profile. Genuine public views are unchanged.
++  if (publicMatch && !isOwnUsername(safeDecode(publicMatch[1]))) {
+     window.loadPublicProfile(safeDecode(publicMatch[1]));
+   } else {
+     window.loadProfile();

@@ -1597,6 +1597,61 @@ a:hover {
   font-size: 0.75rem;
 }
 
+/* Gallery upload queue */
+.gallery-upload-queue {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--theme-card-border-color, var(--kp-border));
+}
+
+.gallery-upload-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem;
+  background: var(--theme-card-background, rgba(255, 247, 236, 0.95));
+  border: 1px solid var(--theme-card-border-color, var(--kp-border));
+  border-radius: var(--theme-control-radius, 0.875rem);
+  margin-bottom: 0.375rem;
+  font-size: 0.75rem;
+}
+
+.gallery-upload-filename {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--theme-text, var(--kp-ink));
+}
+
+.gallery-upload-status {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  padding: 0.125rem 0.5rem;
+  border-radius: 9999px;
+  white-space: nowrap;
+}
+
+.gallery-upload-status.pending {
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+  background: rgba(107, 96, 114, 0.1);
+}
+
+.gallery-upload-status.uploading {
+  color: var(--theme-accent, var(--kp-teal));
+  background: rgba(14, 110, 110, 0.1);
+}
+
+.gallery-upload-status.success {
+  color: #2e7d32;
+  background: #e8f5e9;
+}
+
+.gallery-upload-status.error {
+  color: #c23b3b;
+  background: #fbeaea;
+}
+
 .photo-gallery-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

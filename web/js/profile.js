@@ -248,8 +248,9 @@ export function renderProfilePage(viewUsername = null) {
             <div class="sidebar-module-body" id="photo-gallery-body">
               ${isPublicView ? '' : `
                 <div class="photo-gallery-upload" id="photo-gallery-upload">
-                  <input type="file" id="gallery-photo-input" accept="image/jpeg,image/png,image/webp" style="display:none">
-                  <button class="btn btn-primary btn-sm" onclick="document.getElementById('gallery-photo-input').click()">Upload Photo</button>
+                  <input type="file" id="gallery-photo-input" accept="image/jpeg,image/png,image/webp" multiple style="display:none">
+                  <button class="btn btn-primary btn-sm" onclick="document.getElementById('gallery-photo-input').click()">Upload Photos</button>
+                  <div id="gallery-upload-queue" class="gallery-upload-queue" style="display:none"></div>
                   <div id="gallery-upload-status" class="upload-status"></div>
                 </div>
               `}
@@ -599,27 +600,39 @@ window.loadPublicProfile = async function(username) {
     renderProfileView(profile);
 
     const formContainer = document.getElementById('testimonial-form-container');
+    const testimonialForm = document.getElementById('testimonial-form');
     const targetName = document.getElementById('testimonial-target-name');
 
     if (isAuthenticated()) {
+      // Authenticated visitor on another user's profile - show the form
       if (formContainer) {
         formContainer.style.display = 'block';
       }
+      if (testimonialForm) {
+        testimonialForm.style.display = 'block';
+      }
+      // Remove any existing login prompt
+      const existingPrompt = formContainer?.querySelector('.testimonial-login-prompt');
+      if (existingPrompt) existingPrompt.remove();
       if (targetName) {
-        targetName.textContent = getProfileDisplayName(profile) || profile.username;
+        targetName.textContent = `@${profile.username}`;
       }
       await loadAndRenderTestimonials(profile.username, true);
       initTestimonialForm();
     } else {
+      // Unauthenticated visitor - show login prompt, hide the form
       if (formContainer) {
-        const loginPrompt = formContainer.querySelector('.testimonial-login-prompt');
-        if (!loginPrompt) {
-          const prompt = document.createElement('div');
-          prompt.className = 'testimonial-login-prompt';
-          prompt.innerHTML = '<p style="color: var(--theme-text-secondary, #6b6072); font-size: 0.875rem;">Log in to leave a testimonial.</p>';
-          formContainer.appendChild(prompt);
-        }
         formContainer.style.display = 'block';
+      }
+      if (testimonialForm) {
+        testimonialForm.style.display = 'none';
+      }
+      const loginPrompt = formContainer?.querySelector('.testimonial-login-prompt');
+      if (!loginPrompt) {
+        const prompt = document.createElement('div');
+        prompt.className = 'testimonial-login-prompt';
+        prompt.innerHTML = '<p style="color: var(--theme-text-secondary, #6b6072); font-size: 0.875rem; text-align: center; padding: 1rem;">Want to leave a testimonial?<br><a href="#/login" style="color: var(--theme-accent, var(--kp-teal)); font-weight: 600;">Log in</a> to write one.</p>';
+        formContainer.appendChild(prompt);
       }
       await loadAndRenderTestimonials(profile.username, false);
     }
@@ -1810,52 +1823,110 @@ function initGalleryUpload() {
   const newInput = document.getElementById('gallery-photo-input');
 
   newInput.addEventListener('change', async function() {
-    const file = this.files[0];
-    if (!file) return;
+    const files = Array.from(this.files);
+    if (files.length === 0) return;
 
+    const queueEl = document.getElementById('gallery-upload-queue');
     const status = document.getElementById('gallery-upload-status');
     const uploadBtn = document.querySelector('#photo-gallery-upload .btn');
 
-    if (!file.type.startsWith('image/')) {
-      status.textContent = 'Invalid file type. Allowed: JPEG, PNG, WebP';
-      status.className = 'upload-status error';
-      this.value = '';
-      return;
+    // Validate all files first
+    const validFiles = [];
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) {
+        status.textContent = `Invalid file type: ${file.name}. Allowed: JPEG, PNG, WebP`;
+        status.className = 'upload-status error';
+        this.value = '';
+        return;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        status.textContent = `File too large: ${file.name}. Maximum size: 5MB`;
+        status.className = 'upload-status error';
+        this.value = '';
+        return;
+      }
+      validFiles.push(file);
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      status.textContent = 'File too large. Maximum size: 5MB';
-      status.className = 'upload-status error';
-      this.value = '';
-      return;
+    // Show upload queue
+    if (queueEl) {
+      queueEl.style.display = 'block';
+      queueEl.innerHTML = validFiles.map((file, index) => `
+        <div class="gallery-upload-item" data-index="${index}">
+          <span class="gallery-upload-filename">${escapeHtml(file.name)}</span>
+          <span class="gallery-upload-status">Pending</span>
+        </div>
+      `).join('');
     }
 
     if (uploadBtn) {
       uploadBtn.disabled = true;
-      uploadBtn.textContent = 'Uploading...';
+      uploadBtn.textContent = `Uploading ${validFiles.length} photos...`;
     }
-    status.textContent = 'Uploading...';
+    status.textContent = `Uploading ${validFiles.length} photos...`;
     status.className = 'upload-status';
 
-    try {
-      const result = await galleryApi.uploadPhoto(file);
-      status.textContent = 'Photo uploaded!';
-      status.className = 'upload-status success';
+    // Upload each file sequentially
+    let successCount = 0;
+    let failCount = 0;
 
-      // Reload gallery
-      if (currentProfile) {
-        await loadAndRenderGallery(currentProfile.username, true);
+    for (let i = 0; i < validFiles.length; i++) {
+      const file = validFiles[i];
+      const itemEl = queueEl?.querySelector(`.gallery-upload-item[data-index="${i}"]`);
+      const statusEl = itemEl?.querySelector('.gallery-upload-status');
+
+      if (statusEl) {
+        statusEl.textContent = 'Uploading...';
+        statusEl.className = 'gallery-upload-status uploading';
       }
-    } catch (err) {
-      status.textContent = err.message || 'Upload failed';
-      status.className = 'upload-status error';
-    } finally {
-      if (uploadBtn) {
-        uploadBtn.disabled = false;
-        uploadBtn.textContent = 'Upload Photo';
+
+      try {
+        await galleryApi.uploadPhoto(file);
+        successCount++;
+        if (statusEl) {
+          statusEl.textContent = '✓ Done';
+          statusEl.className = 'gallery-upload-status success';
+        }
+      } catch (err) {
+        failCount++;
+        if (statusEl) {
+          statusEl.textContent = `✗ ${err.message || 'Failed'}`;
+          statusEl.className = 'gallery-upload-status error';
+        }
       }
-      this.value = '';
+
+      // Update overall status
+      status.textContent = `Uploaded ${successCount} of ${validFiles.length}...`;
     }
+
+    // Final status
+    if (failCount === 0) {
+      status.textContent = `All ${successCount} photos uploaded successfully!`;
+      status.className = 'upload-status success';
+    } else {
+      status.textContent = `${successCount} uploaded, ${failCount} failed.`;
+      status.className = 'upload-status error';
+    }
+
+    // Reload gallery
+    if (currentProfile) {
+      await loadAndRenderGallery(currentProfile.username, true);
+    }
+
+    if (uploadBtn) {
+      uploadBtn.disabled = false;
+      uploadBtn.textContent = 'Upload Photos';
+    }
+
+    // Clear queue after a delay
+    setTimeout(() => {
+      if (queueEl) {
+        queueEl.style.display = 'none';
+        queueEl.innerHTML = '';
+      }
+    }, 3000);
+
+    this.value = '';
   });
 }
 

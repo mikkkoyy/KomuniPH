@@ -7,6 +7,7 @@ import Database from 'better-sqlite3';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 import config from './config.js';
+import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -162,9 +163,24 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_testimonials_created_at ON testimonials(created_at DESC);
 
     -- PHOTO-GALLERY-01: Profile photo gallery
+    CREATE TABLE IF NOT EXISTS photo_albums (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      description TEXT,
+      type TEXT NOT NULL DEFAULT 'general',
+      cover_photo_id TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_photo_albums_user_id ON photo_albums(user_id);
+    CREATE INDEX IF NOT EXISTS idx_photo_albums_type ON photo_albums(type);
+
     CREATE TABLE IF NOT EXISTS profile_photos (
       id TEXT PRIMARY KEY,
       profile_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      album_id TEXT REFERENCES photo_albums(id) ON DELETE SET NULL,
       file_path TEXT NOT NULL,
       caption TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -173,6 +189,7 @@ export function initDatabase() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_profile_photos_profile_user_id ON profile_photos(profile_user_id);
+    CREATE INDEX IF NOT EXISTS idx_profile_photos_album_id ON profile_photos(album_id);
     CREATE INDEX IF NOT EXISTS idx_profile_photos_status ON profile_photos(status);
     CREATE INDEX IF NOT EXISTS idx_profile_photos_created_at ON profile_photos(created_at DESC);
 
@@ -280,6 +297,80 @@ export function initDatabase() {
     database.exec('ALTER TABLE profiles ADD COLUMN barangay TEXT');
   } catch (err) {
     // Column already exists — safe no-op.
+  }
+
+  // PHOTO-ALBUM-01: Add album_id column to existing profile_photos tables.
+  try {
+    database.exec('ALTER TABLE profile_photos ADD COLUMN album_id TEXT REFERENCES photo_albums(id) ON DELETE SET NULL');
+  } catch (err) {
+    // Column already exists — safe no-op.
+  }
+
+  // PHOTO-ALBUM-01: Create index for album_id if not exists
+  try {
+    database.exec('CREATE INDEX IF NOT EXISTS idx_profile_photos_album_id ON profile_photos(album_id)');
+  } catch (err) {
+    // Index already exists — safe no-op.
+  }
+
+  // PHOTO-ALBUM-01: Create Profile Pictures album for existing users who don't have one
+  try {
+    const usersWithoutAlbum = database.prepare(`
+      SELECT u.id FROM users u
+      WHERE NOT EXISTS (
+        SELECT 1 FROM photo_albums pa WHERE pa.user_id = u.id AND pa.type = 'profile'
+      )
+    `).all();
+    
+    for (const user of usersWithoutAlbum) {
+      const albumId = crypto.randomBytes(16).toString('hex');
+      const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+      database.prepare(`
+        INSERT INTO photo_albums (id, user_id, name, description, type, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(albumId, user.id, 'Profile Pictures', 'Your profile picture history', 'profile', timestamp, timestamp);
+    }
+    if (usersWithoutAlbum.length > 0) {
+      console.log(`[PHOTO-ALBUM-01] Created Profile Pictures album for ${usersWithoutAlbum.length} user(s)`);
+    }
+  } catch (err) {
+    console.log('[PHOTO-ALBUM-01] Profile Pictures album creation skipped:', err.message);
+  }
+
+  // PHOTO-ALBUM-01: Migrate existing photos without album to a default "My Photos" album
+  try {
+    const usersWithOrphanPhotos = database.prepare(`
+      SELECT DISTINCT pp.profile_user_id FROM profile_photos pp
+      LEFT JOIN photo_albums pa ON pp.album_id = pa.id
+      WHERE pp.album_id IS NULL
+    `).all();
+    
+    for (const user of usersWithOrphanPhotos) {
+      // Create a default "My Photos" album for this user if they don't have a general album
+      let defaultAlbum = database.prepare(`
+        SELECT id FROM photo_albums WHERE user_id = ? AND type = 'general' LIMIT 1
+      `).get(user.profile_user_id);
+      
+      if (!defaultAlbum) {
+        const albumId = crypto.randomBytes(16).toString('hex');
+        const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+        database.prepare(`
+          INSERT INTO photo_albums (id, user_id, name, description, type, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(albumId, user.profile_user_id, 'My Photos', 'Your uploaded photos', 'general', timestamp, timestamp);
+        defaultAlbum = { id: albumId };
+      }
+      
+      // Assign orphan photos to the default album
+      database.prepare(`
+        UPDATE profile_photos SET album_id = ? WHERE profile_user_id = ? AND album_id IS NULL
+      `).run(defaultAlbum.id, user.profile_user_id);
+    }
+    if (usersWithOrphanPhotos.length > 0) {
+      console.log(`[PHOTO-ALBUM-01] Migrated orphan photos to default albums for ${usersWithOrphanPhotos.length} user(s)`);
+    }
+  } catch (err) {
+    console.log('[PHOTO-ALBUM-01] Orphan photo migration skipped:', err.message);
   }
 
   // PROFILE-04: Backfill existing profiles with identity fields from existing data.

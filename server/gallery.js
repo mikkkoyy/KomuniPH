@@ -109,7 +109,8 @@ export function handleGetPhotos(req, res, params) {
 
 /**
  * Handle POST /api/profile/photos
- * Upload a photo to the authenticated user's gallery.
+ * Upload one or multiple photos to the authenticated user's gallery.
+ * Supports optional album_id field to assign photos to a specific album.
  */
 export function handleUploadPhoto(req, res, user) {
   const contentType = req.headers['content-type'] || '';
@@ -120,12 +121,13 @@ export function handleUploadPhoto(req, res, user) {
   const busboy = Busboy({
     headers: req.headers,
     limits: {
-      files: 1,
+      files: 20, // Allow multiple files
       fileSize: MAX_FILE_SIZE,
     },
   });
 
   let responseSent = false;
+  let albumId = null;
 
   const sendError = (status, message) => {
     if (!responseSent) {
@@ -141,7 +143,7 @@ export function handleUploadPhoto(req, res, user) {
     }
   };
 
-  let fileInfo = null;
+  const fileQueue = [];
 
   busboy.on('file', (fieldname, file, info) => {
     console.log('[GALLERY] Busboy received file:', {
@@ -189,7 +191,7 @@ export function handleUploadPhoto(req, res, user) {
         bufferBytes: data.length,
         bufferEmpty: data.length === 0,
       });
-      fileInfo = {
+      fileQueue.push({
         filename,
         mimeType,
         uniqueFilename,
@@ -197,7 +199,7 @@ export function handleUploadPhoto(req, res, user) {
         thumbnailPath,
         data,
         fileSize,
-      };
+      });
     });
 
     file.on('error', (err) => {
@@ -208,6 +210,9 @@ export function handleUploadPhoto(req, res, user) {
 
   busboy.on('field', (name, val) => {
     console.log('[GALLERY] Busboy field:', name, val);
+    if (name === 'album_id') {
+      albumId = val;
+    }
   });
 
   busboy.on('error', (err) => {
@@ -215,23 +220,23 @@ export function handleUploadPhoto(req, res, user) {
     sendError(500, 'Upload processing failed');
   });
 
-  busboy.on('finish', () => {
-    console.log('[GALLERY] Busboy finished. File info:', fileInfo ? 'present' : 'null');
+  busboy.on('finish', async () => {
+    console.log('[GALLERY] Busboy finished. Files in queue:', fileQueue.length);
 
-    if (!fileInfo && !responseSent) {
-      sendError(422, 'No file uploaded');
+    if (fileQueue.length === 0 && !responseSent) {
+      sendError(422, 'No files uploaded');
       return;
     }
 
-    if (fileInfo && !responseSent) {
-      processPhotoUpload(fileInfo, user)
-        .then((result) => {
-          sendSuccess({
-            message: 'Photo uploaded successfully',
-            photo: result,
-          });
-        })
-        .catch((err) => {
+    if (!responseSent) {
+      const results = [];
+      const errors = [];
+
+      for (const fileInfo of fileQueue) {
+        try {
+          const result = await processPhotoUpload(fileInfo, user, albumId);
+          results.push({ success: true, photo: result });
+        } catch (err) {
           const targetPath = fileInfo.filePath;
           const thumbPath = fileInfo.thumbnailPath;
           try {
@@ -246,11 +251,15 @@ export function handleUploadPhoto(req, res, user) {
           } catch (cleanupErr) {
             console.error('[GALLERY] Cleanup failed:', cleanupErr);
           }
-          const status = err.status || 422;
-          const message = err.message || 'Failed to process image. Please upload a valid JPEG, PNG, or WebP image.';
-          console.error('[GALLERY] Upload rejected (' + status + '):', message);
-          sendError(status, message);
-        });
+          errors.push({ filename: fileInfo.filename, error: err.message || 'Upload failed' });
+        }
+      }
+
+      sendSuccess({
+        message: `${results.length} photo(s) uploaded successfully${errors.length ? `, ${errors.length} failed` : ''}`,
+        photos: results.map(r => r.photo),
+        errors: errors.length > 0 ? errors : undefined,
+      });
     }
   });
 
@@ -261,7 +270,7 @@ export function handleUploadPhoto(req, res, user) {
  * Validate the buffered upload with Sharp, resize + convert to WebP,
  * generate thumbnail, write files, update SQLite.
  */
-async function processPhotoUpload(fileInfo, user) {
+async function processPhotoUpload(fileInfo, user, albumId = null) {
   const { filename, mimeType, uniqueFilename, filePath, thumbnailPath, data, fileSize } = fileInfo;
 
   if (!data || data.length === 0) {
@@ -348,12 +357,24 @@ async function processPhotoUpload(fileInfo, user) {
   const photoId = crypto.randomBytes(16).toString('hex');
   const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
+  // Validate album_id if provided
+  let validatedAlbumId = null;
+  if (albumId) {
+    const album = queryOne(
+      'SELECT id FROM photo_albums WHERE id = ? AND user_id = ?',
+      [albumId, user.sub]
+    );
+    if (album) {
+      validatedAlbumId = albumId;
+    }
+  }
+
   try {
     execute(
-      'INSERT INTO profile_photos (id, profile_user_id, file_path, caption, created_at, updated_at, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [photoId, user.sub, uniqueFilename, '', timestamp, timestamp, 'active']
+      'INSERT INTO profile_photos (id, profile_user_id, album_id, file_path, caption, created_at, updated_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [photoId, user.sub, validatedAlbumId, uniqueFilename, '', timestamp, timestamp, 'active']
     );
-    console.log('[GALLERY] Database record created for user', user.sub, '->', uniqueFilename);
+    console.log('[GALLERY] Database record created for user', user.sub, '->', uniqueFilename, validatedAlbumId ? `in album ${validatedAlbumId}` : '');
   } catch (dbErr) {
     console.error('[GALLERY] Failed to insert photo record:', dbErr.message);
     const err = new Error('Failed to save uploaded photo. Please try again.');
@@ -363,6 +384,7 @@ async function processPhotoUpload(fileInfo, user) {
 
   return {
     id: photoId,
+    album_id: validatedAlbumId,
     image_url: `/uploads/gallery/${uniqueFilename}`,
     thumbnail_url: `/uploads/gallery/thumbnails/${uniqueFilename}`,
     caption: '',

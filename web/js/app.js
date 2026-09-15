@@ -6,7 +6,7 @@
 import { isAuthenticated, clearTokens, initAuth } from './api.js';
 import { renderLoginPage, renderRegisterPage, renderVerifyEmailPage, renderForgotPasswordPage, renderResetPasswordPage, renderResetPasswordSuccessPage, initLoginForm, initRegisterForm, initForgotPasswordForm, initResetPasswordForm } from './auth.js';
 import { renderHomePage, initHomePage, renderPlaceholderPage, initPlaceholderPage } from './feed.js';
-import { renderProfilePage, initProfilePage } from './profile.js';
+import { renderProfilePage, initProfilePage, renderGalleryPage, initGalleryPage, renderAlbumPage, initAlbumPage } from './profile.js';
 import { renderMessagesPage, initMessagesPage, destroyMessagesPage } from './messages.js';
 
 const app = document.getElementById('app');
@@ -123,6 +123,18 @@ function render() {
       if (publicProfileMatch) {
         html = renderProfilePage(publicProfileMatch[1]);
         initFn = initProfilePage;
+        break;
+      }
+      const galleryMatch = route.match(/^\/profile\/([^/]+)\/photos$/);
+      if (galleryMatch) {
+        html = renderGalleryPage(galleryMatch[1]);
+        initFn = initGalleryPage;
+        break;
+      }
+      const albumMatch = route.match(/^\/profile\/([^/]+)\/photos\/([^/]+)$/);
+      if (albumMatch) {
+        html = renderAlbumPage(albumMatch[1], albumMatch[2]);
+        initFn = initAlbumPage;
         break;
       }
       navigate('/login');

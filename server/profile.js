@@ -3,7 +3,7 @@
  * Profile routes
  */
 
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, unlinkSync, writeFileSync, copyFileSync } from 'fs';
 import { resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
@@ -11,9 +11,10 @@ import Busboy from 'busboy';
 import sharp from 'sharp';
 import crypto from 'crypto';
 import config from './config.js';
-import { queryOne, execute } from './database.js';
+import { queryOne, queryAll, execute } from './database.js';
 import { jsonResponse, errorResponse, parseBody } from './utils.js';
 import { seedDefaultTheme } from './database.js';
+import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -832,6 +833,14 @@ async function processPhotoUpload(fileInfo, user) {
     }
   }
 
+  // 7. Save to Profile Pictures album
+  try {
+    await saveToProfilePicturesAlbum(user.sub, uniqueFilename, timestamp);
+  } catch (albumErr) {
+    console.error('[PROFILE] Failed to save to Profile Pictures album:', albumErr.message);
+    // Don't fail the upload if album save fails
+  }
+
   return photoUrl;
 }
 
@@ -1090,6 +1099,51 @@ async function processBackgroundUpload(fileInfo, user) {
   );
 
   return backgroundUrl;
+}
+
+/**
+ * Save profile photo to the Profile Pictures album.
+ * Creates the album if it doesn't exist.
+ * Copies the file to the gallery directory for unified access.
+ */
+async function saveToProfilePicturesAlbum(userId, fileName, timestamp) {
+  const galleryUploadDir = resolve(__dirname, '..', 'uploads/gallery');
+  
+  // Copy file to gallery directory
+  const srcPath = resolve(uploadDir, fileName);
+  const destPath = resolve(galleryUploadDir, fileName);
+  
+  try {
+    copyFileSync(srcPath, destPath);
+    console.log('[PROFILE] Copied profile photo to gallery:', fileName);
+  } catch (copyErr) {
+    console.error('[PROFILE] Failed to copy profile photo to gallery:', copyErr.message);
+    throw copyErr;
+  }
+
+  // Get or create Profile Pictures album
+  let album = queryOne(
+    'SELECT id FROM photo_albums WHERE user_id = ? AND type = ?',
+    [userId, 'profile']
+  );
+
+  if (!album) {
+    const albumId = crypto.randomBytes(16).toString('hex');
+    execute(
+      'INSERT INTO photo_albums (id, user_id, name, description, type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [albumId, userId, 'Profile Pictures', 'Your profile picture history', 'profile', timestamp, timestamp]
+    );
+    album = { id: albumId };
+  }
+
+  // Insert photo record in profile_photos with album_id
+  const photoId = crypto.randomBytes(16).toString('hex');
+  execute(
+    'INSERT INTO profile_photos (id, profile_user_id, album_id, file_path, caption, created_at, updated_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    [photoId, userId, album.id, fileName, 'Profile picture', timestamp, timestamp, 'active']
+  );
+
+  console.log('[PROFILE] Saved to Profile Pictures album:', album.id, '->', fileName);
 }
 
 /**

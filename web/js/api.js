@@ -417,9 +417,46 @@ export const galleryApi = {
     return apiRequest(`/profile/photos?limit=${limit}&offset=${offset}`);
   },
 
-  async uploadPhoto(file) {
+  async uploadPhoto(file, albumId = null) {
     const formData = new FormData();
     formData.append('photo', file);
+    if (albumId) {
+      formData.append('album_id', albumId);
+    }
+
+    const headers = {};
+    if (accessToken) {
+      headers['Authorization'] = `Bearer ${accessToken}`;
+    }
+
+    const response = await fetch(`${API_BASE}/profile/photos`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    const contentType = response.headers.get('content-type') || '';
+    const hasJsonBody = contentType.includes('application/json');
+    const parsedBody = hasJsonBody ? await response.json().catch(() => null) : null;
+
+    if (!response.ok) {
+      const error = new Error(parsedBody?.error?.message || `Upload failed with status ${response.status}`);
+      error.status = response.status;
+      error.body = parsedBody;
+      throw error;
+    }
+
+    return parsedBody;
+  },
+
+  async uploadPhotos(files, albumId = null) {
+    const formData = new FormData();
+    for (const file of files) {
+      formData.append('photo', file);
+    }
+    if (albumId) {
+      formData.append('album_id', albumId);
+    }
 
     const headers = {};
     if (accessToken) {
@@ -450,5 +487,52 @@ export const galleryApi = {
     return apiRequest(`/profile/photos/${photoId}`, {
       method: 'DELETE',
     });
+  },
+};
+
+/**
+ * Album API
+ */
+export const albumsApi = {
+  async getOwnAlbums() {
+    return apiRequest('/profile/albums');
+  },
+
+  async getAlbums(username) {
+    return apiRequest(`/profiles/${username}/albums`);
+  },
+
+  async getAlbum(username, albumId) {
+    return apiRequest(`/profiles/${username}/albums/${albumId}`);
+  },
+
+  async createAlbum(name, description = '', type = 'general') {
+    return apiRequest('/profile/albums', {
+      method: 'POST',
+      body: { name, description, type },
+    });
+  },
+
+  async updateAlbum(albumId, data) {
+    return apiRequest(`/profile/albums/${albumId}`, {
+      method: 'PATCH',
+      body: data,
+    });
+  },
+
+  async deleteAlbum(albumId) {
+    return apiRequest(`/profile/albums/${albumId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async getProfilePicturesAlbum() {
+    return apiRequest('/profile/profile-pictures-album');
+  },
+
+  async getPhotosWithAlbum(username, albumId = null, limit = 50, offset = 0) {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (albumId) params.set('album_id', albumId);
+    return apiRequest(`/profiles/${username}/photos?${params.toString()}`);
   },
 };

@@ -117,23 +117,25 @@ export function renderProfilePage(viewUsername = null) {
               Profile
               <span></span>
             </div>
-             <div class="profile-module-body">
-                <div id="profile-photo-section">${isPublicView ? '' : `
-                  <img class="profile-photo-large" id="profile-photo-large"
-                       src="" alt="Profile photo"
-                       style="display:none">
-                  <div class="profile-photo-large" id="profile-photo-initials"
-                       style="display:none; background: var(--theme-accent, var(--kp-teal)); color: white;">
-                    ?
-                  </div>
-                  <div style="clear:both"></div>
-                   <button class="profile-action-btn" id="change-photo-btn" onclick="document.getElementById('photo-input').click()">Change Profile Photo</button>
-                  <input type="file" id="photo-input" accept="image/jpeg,image/png,image/webp" style="display:none">
-                  <button class="btn btn-primary" id="upload-btn" style="display:none" onclick="window.uploadPhoto()">Upload Photo</button>
-                  <div id="upload-status" class="upload-status"></div>
-                `}${isPublicView ? `
-                  <div class="profile-photo-display" id="profile-photo-display"></div>
-                ` : ''}
+<div class="profile-module-body">
+                 <div id="profile-photo-section">${isPublicView ? '' : `
+                   <div class="profile-photo-wrapper" id="profile-photo-wrapper">
+                     <img class="profile-photo-large" id="profile-photo-large"
+                          src="" alt="Profile photo"
+                          style="display:none">
+                     <div class="profile-photo-large" id="profile-photo-initials"
+                          style="display:none; background: var(--theme-accent, var(--kp-teal)); color: white;">
+                       ?
+                     </div>
+                     <button class="profile-photo-camera-btn" id="profile-photo-camera-btn" title="Change profile picture" aria-label="Change profile picture">
+                       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="12" r="4"></circle></svg>
+                     </button>
+                   </div>
+                   <input type="file" id="photo-input" accept="image/jpeg,image/png,image/webp" style="display:none">
+                   <div id="upload-status" class="upload-status"></div>
+                 `}${isPublicView ? `
+                   <div class="profile-photo-display" id="profile-photo-display"></div>
+                 ` : ''}
                 <div id="profile-view">
                   <h2 class="profile-name" id="profile-name"></h2>
                   <p class="profile-username" id="profile-username"></p>
@@ -1669,6 +1671,77 @@ export function initProfilePage() {
     window.loadPublicProfile(publicMatch[1]);
   } else {
     window.loadProfile();
+  }
+
+  // Initialize camera button for profile photo
+  initProfilePhotoCamera();
+}
+
+/**
+ * Initialize profile photo camera button
+ */
+function initProfilePhotoCamera() {
+  const cameraBtn = document.getElementById('profile-photo-camera-btn');
+  const photoInput = document.getElementById('photo-input');
+  
+  if (cameraBtn && photoInput) {
+    cameraBtn.addEventListener('click', () => {
+      photoInput.click();
+    });
+
+    photoInput.addEventListener('change', async () => {
+      const file = photoInput.files[0];
+      if (!file) return;
+
+      const status = document.getElementById('upload-status');
+      status.textContent = 'Uploading...';
+      status.className = 'upload-status';
+
+      try {
+        const result = await profileApi.uploadPhoto(file);
+        status.textContent = 'Photo uploaded successfully!';
+        status.className = 'upload-status success';
+
+        // Reload profile to get updated photo
+        const updatedProfile = await profileApi.getOwnProfile();
+        setCurrentUserProfile(updatedProfile);
+        currentProfile = updatedProfile;
+        applyProfileBackground(updatedProfile);
+
+        const displayName = getProfileDisplayName(updatedProfile);
+        const profilePhotoLarge = document.getElementById('profile-photo-large');
+        const profilePhotoInitials = document.getElementById('profile-photo-initials');
+        if (updatedProfile.profile_photo_url) {
+          if (profilePhotoLarge) {
+            profilePhotoLarge.src = updatedProfile.profile_photo_url;
+            profilePhotoLarge.alt = displayName;
+            profilePhotoLarge.style.display = 'block';
+          }
+          if (profilePhotoInitials) profilePhotoInitials.style.display = 'none';
+        } else {
+          if (profilePhotoLarge) profilePhotoLarge.style.display = 'none';
+          if (profilePhotoInitials) {
+            profilePhotoInitials.style.display = 'block';
+            profilePhotoInitials.textContent = (displayName || '?').charAt(0).toUpperCase();
+          }
+        }
+
+        // Update public photo display
+        const publicPhotoDisplay = document.getElementById('profile-photo-display');
+        if (publicPhotoDisplay) {
+          if (updatedProfile.profile_photo_url) {
+            publicPhotoDisplay.innerHTML = `<img src="${escapeHtmlAttr(updatedProfile.profile_photo_url)}" alt="${escapeHtmlAttr(displayName)}" class="profile-photo-public">`;
+          } else {
+            publicPhotoDisplay.innerHTML = `<div class="profile-photo-public-initials" style="background: var(--theme-accent, var(--kp-teal)); color: white;">${(displayName || '?').charAt(0).toUpperCase()}</div>`;
+          }
+        }
+      } catch (err) {
+        status.textContent = err.message || 'Upload failed';
+        status.className = 'upload-status error';
+      } finally {
+        photoInput.value = '';
+      }
+    });
   }
 }
 

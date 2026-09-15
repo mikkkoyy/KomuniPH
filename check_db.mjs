@@ -1,0 +1,17 @@
+import Database from 'better-sqlite3';
+const db = new Database('D:\\FILES\\project\\KomuniPH\\data\\komuniph.db');
+console.log('=== TABLES ===');
+const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all();
+tables.forEach(t => console.log(t.name));
+console.log('\n=== photo_albums ===');
+const albums = db.prepare('SELECT * FROM photo_albums').all();
+console.log(albums);
+console.log('\n=== profile_photos ===');
+const photos = db.prepare('SELECT * FROM profile_photos').all();
+console.log(photos);
+console.log('\n=== profiles ===');
+const profiles = db.prepare('SELECT user_id, profile_photo_url, first_name, last_name, nickname FROM profiles').all();
+console.log(profiles);
+console.log('\n=== users ===');
+const users = db.prepare('SELECT id, username, email FROM users').all();
+console.log(users);

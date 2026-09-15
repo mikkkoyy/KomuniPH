@@ -17,6 +17,16 @@ import { handleGetTestimonials, handleCreateTestimonial, handleDeleteTestimonial
 import { handleGetPhotos, handleUploadPhoto as handleGalleryUploadPhoto, handleDeletePhoto, handleGetOwnPhotos } from './gallery.js';
 import { getAllLocations, getCountries, getCities, getBarangays } from './locations.js';
 import {
+  handleGetOwnAlbums,
+  handleGetAlbums,
+  handleGetAlbum,
+  handleCreateAlbum,
+  handleUpdateAlbum,
+  handleDeleteAlbum,
+  handleGetPhotosWithAlbum,
+  handleGetProfilePicturesAlbum,
+} from './albums.js';
+import {
   handleGetFeed,
   handleCreatePost,
   handleUpdatePost,
@@ -212,14 +222,63 @@ async function handleApi(req, res) {
      return handleGetOwnPhotos(req, res, user);
    }
 
-   const photoMatch = matchRoute('/api/profile/photos/:id', path);
-   if (method === 'DELETE' && photoMatch) {
-     const user = requireAuth(req, res);
-     if (!user) return;
-     return handleDeletePhoto(req, res, user, photoMatch);
-   }
+const photoMatch = matchRoute('/api/profile/photos/:id', path);
+    if (method === 'DELETE' && photoMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleDeletePhoto(req, res, user, photoMatch);
+    }
 
-   // Public profile by username
+    // Album routes (public)
+    const albumsMatch = matchRoute('/api/profiles/:username/albums', path);
+    if (method === 'GET' && albumsMatch) {
+      return handleGetAlbums(req, res, albumsMatch);
+    }
+
+    const albumMatch = matchRoute('/api/profiles/:username/albums/:albumId', path);
+    if (method === 'GET' && albumMatch) {
+      return handleGetAlbum(req, res, albumMatch);
+    }
+
+    // Album routes (owner only)
+    if (method === 'GET' && path === '/api/profile/albums') {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleGetOwnAlbums(req, res, user);
+    }
+
+    if (method === 'POST' && path === '/api/profile/albums') {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleCreateAlbum(req, res, user);
+    }
+
+    const ownAlbumMatch = matchRoute('/api/profile/albums/:id', path);
+    if (method === 'PATCH' && ownAlbumMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleUpdateAlbum(req, res, user, ownAlbumMatch);
+    }
+    if (method === 'DELETE' && ownAlbumMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleDeleteAlbum(req, res, user, ownAlbumMatch);
+    }
+
+    // Profile pictures album (owner only)
+    if (method === 'GET' && path === '/api/profile/profile-pictures-album') {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleGetProfilePicturesAlbum(req, res, user);
+    }
+
+    // Photos with album filter
+    const photosWithAlbumMatch = matchRoute('/api/profiles/:username/photos', path);
+    if (method === 'GET' && photosWithAlbumMatch) {
+      return handleGetPhotosWithAlbum(req, res, photosWithAlbumMatch);
+    }
+
+    // Public profile by username
   const publicProfileMatch = matchRoute('/api/profile/:username', path);
   if (method === 'GET' && publicProfileMatch) {
     return handleGetPublicProfile(req, res, publicProfileMatch);

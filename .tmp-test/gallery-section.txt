@@ -1,0 +1,152 @@
+/* =========================================================================
+ * GALLERY-ROUTES-01: Dedicated Photo Gallery + Album pages
+ *
+ * This app uses hash routing (window.location.hash), so these pages live at:
+ *   #/profile/:username/photos
+ *   #/profile/:username/photos/:albumId
+ *
+ * Every link/redirect goes through the hash router (`#/...` anchors and
+ * window.navigate()) so reload, Back and Forward keep working without any
+ * server-side SPA fallback routes.
+ * ========================================================================= */
+
+// Number of photos previewed inside the profile page "Photo Gallery" module.
+const PROFILE_GALLERY_PREVIEW_LIMIT = 6;
+
+/**
+ * State shared by the dedicated gallery and album pages.
+ */
+const galleryRoutes = {
+  page: null,          // 'gallery' | 'album' | null
+  username: '',
+  albumId: null,
+  isOwnProfile: false,
+  photos: [],
+  albums: [],
+  album: null,
+};
+
+/**
+ * Decode a URL component without throwing on malformed input.
+ */
+function safeDecode(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch (err) {
+    return value;
+  }
+}
+
+/**
+ * Parse the current hash into gallery route params.
+ * Used because the router calls initGalleryPage()/initAlbumPage() without
+ * arguments — the hash is the single source of truth for the route.
+ */
+function parseGalleryHash() {
+  const hash = window.location.hash.slice(1) || '';
+
+  const albumMatch = hash.match(/^\/profile\/([^/]+)\/photos\/([^/]+)$/);
+  if (albumMatch) {
+    return { page: 'album', username: safeDecode(albumMatch[1]), albumId: safeDecode(albumMatch[2]) };
+  }
+
+  const galleryMatch = hash.match(/^\/profile\/([^/]+)\/photos$/);
+  if (galleryMatch) {
+    return { page: 'gallery', username: safeDecode(galleryMatch[1]), albumId: null };
+  }
+
+  return { page: null, username: '', albumId: null };
+}
+
+/**
+ * Is the given username the signed-in user?
+ */
+function isOwnUsername(username) {
+  if (!isAuthenticated() || !username) return false;
+  const cached = getCurrentUserProfile();
+  if (!cached || !cached.username) return false;
+  return String(cached.username).toLowerCase() === String(username).toLowerCase();
+}
+
+/**
+ * Render the shared page shell for the gallery / album pages.
+ * Reuses the profile frame so the profile background (Gradient Slate by
+ * default, uploaded image when set) is applied exactly like on the profile.
+ */
+function renderGalleryShell({ username, activeNav, tagline, stripText, moduleHtml }) {
+  const ownProfile = isOwnUsername(username);
+
+  return `
+    <div class="profile-frame" id="profile-frame" data-view="${ownProfile ? 'own' : 'public'}">
+      <div class="profile-background-layer" id="profile-background-layer" aria-hidden="true"></div>
+      <div class="profile-content-frame">
+        <header class="profile-header" id="profile-header">
+          <div class="profile-header-inner">
+            <h1 class="profile-brand">KomuniPH</h1>
+            <p class="profile-tagline">${escapeHtml(tagline)}</p>
+          </div>
+        </header>
+
+        <nav class="profile-nav" id="gallery-nav">
+          ${ownProfile ? '<a class="profile-nav-link" href="#/home">Home</a>' : ''}
+          <a class="profile-nav-link" href="#/profile/${escapeHtmlAttr(username)}">Profile</a>
+          <a class="profile-nav-link${activeNav === 'gallery' ? ' profile-nav-active' : ''}" href="#/profile/${escapeHtmlAttr(username)}/photos">Photo Gallery</a>
+          ${isAuthenticated()
+            ? '<button type="button" class="profile-nav-link profile-nav-link-logout" onclick="window.handleLogout()">Log Out</button>'
+            : '<a class="profile-nav-link" href="#/login">Log In</a>'}
+        </nav>
+
+        <div class="profile-status-strip" id="gallery-status-strip">${escapeHtml(stripText)}</div>
+
+        <div class="gallery-content" id="gallery-content">
+          ${moduleHtml}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Render one album card. Profile Pictures is listed first by the caller.
+ */
+function renderAlbumCardHtml(album, username) {
+  const coverThumb = album.cover_photo_url || '';
+  const count = album.photo_count || 0;
+
+  return `
+    <a class="gallery-album-card" href="#/profile/${escapeHtmlAttr(username)}/photos/${escapeHtmlAttr(album.id)}">
+      <div class="gallery-album-cover">
+        ${coverThumb
+          ? `<img src="${escapeHtmlAttr(coverThumb)}" alt="${escapeHtmlAttr(album.name)}" loading="lazy">`
+          : '<span class="gallery-album-cover-placeholder">No photos yet</span>'}
+      </div>
+      <div class="gallery-album-name">${escapeHtml(album.name)}</div>
+      <div class="gallery-album-count">${count} photo${count === 1 ? '' : 's'}</div>
+    </a>
+  `;
+}
+
+/**
+ * Render every album card — Profile Pictures first, then the normal albums.
+ * The API already orders them that way; this keeps that guarantee locally too.
+ */
+function renderAlbumCardsHtml(username, albums) {
+  const ordered = (albums || []).slice().sort((a, b) => {
+    const rank = (album) => (album.is_profile_pictures || album.type === 'profile' ? 0 : 1);
+    return rank(a) - rank(b);
+  });
+
+  if (ordered.length === 0) {
+    return '<p class="photo-gallery-empty">No albums to show yet.</p>';
+  }
+
+  return `<div class="gallery-album-grid">${ordered.map(album => renderAlbumCardHtml(album, username)).join('')}</div>`;
+}
+
+/**
+ * Render a grid of photos (reuses the profile gallery item markup so the
+ * lightbox, delete button and captions behave identically everywhere).
+ */
+function renderGalleryGridHtml(photos, isOwner) {
+  return (photos || []).map(photo => renderGalleryItemHtml(photo, isOwner)).join('');
+}

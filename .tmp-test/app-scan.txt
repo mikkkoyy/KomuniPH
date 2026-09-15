@@ -1,0 +1,164 @@
+1: /**
+2:  * KomuniPH Lite - Main Application
+3:  * Router and app initialization
+4:  */
+5: 
+6: import { isAuthenticated, clearTokens, initAuth } from './api.js';
+7: import { renderLoginPage, renderRegisterPage, renderVerifyEmailPage, renderForgotPasswordPage, renderResetPasswordPage, renderResetPasswordSuccessPage, initLoginForm, initRegisterForm, initForgotPasswordForm, initResetPasswordForm } from './auth.js';
+8: import { renderHomePage, initHomePage, renderPlaceholderPage, initPlaceholderPage } from './feed.js';
+9: import { renderProfilePage, initProfilePage, renderGalleryPage, initGalleryPage, renderAlbumPage, initAlbumPage } from './profile.js';
+10: import { renderMessagesPage, initMessagesPage, destroyMessagesPage } from './messages.js';
+11: 
+12: const app = document.getElementById('app');
+13: 
+14: /**
+15:  * Navigate to a route
+16:  */
+17: export function navigate(path) {
+18:   window.location.hash = path;
+19: }
+20: 
+21: /**
+22:  * Get current route from hash
+23:  */
+24: function getRoute() {
+25:   const hash = window.location.hash.slice(1) || '/login';
+26:   return hash;
+27: }
+28: 
+29: /**
+30:  * Render the current route
+31:  */
+32: function render() {
+33:   const route = getRoute();
+34: 
+35:   // Cleanup previous page
+36:   if (destroyMessagesPage) {
+37:     destroyMessagesPage();
+38:   }
+39: 
+40:   // Clear tokens on logout
+41:   if (route === '/logout') {
+42:     clearTokens();
+43:     navigate('/login');
+44:     return;
+45:   }
+46: 
+47:   let html = '';
+48:   let initFn = null;
+49: 
+50:   switch (route) {
+51:     case '/login':
+52:       html = renderLoginPage();
+53:       initFn = initLoginForm;
+54:       break;
+55:     case '/register':
+56:       html = renderRegisterPage();
+57:       initFn = initRegisterForm;
+58:       break;
+59:     case '/verify-email':
+60:       html = renderVerifyEmailPage();
+61:       break;
+62:     case '/forgot-password':
+63:       html = renderForgotPasswordPage();
+64:       initFn = initForgotPasswordForm;
+65:       break;
+66:     case '/reset-password':
+67:       html = renderResetPasswordPage();
+68:       initFn = initResetPasswordForm;
+69:       break;
+70:     case '/reset-success':
+71:       html = renderResetPasswordSuccessPage();
+72:       break;
+73:     case '/home':
+74:       if (!isAuthenticated()) {
+75:         navigate('/login');
+76:         return;
+77:       }
+78:       html = renderHomePage();
+79:       initFn = initHomePage;
+80:       break;
+81:     case '/profile':
+82:       if (!isAuthenticated()) {
+83:         navigate('/login');
+84:         return;
+85:       }
+86:       html = renderProfilePage();
+87:       initFn = initProfilePage;
+88:       break;
+89:     case '/messages':
+90:       if (!isAuthenticated()) {
+91:         navigate('/login');
+92:         return;
+93:       }
+94:       html = renderMessagesPage();
+95:       initFn = initMessagesPage;
+96:       break;
+97:     case '/creator-studio':
+98:       if (!isAuthenticated()) {
+99:         navigate('/login');
+100:         return;
+101:       }
+102:       html = renderPlaceholderPage('Creator Studio', 'Create and manage your content from one place.', '🎬', 'creator-studio');
+103:       initFn = initPlaceholderPage;
+104:       break;
+105:     case '/marketplace':
+106:       if (!isAuthenticated()) {
+107:         navigate('/login');
+108:         return;
+109:       }
+110:       html = renderPlaceholderPage('Marketplace', 'Discover products and listings from the KomuniPH community.', '🛍️', 'marketplace');
+111:       initFn = initPlaceholderPage;
+112:       break;
+113:     case '/groups':
+114:       if (!isAuthenticated()) {
+115:         navigate('/login');
+116:         return;
+117:       }
+118:       html = renderPlaceholderPage('Community Groups', 'Find and join communities that interest you.', '👥', 'groups');
+119:       initFn = initPlaceholderPage;
+120:       break;
+121:     default:
+122:       // GALLERY-ROUTES-01: gallery + album hash routes MUST be matched before
+123:       // the public-profile catch-all below, because `(.+)` also matches "/"
+124:       // and would otherwise swallow /profile/:user/photos[/:albumId].
+125:       const galleryMatch = route.match(/^\/profile\/([^/]+)\/photos$/);
+126:       if (galleryMatch) {
+127:         html = renderGalleryPage(galleryMatch[1]);
+128:         initFn = initGalleryPage;
+129:         break;
+130:       }
+131:       const albumMatch = route.match(/^\/profile\/([^/]+)\/photos\/([^/]+)$/);
+132:       if (albumMatch) {
+133:         html = renderAlbumPage(albumMatch[1], albumMatch[2]);
+134:         initFn = initAlbumPage;
+135:         break;
+136:       }
+137:       const publicProfileMatch = route.match(/^\/profile\/([^/]+)$/);
+138:       if (publicProfileMatch) {
+139:         html = renderProfilePage(publicProfileMatch[1]);
+140:         initFn = initProfilePage;
+141:         break;
+142:       }
+143:       navigate('/login');
+144:       return;
+145:   }
+146: 
+147:   app.innerHTML = html;
+148: 
+149:   // Initialize page-specific logic after DOM is ready
+150:   if (initFn) {
+151:     requestAnimationFrame(() => {
+152:       initFn();
+153:     });
+154:   }
+155: }
+156: 
+157: // Listen for hash changes
+158: window.addEventListener('hashchange', render);
+159: 
+160: // Initial render — restore auth first, then route
+161: initAuth().then(() => {
+162:   render();
+163: });
+164: 

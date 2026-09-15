@@ -1,0 +1,90 @@
+1701:     photoInput.addEventListener('change', async () => {
+1702:       const file = photoInput.files[0];
+1703:       if (!file) return;
+1704: 
+1705:       const status = document.getElementById('upload-status');
+1706:       status.textContent = 'Uploading...';
+1707:       status.className = 'upload-status';
+1708: 
+1709:       try {
+1710:         const result = await profileApi.uploadPhoto(file);
+1711:         status.textContent = 'Photo uploaded successfully!';
+1712:         status.className = 'upload-status success';
+1713: 
+1714:         // Reload profile to get updated photo
+1715:         const updatedProfile = await profileApi.getOwnProfile();
+1716:         setCurrentUserProfile(updatedProfile);
+1717:         currentProfile = updatedProfile;
+1718:         applyProfileBackground(updatedProfile);
+1719: 
+1720:         const displayName = getProfileDisplayName(updatedProfile);
+1721:         const profilePhotoLarge = document.getElementById('profile-photo-large');
+1722:         const profilePhotoInitials = document.getElementById('profile-photo-initials');
+1723:         if (updatedProfile.profile_photo_url) {
+1724:           if (profilePhotoLarge) {
+1725:             profilePhotoLarge.src = updatedProfile.profile_photo_url;
+1726:             profilePhotoLarge.alt = displayName;
+1727:             profilePhotoLarge.style.display = 'block';
+1728:           }
+1729:           if (profilePhotoInitials) profilePhotoInitials.style.display = 'none';
+1730:         } else {
+1731:           if (profilePhotoLarge) profilePhotoLarge.style.display = 'none';
+1732:           if (profilePhotoInitials) {
+1733:             profilePhotoInitials.style.display = 'block';
+1734:             profilePhotoInitials.textContent = (displayName || '?').charAt(0).toUpperCase();
+1735:           }
+1736:         }
+1737: 
+1738:         // Update public photo display
+1739:         const publicPhotoDisplay = document.getElementById('profile-photo-display');
+1740:         if (publicPhotoDisplay) {
+1741:           if (updatedProfile.profile_photo_url) {
+1742:             publicPhotoDisplay.innerHTML = `<img src="${escapeHtmlAttr(updatedProfile.profile_photo_url)}" alt="${escapeHtmlAttr(displayName)}" class="profile-photo-public">`;
+1743:           } else {
+1744:             publicPhotoDisplay.innerHTML = `<div class="profile-photo-public-initials" style="background: var(--theme-accent, var(--kp-teal)); color: white;">${(displayName || '?').charAt(0).toUpperCase()}</div>`;
+1745:           }
+1746:         }
+1747:       } catch (err) {
+1748:         status.textContent = err.message || 'Upload failed';
+1749:         status.className = 'upload-status error';
+1750:       } finally {
+1751:         photoInput.value = '';
+1752:       }
+1753:     });
+1754:   }
+1755: }
+1756: 
+1757: /**
+1758:  * Upload photo
+1759:  */
+1760: window.uploadPhoto = async function() {
+1761:   const photoInput = document.getElementById('photo-input');
+1762:   const uploadBtn = document.getElementById('upload-btn');
+1763:   const status = document.getElementById('upload-status');
+1764: 
+1765:   const file = photoInput.files[0];
+1766:   if (!file) {
+1767:     status.textContent = 'No file selected';
+1768:     status.className = 'upload-status error';
+1769:     return;
+1770:   }
+1771: 
+1772:   uploadBtn.disabled = true;
+1773:   uploadBtn.textContent = 'Uploading...';
+1774:   status.textContent = 'Uploading...';
+1775:   status.className = 'upload-status';
+1776: 
+1777:   try {
+1778:     const result = await profileApi.uploadPhoto(file);
+1779:     status.textContent = 'Photo uploaded successfully!';
+1780:     status.className = 'upload-status success';
+1781: 
+1782:     const updatedProfile = await profileApi.getOwnProfile();
+1783:     setCurrentUserProfile(updatedProfile);
+1784:     currentProfile = updatedProfile;
+1785:     applyProfileBackground(updatedProfile);
+1786: 
+1787:     const displayName = getProfileDisplayName(updatedProfile);
+1788:     const alias = updatedProfile.alias_enabled && updatedProfile.alias ? updatedProfile.alias : '';
+1789:     const profilePhotoLarge = document.getElementById('profile-photo-large');
+1790:     const profilePhotoInitials = document.getElementById('profile-photo-initials');

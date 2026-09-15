@@ -1,0 +1,21 @@
+59: export function handleGetPhotos(req, res, params) {
+64: 'SELECT user_id FROM profiles p JOIN users u ON p.user_id = u.id WHERE u.username = ?',
+76: SELECT
+79: album_id,
+86: WHERE profile_user_id = ? AND status = 'active'
+93: album_id: p.album_id || null,
+115: * Supports optional album_id field to assign photos to a specific album.
+117: export function handleUploadPhoto(req, res, user) {
+215: if (name === 'album_id') {
+362: // Validate album_id if provided
+366: 'SELECT id FROM photo_albums WHERE id = ? AND user_id = ?',
+376: 'INSERT INTO profile_photos (id, profile_user_id, album_id, file_path, caption, created_at, updated_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+389: album_id: validatedAlbumId,
+401: export function handleDeletePhoto(req, res, user, params) {
+404: 'SELECT * FROM profile_photos WHERE id = ?',
+437: execute('DELETE FROM profile_photos WHERE id = ?', [params.id]);
+450: export function handleGetOwnPhotos(req, res, user) {
+456: SELECT
+459: album_id,
+466: WHERE profile_user_id = ?
+473: album_id: p.album_id || null,

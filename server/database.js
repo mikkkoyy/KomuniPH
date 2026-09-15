@@ -38,6 +38,19 @@ export function getDb() {
 export function initDatabase() {
   const database = getDb();
 
+  // PHOTO-ALBUM-01: Add album_id column to existing profile_photos tables.
+  // This MUST run before database.exec() which creates indexes on album_id.
+  try {
+    const tableExists = database.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='profile_photos'"
+    ).get();
+    if (tableExists) {
+      database.exec('ALTER TABLE profile_photos ADD COLUMN album_id TEXT REFERENCES photo_albums(id) ON DELETE SET NULL');
+    }
+  } catch (err) {
+    // Column already exists — safe no-op.
+  }
+
   database.exec(`
     -- Users table
     CREATE TABLE IF NOT EXISTS users (

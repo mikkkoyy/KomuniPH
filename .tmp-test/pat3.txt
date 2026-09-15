@@ -1,0 +1,11 @@
+View All Photos -> 269,1850,1862,2735
+openGalleryPage -> 269,2739
+gallery-albums-grid -> 2349,2419,2668
+album-photos-grid -> 2480,2592
+gallery-photo-input -> 253,254,1940,1945,2366,2367
+cover_photo_url -> 
+cover_thumbnail_url -> 2300,2579
+is_own_album -> 2649
+getAlbumPhotos -> 2654
+refreshActiveGalleryView -> 2386
+window.navigate -> 2731,2745

@@ -76,6 +76,7 @@ export function handleGetPhotos(req, res, params) {
       SELECT
         id,
         profile_user_id,
+        album_id,
         file_path,
         caption,
         created_at,
@@ -89,6 +90,7 @@ export function handleGetPhotos(req, res, params) {
 
     const transformed = photos.map(p => ({
       id: p.id,
+      album_id: p.album_id || null,
       image_url: `/uploads/gallery/${p.file_path}`,
       thumbnail_url: `/uploads/gallery/thumbnails/${p.file_path}`,
       caption: p.caption || '',
@@ -454,6 +456,7 @@ export function handleGetOwnPhotos(req, res, user) {
       SELECT
         id,
         profile_user_id,
+        album_id,
         file_path,
         caption,
         created_at,
@@ -467,6 +470,7 @@ export function handleGetOwnPhotos(req, res, user) {
 
     const transformed = photos.map(p => ({
       id: p.id,
+      album_id: p.album_id || null,
       image_url: `/uploads/gallery/${p.file_path}`,
       thumbnail_url: `/uploads/gallery/thumbnails/${p.file_path}`,
       caption: p.caption || '',

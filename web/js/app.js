@@ -119,12 +119,9 @@ function render() {
       initFn = initPlaceholderPage;
       break;
     default:
-      const publicProfileMatch = route.match(/^\/profile\/(.+)$/);
-      if (publicProfileMatch) {
-        html = renderProfilePage(publicProfileMatch[1]);
-        initFn = initProfilePage;
-        break;
-      }
+      // GALLERY-ROUTES-01: gallery + album hash routes MUST be matched before
+      // the public-profile catch-all below, because `(.+)` also matches "/"
+      // and would otherwise swallow /profile/:user/photos[/:albumId].
       const galleryMatch = route.match(/^\/profile\/([^/]+)\/photos$/);
       if (galleryMatch) {
         html = renderGalleryPage(galleryMatch[1]);
@@ -135,6 +132,12 @@ function render() {
       if (albumMatch) {
         html = renderAlbumPage(albumMatch[1], albumMatch[2]);
         initFn = initAlbumPage;
+        break;
+      }
+      const publicProfileMatch = route.match(/^\/profile\/([^/]+)$/);
+      if (publicProfileMatch) {
+        html = renderProfilePage(publicProfileMatch[1]);
+        initFn = initProfilePage;
         break;
       }
       navigate('/login');
@@ -153,6 +156,11 @@ function render() {
 
 // Listen for hash changes
 window.addEventListener('hashchange', render);
+
+// GALLERY-ROUTES-01: the hash router owns navigate(). Expose it globally so
+// profile.js (gallery "View All Photos" / album cards) can reuse the exact
+// same hash navigation instead of touching window.location directly.
+window.navigate = navigate;
 
 // Initial render — restore auth first, then route
 initAuth().then(() => {

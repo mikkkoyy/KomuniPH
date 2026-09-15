@@ -1,0 +1,4 @@
+has navigate export: true
+window.navigate: false
+gallery route regex lines: 124: // and would otherwise swallow /profile/:user/photos[/:albumId]. | 125: const galleryMatch = route.match(/^\/profile\/([^/]+)\/photos$/); | 131: const albumMatch = route.match(/^\/profile\/([^/]+)\/photos\/([^/]+)$/);
+imports: import { isAuthenticated, clearTokens, initAuth } from './api.js'; | import { renderLoginPage, renderRegisterPage, renderVerifyEmailPage, renderForgotPasswordPage, renderResetPasswordPage, renderResetPasswordSuccessPage, initLoginForm, initRegisterForm, initForgotPasswordForm, initResetPasswordForm } from './auth.js'; | import { renderHomePage, initHomePage, renderPlaceholderPage, initPlaceholderPage } from './feed.js'; | import { renderProfilePage, initProfilePage, renderGalleryPage, initGalleryPage, renderAlbumPage, initAlbumPage } from './profile.js'; | import { renderMessagesPage, initMessagesPage, destroyMessagesPage } from './messages.js';

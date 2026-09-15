@@ -1,0 +1,680 @@
+diff --git a/web/js/profile.js b/web/js/profile.js
+index fef868c..59ef5f1 100644
+--- a/web/js/profile.js
++++ b/web/js/profile.js
+@@ -4,3 +4,3 @@
+ 
+-import { profileApi, testimonialsApi, galleryApi, authApi, isAuthenticated, getCurrentUserProfile, setCurrentUserProfile } from './api.js';
++import { profileApi, testimonialsApi, galleryApi, albumsApi, authApi, isAuthenticated, getCurrentUserProfile, setCurrentUserProfile } from './api.js';
+ import { navigate } from './app.js';
+@@ -264,2 +264,9 @@ export function renderProfilePage(viewUsername = null) {
+               </div>
++              <!-- GALLERY-ROUTES-01: entry point to the dedicated gallery page.
++                   Uses the hash router (navigate()) ΓÇö never a server path. -->
++              <div class="photo-gallery-preview-footer" id="photo-gallery-preview-footer">
++                <button type="button" class="photo-gallery-view-all" id="photo-gallery-view-all"
++                        ${isPublicView ? `onclick="window.openGalleryPage('${escapeHtmlAttr(viewUsername)}')"` : 'onclick="window.openGalleryPage()"'}>View All Photos &rarr;</button>
++                <span class="photo-gallery-preview-meta" id="photo-gallery-preview-meta"></span>
++              </div>
+             </div>
+@@ -1668,5 +1675,7 @@ export function initProfilePage() {
+   const hash = window.location.hash.slice(1) || '/login';
+-  const publicMatch = hash.match(/^\/profile\/(.+)$/);
++  // GALLERY-ROUTES-01: only a bare /profile/:username is a profile page.
++  // `(.+)` would also match /profile/:user/photos[/:albumId].
++  const publicMatch = hash.match(/^\/profile\/([^/]+)$/);
+   if (publicMatch) {
+-    window.loadPublicProfile(publicMatch[1]);
++    window.loadPublicProfile(safeDecode(publicMatch[1]));
+   } else {
+@@ -1828,3 +1837,3 @@ window.uploadPhoto = async function() {
+ /**
+- * Load and render photo gallery
++ * Load and render photo gallery (sidebar preview on the profile page)
+  */
+@@ -1838,3 +1847,7 @@ async function loadAndRenderGallery(username, isOwnProfile) {
+     }
+-    renderGallery(response.photos || [], isOwnProfile);
++    const photos = response.photos || [];
++    // The profile page only shows a short preview; the lightbox still navigates
++    // across the whole gallery, and "View All Photos" links to the full page.
++    renderGallery(photos.slice(0, PROFILE_GALLERY_PREVIEW_LIMIT), isOwnProfile, photos);
++    renderGalleryPreviewMeta(photos.length);
+     initGalleryUpload();
+@@ -1843,2 +1856,3 @@ async function loadAndRenderGallery(username, isOwnProfile) {
+     renderGallery([], isOwnProfile);
++    renderGalleryPreviewMeta(0);
+   }
+@@ -1846,6 +1860,21 @@ async function loadAndRenderGallery(username, isOwnProfile) {
+ 
++/**
++ * Update the "View All Photos" preview counter on the profile page
++ */
++function renderGalleryPreviewMeta(totalPhotos) {
++  const metaEl = document.getElementById('photo-gallery-preview-meta');
++  if (!metaEl) return;
++  const total = totalPhotos || 0;
++  metaEl.textContent = total > 0 ? `${total} photo${total === 1 ? '' : 's'}` : '';
++}
++
+ /**
+  * Render photo gallery grid
++ *
++ * @param {Array} photos - photos to render in the grid
++ * @param {boolean} isOwnProfile - show owner-only controls (delete)
++ * @param {Array} lightboxSource - full photo list used by the lightbox
++ *   (defaults to the rendered photos when not supplied)
+  */
+-function renderGallery(photos, isOwnProfile) {
++function renderGallery(photos, isOwnProfile, lightboxSource = photos) {
+   const gridEl = document.getElementById('photo-gallery-grid');
+@@ -1858,2 +1887,3 @@ function renderGallery(photos, isOwnProfile) {
+     gridEl.style.display = 'none';
++    gridEl.innerHTML = '';
+     emptyEl.style.display = 'block';
+@@ -1867,3 +1897,13 @@ function renderGallery(photos, isOwnProfile) {
+ 
+-  gridEl.innerHTML = photos.map(photo => `
++  gridEl.innerHTML = photos.map(photo => renderGalleryItemHtml(photo, isOwnProfile)).join('');
++
++  // Add click handlers for lightbox
++  bindGalleryGridLightbox(gridEl, photos, lightboxSource);
++}
++
++/**
++ * Render a single gallery grid item
++ */
++function renderGalleryItemHtml(photo, isOwnProfile) {
++  return `
+     <div class="photo-gallery-item" data-photo-id="${escapeHtmlAttr(photo.id)}">
+@@ -1875,5 +1915,13 @@ function renderGallery(photos, isOwnProfile) {
+     </div>
+-  `).join('');
++  `;
++}
+ 
+-  // Add click handlers for lightbox
++/**
++ * Attach lightbox click handlers to a rendered gallery grid
++ *
++ * @param {HTMLElement} gridEl - rendered grid container
++ * @param {Array} displayedPhotos - photos present in the grid (for index lookup)
++ * @param {Array} lightboxSource - photo list the lightbox navigates through
++ */
++function bindGalleryGridLightbox(gridEl, displayedPhotos, lightboxSource = displayedPhotos) {
+   gridEl.querySelectorAll('.photo-gallery-item').forEach((item, index) => {
+@@ -1881,3 +1929,4 @@ function renderGallery(photos, isOwnProfile) {
+       if (e.target.classList.contains('photo-gallery-delete')) return;
+-      openLightbox(photos, index);
++      const startIndex = lightboxSource === displayedPhotos ? index : 0;
++      openLightbox(lightboxSource, startIndex);
+     });
+@@ -2123,4 +2172,8 @@ window.deleteGalleryPhoto = async function(photoId) {
+     await galleryApi.deletePhoto(photoId);
+-    // Reload gallery
+-    if (currentProfile) {
++    // Reload whichever gallery view is currently mounted
++    if (galleryRoutes.page === 'gallery') {
++      await refreshGalleryPage();
++    } else if (galleryRoutes.page === 'album') {
++      await refreshAlbumPage();
++    } else if (currentProfile) {
+       await loadAndRenderGallery(currentProfile.username, true);
+@@ -2137 +2190,557 @@ window.lightboxPrev = lightboxPrev;
+ window.lightboxNext = lightboxNext;
++
++/* =========================================================================
++ * GALLERY-ROUTES-01: Dedicated Photo Gallery + Album pages
++ *
++ * This app uses hash routing (window.location.hash), so the gallery lives at:
++ *   #/profile/:username/photos
++ *   #/profile/:username/photos/:albumId
++ *
++ * Every navigation goes through navigate() / <a href="#/..."> so refresh,
++ * Back and Forward keep working without any server-side SPA routes.
++ * ========================================================================= */
++
++const PROFILE_GALLERY_PREVIEW_LIMIT = 6;
++
++/**
++ * State shared by the dedicated gallery and album pages.
++ */
++const galleryRoutes = {
++  page: null,          // 'gallery' | 'album' | null
++  username: '',
++  albumId: null,
++  isOwnProfile: false,
++  photos: [],
++  albums: [],
++  album: null,
++};
++
++/**
++ * Decode a URL component without throwing on malformed input.
++ */
++function safeDecode(value) {
++  try {
++    return decodeURIComponent(value);
++  } catch (err) {
++    return value;
++  }
++}
++
++/**
++ * Parse the current hash into gallery route params.
++ */
++function parseGalleryHash() {
++  const hash = window.location.hash.slice(1) || '';
++
++  const albumMatch = hash.match(/^\/profile\/([^/]+)\/photos\/([^/]+)$/);
++  if (albumMatch) {
++    return { page: 'album', username: safeDecode(albumMatch[1]), albumId: safeDecode(albumMatch[2]) };
++  }
++
++  const galleryMatch = hash.match(/^\/profile\/([^/]+)\/photos$/);
++  if (galleryMatch) {
++    return { page: 'gallery', username: safeDecode(galleryMatch[1]), albumId: null };
++  }
++
++  return { page: null, username: '', albumId: null };
++}
++
++/**
++ * Is the given username the signed-in user?
++ */
++function isOwnUsername(username) {
++  if (!isAuthenticated() || !username) return false;
++  const cached = getCurrentUserProfile();
++  if (!cached || !cached.username) return false;
++  return String(cached.username).toLowerCase() === String(username).toLowerCase();
++}
++
++/**
++ * Render the shared page shell for the gallery / album pages.
++ * Reuses the profile frame so the user's background (Gradient Slate by default,
++ * uploaded image when set) is applied exactly like on the profile page.
++ */
++function renderGalleryShell({ username, activeNav, tagline, stripText, moduleHtml }) {
++  const ownProfile = isOwnUsername(username);
++
++  return `
++    <div class="profile-frame" id="profile-frame" data-view="${ownProfile ? 'own' : 'public'}">
++      <div class="profile-background-layer" id="profile-background-layer" aria-hidden="true"></div>
++      <div class="profile-content-frame">
++        <header class="profile-header" id="profile-header">
++          <div class="profile-header-inner">
++            <h1 class="profile-brand">KomuniPH</h1>
++            <p class="profile-tagline">${escapeHtml(tagline)}</p>
++          </div>
++        </header>
++
++        <nav class="profile-nav" id="gallery-nav">
++          ${ownProfile ? '<a href="#/home" class="profile-nav-link">Home</a>' : ''}
++          <a href="#/profile/${escapeHtmlAttr(username)}" class="profile-nav-link">Profile</a>
++          <a href="#/profile/${escapeHtmlAttr(username)}/photos" class="profile-nav-link${activeNav === 'gallery' ? ' profile-nav-active' : ''}">Photo Gallery</a>
++          ${isAuthenticated()
++            ? '<button class="profile-nav-link profile-nav-link-logout" onclick="window.handleLogout()">Log Out</button>'
++            : '<a href="#/login" class="profile-nav-link">Log In</a>'}
++        </nav>
++
++        <div class="profile-status-strip" id="gallery-status-strip">${escapeHtml(stripText)}</div>
++
++        <div class="gallery-content" id="gallery-content">
++          ${moduleHtml}
++        </div>
++      </div>
++    </div>
++  `;
++}
++
++/**
++ * Render one album card (used on the dedicated gallery page).
++ */
++function renderAlbumCardHtml(album, username) {
++  const coverThumb = album.cover_thumbnail_url || album.cover_image_url || '';
++  const count = album.photo_count || 0;
++
++  return `
++    <a class="gallery-album-card" href="#/profile/${escapeHtmlAttr(username)}/photos/${escapeHtmlAttr(album.id)}">
++      <div class="gallery-album-cover">
++        ${coverThumb
++          ? `<img src="${escapeHtmlAttr(coverThumb)}" alt="${escapeHtmlAttr(album.name)}" loading="lazy">`
++          : '<div class="gallery-album-cover-placeholder">No photos yet</div>'}
++      </div>
++      <div class="gallery-album-info">
++        <div class="gallery-album-name">${escapeHtml(album.name)}</div>
++        <div class="gallery-album-meta">${count} photo${count === 1 ? '' : 's'}</div>
++      </div>
++    </a>
++  `;
++}
++
++/**
++ * Render the dedicated Photo Gallery page for a username.
++ * Public and read-only for visitors of another profile.
++ *
++ * @param {string} username
++ * @returns {string} HTML string
++ */
++export function renderGalleryPage(username) {
++  const profileUsername = username || '';
++  // Reset shared state for this navigation.
++  galleryRoutes.page = 'gallery';
++  galleryRoutes.username = profileUsername;
++  galleryRoutes.albumId = null;
++  galleryRoutes.isOwnProfile = isOwnUsername(profileUsername);
++  galleryRoutes.photos = [];
++  galleryRoutes.albums = [];
++  galleryRoutes.album = null;
++
++  return renderGalleryShell({
++    username: profileUsername,
++    activeNav: 'gallery',
++    tagline: `Photo Gallery ΓÇö @${profileUsername}`,
++    stripText: 'Loading albums...',
++    moduleHtml: `
++      <section class="profile-module">
++        <div class="profile-module-header">
++          <span>Photo Gallery</span>
++          <span id="gallery-album-total"></span>
++        </div>
++        <div class="profile-module-body">
++          ${galleryRoutes.isOwnProfile ? renderGalleryUploadModule() : ''}
++          <div class="gallery-albums" id="gallery-albums-grid">
++            <div class="photo-gallery-empty">Loading albums...</div>
++          </div>
++        </div>
++      </section>
++    `,
++  });
++}
++
++/**
++ * Shared owner-only upload toolbar used by the gallery and album pages.
++ * Uses the same element ids as the profile sidebar so the existing
++ * initGalleryUpload() multi-upload flow can be reused unchanged.
++ */
++function renderGalleryUploadModule() {
++  return `
++    <div class="photo-gallery-upload" id="photo-gallery-upload">
++      <input type="file" id="gallery-photo-input" accept="image/jpeg,image/png,image/webp" multiple style="display:none">
++      <button class="btn btn-primary btn-sm" type="button" onclick="document.getElementById('gallery-photo-input').click()">Upload Photos</button>
++      <div id="gallery-upload-queue" class="gallery-upload-queue" style="display:none"></div>
++      <div id="gallery-upload-status" class="upload-status"></div>
++    </div>
++  `;
++}
++
++/**
++ * Album id used as the upload target for the currently mounted gallery view.
++ * Returns null on the profile page / gallery page (general gallery upload).
++ */
++function getGalleryUploadAlbumId() {
++  return galleryRoutes.page === 'album' ? galleryRoutes.albumId : null;
++}
++
++/**
++ * Reload whichever gallery view is currently mounted.
++ * Used after a successful upload or delete.
++ */
++async function refreshActiveGalleryView() {
++  if (galleryRoutes.page === 'gallery') {
++    await refreshGalleryPage();
++  } else if (galleryRoutes.page === 'album') {
++    await refreshAlbumPage();
++  } else if (currentProfile) {
++    await loadAndRenderGallery(currentProfile.username, true);
++  }
++}
++
++/**
++ * Initialise the dedicated Photo Gallery page after it has been mounted.
++ * Loads albums + photos, renders the Profile Pictures album first and then
++ * every normal album, and wires up the lightbox / upload / delete behaviour.
++ *
++ * @param {string} username
++ */
++export async function initGalleryPage(username) {
++  const params = parseGalleryHash();
++  const profileUsername = username || params.username || galleryRoutes.username;
++
++  try {
++    const [albumResponse, photos] = await Promise.all([
++      albumsApi.getAlbums(profileUsername),
++      fetchGalleryPhotos(profileUsername),
++    ]);
++
++    galleryRoutes.albums = albumResponse.albums || [];
++    galleryRoutes.photos = photos;
++    galleryRoutes.isOwnProfile = galleryRoutes.isOwnProfile || !!albumResponse.is_own_profile;
++  } catch (err) {
++    console.error('[GALLERY] Failed to load gallery page:', err);
++    setGalleryStatus(`Failed to load gallery: ${err.message || 'Unknown error'}`, true);
++    const gridEl = document.getElementById('gallery-albums-grid');
++    if (gridEl) {
++      gridEl.innerHTML = '<div class="photo-gallery-empty">Could not load albums.</div>';
++    }
++    return;
++  }
++
++  // Owner-only multi-upload (reuses the profile sidebar upload flow)
++  if (galleryRoutes.isOwnProfile) initGalleryUpload();
++
++  renderGalleryAlbums();
++  applyGalleryBackground(profileUsername);
++}
++
++/**
++ * Render the album page for one album of a profile.
++ * Photos shown are ONLY the ones belonging to the requested album.
++ *
++ * @param {string} username
++ * @param {string} albumId
++ * @returns {string} HTML string
++ */
++export function renderAlbumPage(username, albumId) {
++  const profileUsername = username || '';
++
++  galleryRoutes.page = 'album';
++  galleryRoutes.username = profileUsername;
++  galleryRoutes.albumId = albumId || null;
++  galleryRoutes.isOwnProfile = isOwnUsername(profileUsername);
++  galleryRoutes.photos = [];
++  galleryRoutes.albums = [];
++  galleryRoutes.album = null;
++
++  const isOwner = galleryRoutes.isOwnProfile;
++
++  return renderGalleryShell({
++    username: profileUsername,
++    activeNav: 'gallery',
++    tagline: `Album ΓÇö @${profileUsername}`,
++    stripText: 'Loading album...',
++    moduleHtml: `
++      <section class="profile-module" id="album-module">
++        <div class="profile-module-header">
++          <span class="gallery-back-link">
++            <a href="#/profile/${escapeHtmlAttr(profileUsername)}/photos" class="gallery-back-to-gallery">&larr; Back to Gallery</a>
++          </span>
++          <span class="gallery-album-owner">${isOwner ? 'Your album' : `@${escapeHtml(profileUsername)}`}</span>
++        </div>
++        <div class="profile-module-body">
++          <div class="album-header" id="album-header">
++            <div class="album-cover" id="album-cover"></div>
++            <div class="album-header-text">
++              <h2 class="album-title" id="album-title">Loading album...</h2>
++              <div class="album-meta" id="album-meta"></div>
++            </div>
++          </div>
++
++          ${isOwner ? renderGalleryUploadModule() : ''}
++
++          <div class="photo-gallery" id="album-photo-gallery">
++            <div class="photo-gallery-empty" id="album-photos-empty">Loading photos...</div>
++            <div class="photo-gallery-grid" id="album-photos-grid" style="display:none"></div>
++          </div>
++        </div>
++      </section>
++    `,
++  });
++}
++
++/**
++ * Initialise the album page: load the album + its photos and show ONLY those.
++ *
++ * @param {string} username
++ * @param {string} albumId
++ */
++export async function initAlbumPage(username, albumId) {
++  const params = parseGalleryHash();
++  const profileUsername = username || params.username || galleryRoutes.username;
++  const targetAlbumId = albumId || params.albumId || galleryRoutes.albumId;
++
++  if (!targetAlbumId) {
++    setGalleryStatus('Album not found.', true);
++    renderAlbumPhotos([], false);
++    return;
++  }
++
++  galleryRoutes.albumId = targetAlbumId;
++
++  try {
++    const [albumResponse, publicPhotos] = await Promise.all([
++      albumsApi.getAlbums(profileUsername),
++      fetchGalleryPhotos(profileUsername),
++    ]);
++
++    galleryRoutes.albums = albumResponse.albums || [];
++    galleryRoutes.photos = publicPhotos;
++    galleryRoutes.isOwnProfile = galleryRoutes.isOwnProfile || !!albumResponse.is_own_profile;
++
++    galleryRoutes.album = galleryRoutes.albums.find(
++      album => String(album.id) === String(targetAlbumId)
++    ) || null;
++
++    // Owner viewing their own (possibly private) album uses the authenticated
++    // album endpoint; everyone else uses the public read-only photo feed.
++    let albumPhotos = await fetchAlbumPhotos(targetAlbumId);
++    if (!albumPhotos) {
++      albumPhotos = publicPhotos.filter(
++        photo => photo.album_id != null && String(photo.album_id) === String(targetAlbumId)
++      );
++    }
++    galleryRoutes.photos = sortPhotosByNewest(albumPhotos);
++  } catch (err) {
++    console.error('[GALLERY] Failed to load album:', err);
++    setGalleryStatus(`Failed to load album: ${err.message || 'Unknown error'}`, true);
++    renderAlbumPhotos([], false);
++    applyGalleryBackground(profileUsername);
++    return;
++  }
++
++  renderAlbumHeader(profileUsername);
++  renderAlbumPhotos(galleryRoutes.photos, galleryRoutes.isOwnProfile);
++  if (galleryRoutes.isOwnProfile) initGalleryUpload();
++  applyGalleryBackground(profileUsername);
++}
++
++/**
++ * Refresh the mounted album page (after upload / delete).
++ */
++async function refreshAlbumPage() {
++  if (galleryRoutes.page !== 'album') return;
++  await initAlbumPage(galleryRoutes.username, galleryRoutes.albumId);
++}
++
++/**
++ * Sort photos newest first (mirrors the API ordering).
++ */
++function sortPhotosByNewest(photos) {
++  return (photos || []).slice().sort((a, b) => {
++    const aTime = Date.parse(a.created_at || '') || 0;
++    const bTime = Date.parse(b.created_at || '') || 0;
++    return bTime - aTime;
++  });
++}
++
++/**
++ * Render the album cover, title and photo count.
++ */
++function renderAlbumHeader(username) {
++  const album = galleryRoutes.album;
++  const photos = galleryRoutes.photos || [];
++  const titleEl = document.getElementById('album-title');
++  const metaEl = document.getElementById('album-meta');
++  const coverEl = document.getElementById('album-cover');
++
++  const albumName = album ? album.name : 'Album';
++  const count = photos.length;
++
++  if (titleEl) titleEl.textContent = albumName;
++  if (metaEl) metaEl.textContent = `${count} photo${count === 1 ? '' : 's'} ┬╖ @${username}`;
++  if (coverEl) {
++    const coverThumb = album && (album.cover_thumbnail_url || album.cover_image_url);
++    coverEl.innerHTML = coverThumb
++      ? `<img src="${escapeHtmlAttr(coverThumb)}" alt="${escapeHtmlAttr(albumName)}">`
++      : '<div class="gallery-album-cover-placeholder">No photos yet</div>';
++  }
++
++  setGalleryStatus(`Viewing album "${albumName}" ΓÇö ${count} photo${count === 1 ? '' : 's'}.`);
++}
++
++/**
++ * Render ONLY the photos of the current album into the album grid.
++ */
++function renderAlbumPhotos(photos, isOwnProfile) {
++  const gridEl = document.getElementById('album-photos-grid');
++  const emptyEl = document.getElementById('album-photos-empty');
++  if (!gridEl || !emptyEl) return;
++
++  if (!photos || photos.length === 0) {
++    gridEl.style.display = 'none';
++    gridEl.innerHTML = '';
++    emptyEl.style.display = 'block';
++    emptyEl.textContent = isOwnProfile
++      ? 'No photos in this album yet. Use Upload Photos to add some.'
++      : 'No photos in this album yet.';
++    return;
++  }
++
++  emptyEl.style.display = 'none';
++  gridEl.style.display = 'grid';
++  gridEl.innerHTML = photos.map(photo => renderGalleryItemHtml(photo, isOwnProfile)).join('');
++
++  // The lightbox navigates through this album's photos only.
++  bindGalleryGridLightbox(gridEl, photos, photos);
++}
++
++/**
++ * Refresh the mounted gallery page (after upload / delete).
++ */
++async function refreshGalleryPage() {
++  if (galleryRoutes.page !== 'gallery') return;
++  try {
++    const [albumResponse, photos] = await Promise.all([
++      albumsApi.getAlbums(galleryRoutes.username),
++      fetchGalleryPhotos(galleryRoutes.username),
++    ]);
++    galleryRoutes.albums = albumResponse.albums || [];
++    galleryRoutes.photos = photos;
++  } catch (err) {
++    console.error('[GALLERY] Refresh failed:', err);
++  }
++  renderGalleryAlbums();
++}
++
++/**
++ * Fetch gallery photos for a username (public endpoint).
++ */
++async function fetchGalleryPhotos(username) {
++  const response = await galleryApi.getPhotos(username);
++  return response.photos || [];
++}
++
++/**
++ * Fetch an album's photos. When the owner is viewing their own album we use the
++ * authenticated endpoint so private albums stay visible to their owner.
++ * Returns null when the public endpoint should be used instead.
++ */
++async function fetchAlbumPhotos(albumId) {
++  if (!galleryRoutes.isOwnProfile) return null;
++
++  const isOwnAlbum = (galleryRoutes.albums || []).some(
++    album => String(album.id) === String(albumId) && album.is_own_album
++  );
++  if (!isOwnAlbum) return null;
++
++  try {
++    const response = await albumsApi.getAlbumPhotos(albumId);
++    return response.photos || [];
++  } catch (err) {
++    console.warn('[GALLERY] Falling back to public album photos:', err.message || err);
++    return null;
++  }
++}
++
++/**
++ * Render every album card ΓÇö Profile Pictures first, then normal albums.
++ * The API already orders them that way; the sort here keeps that guarantee
++ * even if the ordering ever changes server-side.
++ */
++function renderGalleryAlbums() {
++  const gridEl = document.getElementById('gallery-albums-grid');
++  if (!gridEl) return;
++
++  const username = galleryRoutes.username;
++  const albums = (galleryRoutes.albums || []).slice().sort((a, b) => {
++    if (a.is_profile_pictures && !b.is_profile_pictures) return -1;
++    if (!a.is_profile_pictures && b.is_profile_pictures) return 1;
++    return 0;
++  });
++
++  const totalEl = document.getElementById('gallery-album-total');
++  const totalPhotos = albums.reduce((sum, album) => sum + (album.photo_count || 0), 0);
++  if (totalEl) {
++    totalEl.textContent = `${albums.length} album${albums.length === 1 ? '' : 's'} ┬╖ ${totalPhotos} photo${totalPhotos === 1 ? '' : 's'}`;
++  }
++
++  if (albums.length === 0) {
++    gridEl.innerHTML = `
++      <div class="photo-gallery-empty">
++        No albums to show yet.${galleryRoutes.isOwnProfile ? ' Upload photos to fill your gallery.' : ''}
++      </div>
++    `;
++    setGalleryStatus(galleryRoutes.isOwnProfile
++      ? 'Your gallery is empty.'
++      : `@${username} has no photos yet.`);
++    return;
++  }
++
++  gridEl.innerHTML = albums.map(album => renderAlbumCardHtml(album, username)).join('');
++
++  const photoTotal = (galleryRoutes.photos || []).length;
++  setGalleryStatus(`@${username} ┬╖ ${photoTotal} photo${photoTotal === 1 ? '' : 's'} in ${albums.length} album${albums.length === 1 ? '' : 's'}`);
++}
++
++/**
++ * Update the status strip on the gallery / album pages.
++ */
++function setGalleryStatus(message, isError = false) {
++  const strip = document.getElementById('gallery-status-strip');
++  if (!strip) return;
++  strip.textContent = message || '';
++  strip.style.color = isError ? '#dc2626' : '';
++}
++
++/**
++ * Apply the profile's theme background to the gallery / album pages.
++ */
++async function applyGalleryBackground(username) {
++  if (!username) return;
++  try {
++    const profile = await profileApi.getPublicProfile(username);
++    applyProfileBackground(profile);
++  } catch (err) {
++    // Cosmetic only ΓÇö never break the page over the background.
++    console.warn('[GALLERY] Could not load profile background:', err.message || err);
++  }
++}
++
++/**
++ * Open an album from the gallery page using hash navigation.
++ */
++function openAlbumFromGallery(albumId) {
++  if (!albumId) return;
++  window.navigate(`/profile/${encodeURIComponent(galleryRoutes.username)}/photos/${encodeURIComponent(albumId)}`);
++}
++
++/**
++ * Hash-navigation entry point for "View All Photos".
++ * Called from the profile preview with no argument (own gallery) or with a
++ * username (public gallery).
++ */
++window.openGalleryPage = function(username) {
++  const target = username || (getCurrentUserProfile() || {}).username || '';
++  if (!target) {
++    console.warn('[GALLERY] Cannot open the gallery without a username');
++    return;
++  }
++  window.navigate(`/profile/${encodeURIComponent(target)}/photos`);
++};

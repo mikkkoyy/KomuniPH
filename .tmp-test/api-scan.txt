@@ -1,0 +1,7 @@
+getAlbumPhotos -> 
+fetchGalleryPhotos -> 
+getPhotos -> 412: async getPhotos(username, limit = 50, offset = 0) { | 533: async getPhotosWithAlbum(username, albumId = null, limit = 50, offset = 0) {
+getOwnPhotos -> 416: async getOwnPhotos(limit = 50, offset = 0) {
+getAlbums -> 501: async getAlbums(username) {
+getAlbum( -> 505: async getAlbum(username, albumId) {
+getProfilePicturesAlbum -> 529: async getProfilePicturesAlbum() {

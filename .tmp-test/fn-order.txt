@@ -1,0 +1,58 @@
+15: function toRgbaWithOpacity(color, opacity) {
+36: function toHexColor(color) {
+56: function resolveBackgroundSizeCss(bgSize) {
+63: function createAvatar(username, displayName, photoUrl, size = 5) {
+74: export function renderProfilePage(viewUsername = null) {
+510: const DEFAULT_BACKGROUND_GRADIENT = 'linear-gradient(135deg, #0f172a 0%, #334155 50%, #475569 100%)';
+512: function applyProfileBackground(profile) {
+661: async function loadAndRenderTestimonials(username, showForm) {
+680: function renderProfileView(profile) {
+868: function populateCityDropdown() {
+892: function populateBarangayDropdown() {
+912: async function populateLocationDropdowns(selectedCountry, selectedCity, selectedBarangay) {
+967: function escapeHtml(str) {
+978: function getProfileDisplayName(profile) {
+1148: function isValidDate(dateString) {
+1499: function formatTestimonialDate(dateStr) {
+1507: function escapeHtmlAttr(str) {
+1512: function renderTestimonialCard(testimonial) {
+1548: function renderTestimonials(testimonials) {
+1674: export function initProfilePage() {
+1692: function initProfilePhotoCamera() {
+1840: async function loadAndRenderGallery(username, isOwnProfile) {
+1864: function renderGalleryPreviewMeta(totalPhotos) {
+1879: function renderGallery(photos, isOwnProfile, lightboxSource = photos) {
+1907: function renderGalleryItemHtml(photo, isOwnProfile) {
+1926: function bindGalleryGridLightbox(gridEl, displayedPhotos, lightboxSource = displayedPhotos) {
+1939: function initGalleryUpload() {
+2070: function openLightbox(photos, index) {
+2104: function closeLightbox() {
+2116: function handleLightboxKeydown(e) {
+2129: function lightboxPrev() {
+2138: function lightboxNext() {
+2147: function updateLightboxImage() {
+2198: /* =========================================================================
+2209: const PROFILE_GALLERY_PREVIEW_LIMIT = 6;
+2214: const galleryRoutes = {
+2227: function safeDecode(value) {
+2238: function parseGalleryHash() {
+2257: function isOwnUsername(username) {
+2269: function renderGalleryShell({ username, activeNav, tagline, stripText, moduleHtml }) {
+2305: function renderAlbumCardHtml(album, username) {
+2331: export function renderGalleryPage(username) {
+2369: function renderGalleryUploadModule() {
+2384: function getGalleryUploadAlbumId() {
+2392: async function refreshActiveGalleryView() {
+2409: export async function initGalleryPage(username) {
+2447: export function renderAlbumPage(username, albumId) {
+2500: export async function initAlbumPage(username, albumId) {
+2538: async function refreshAlbumPage() {
+2546: function sortPhotosByNewest(photos) {
+2557: function renderAlbumHeader(username) {
+2582: function renderAlbumPhotos(photos, isOwnProfile) {
+2608: async function refreshGalleryPage() {
+2626: async function fetchGalleryPhotos(username) {
+2636: function renderGalleryAlbums() {
+2674: function setGalleryStatus(message, isError = false) {
+2684: async function applyGalleryBackground(username) {
+2698: function openAlbumFromGallery(albumId) {

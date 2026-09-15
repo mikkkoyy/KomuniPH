@@ -14,7 +14,6 @@ import config from './config.js';
 import { queryOne, queryAll, execute } from './database.js';
 import { jsonResponse, errorResponse, parseBody } from './utils.js';
 import { seedDefaultTheme } from './database.js';
-import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

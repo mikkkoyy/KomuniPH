@@ -1,0 +1,10 @@
+79: album_id,
+93: album_id: p.album_id || null,
+115: * Supports optional album_id field to assign photos to a specific album.
+215: if (name === 'album_id') {
+362: // Validate album_id if provided
+366: 'SELECT id FROM photo_albums WHERE id = ? AND user_id = ?',
+376: 'INSERT INTO profile_photos (id, profile_user_id, album_id, file_path, caption, created_at, updated_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+389: album_id: validatedAlbumId,
+459: album_id,
+473: album_id: p.album_id || null,

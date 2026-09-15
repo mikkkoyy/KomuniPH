@@ -1863,6 +1863,207 @@ a:hover {
   }
 }
 
+/* GALLERY-ROUTES-01: dedicated Photo Gallery + Album pages
+   (hash routes #/profile/:username/photos[/:albumId]).
+   Reuses the profile frame/theme variables so the page inherits the user's
+   background, cards, text and accent colors. */
+.gallery-content {
+  display: block;
+  margin-bottom: 1rem;
+}
+
+/* Gallery page navigation (scoped so the profile page nav stays untouched) */
+#gallery-nav a,
+#gallery-nav button {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-family: inherit;
+  color: var(--theme-text, var(--kp-ink));
+  text-decoration: none;
+  border: 1px solid var(--theme-card-border-color, var(--kp-border));
+  border-radius: var(--theme-card-radius, var(--kp-card-radius));
+  background: var(--theme-card-background, rgba(255, 247, 236, 0.95));
+  cursor: pointer;
+}
+
+#gallery-nav a:hover,
+#gallery-nav button:hover {
+  background: var(--theme-accent, var(--kp-teal));
+  color: white;
+}
+
+#gallery-nav .profile-nav-active {
+  background: var(--theme-accent, var(--kp-teal));
+  color: white;
+}
+
+/* Album cards */
+.gallery-albums {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 1rem;
+}
+
+.gallery-album-card {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  background: var(--theme-card-background, rgba(255, 247, 236, 0.95));
+  border: 1px solid var(--theme-card-border-color, var(--kp-border));
+  border-radius: var(--theme-card-radius, var(--kp-card-radius));
+  overflow: hidden;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.gallery-album-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--theme-card-shadow, 0 12px 28px -14px rgba(42, 33, 48, 0.4));
+}
+
+.gallery-album-cover {
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: var(--theme-card-background, #fff7ec);
+}
+
+.gallery-album-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.gallery-album-cover-placeholder {
+  width: 100%;
+  height: 100%;
+  min-height: 8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+  text-align: center;
+  padding: 0.5rem;
+}
+
+.gallery-album-info {
+  padding: 0.5rem 0.625rem;
+}
+
+.gallery-album-name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--theme-text, var(--kp-ink));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gallery-album-meta {
+  font-size: 0.6875rem;
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+  margin-top: 0.125rem;
+}
+
+/* Album page header */
+.gallery-back-link,
+.gallery-album-owner {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+}
+
+.gallery-back-to-gallery {
+  color: var(--theme-accent, var(--kp-teal));
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.gallery-back-to-gallery:hover {
+  text-decoration: underline;
+}
+
+.album-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.album-cover {
+  width: 110px;
+  height: 110px;
+  flex: 0 0 auto;
+  border-radius: var(--theme-card-radius, var(--kp-card-radius));
+  overflow: hidden;
+  background: var(--theme-card-background, #fff7ec);
+  border: 1px solid var(--theme-card-border-color, var(--kp-border));
+}
+
+.album-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.album-title {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--theme-text, var(--kp-ink));
+  margin: 0 0 0.25rem;
+}
+
+.album-meta {
+  font-size: 0.75rem;
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+}
+
+/* Profile page gallery preview footer ("View All Photos →") */
+.photo-gallery-preview-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--theme-card-border-color, var(--kp-border));
+}
+
+.photo-gallery-view-all {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--theme-accent, var(--kp-teal));
+  cursor: pointer;
+}
+
+.photo-gallery-view-all:hover {
+  text-decoration: underline;
+}
+
+.photo-gallery-preview-meta {
+  font-size: 0.6875rem;
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+}
+
+/* Gallery pages responsive */
+@media (max-width: 640px) {
+  .gallery-albums {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 0.75rem;
+  }
+
+  .album-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+}
+
 /* Video Box module */
 .video-box {
   background: var(--theme-card-background, #fff7ec);

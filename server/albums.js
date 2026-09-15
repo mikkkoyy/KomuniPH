@@ -84,8 +84,12 @@ export async function handleGetOwnAlbums(req, res, user) {
 /**
  * Handle GET /api/profiles/:username/albums
  * Returns public albums for a profile by username.
+ *
+ * GALLERY-ROUTES-01: the Profile Pictures album (type = 'profile') is included
+ * as well, ordered first, so the dedicated Photo Gallery page can show it
+ * alongside the normal albums. The list stays public read-only.
  */
-export function handleGetAlbums(req, res, params) {
+export async function handleGetAlbums(req, res, params) {
   try {
     const username = params.username ? params.username.toLowerCase() : '';
 
@@ -110,8 +114,8 @@ export function handleGetAlbums(req, res, params) {
         a.updated_at,
         (SELECT COUNT(*) FROM profile_photos p WHERE p.album_id = a.id AND p.status = 'active') as photo_count
       FROM photo_albums a
-      WHERE a.user_id = ? AND a.type = 'general'
-      ORDER BY a.updated_at DESC
+      WHERE a.user_id = ?
+      ORDER BY a.type DESC, a.updated_at DESC
     `, [profile.user_id]);
 
     const transformed = await Promise.all(albums.map(async (album) => {
@@ -138,6 +142,7 @@ export function handleGetAlbums(req, res, params) {
         name: album.name,
         description: album.description || '',
         type: album.type,
+        is_profile_pictures: album.type === 'profile',
         cover_photo_url: coverUrl,
         photo_count: album.photo_count || 0,
         created_at: album.created_at,

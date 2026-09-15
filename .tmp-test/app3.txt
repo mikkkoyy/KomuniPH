@@ -1,0 +1,60 @@
+1: /**
+2:  * KomuniPH Lite - Main Application
+3:  * Router and app initialization
+4:  */
+5: 
+6: import { isAuthenticated, clearTokens, initAuth } from './api.js';
+7: import { renderLoginPage, renderRegisterPage, renderVerifyEmailPage, renderForgotPasswordPage, renderResetPasswordPage, renderResetPasswordSuccessPage, initLoginForm, initRegisterForm, initForgotPasswordForm, initResetPasswordForm } from './auth.js';
+8: import { renderHomePage, initHomePage, renderPlaceholderPage, initPlaceholderPage } from './feed.js';
+9: import { renderProfilePage, initProfilePage, renderGalleryPage, initGalleryPage, renderAlbumPage, initAlbumPage } from './profile.js';
+10: import { renderMessagesPage, initMessagesPage, destroyMessagesPage } from './messages.js';
+11: 
+12: const app = document.getElementById('app');
+13: 
+14: /**
+15:  * Navigate to a route
+16:  */
+17: export function navigate(path) {
+18:   window.location.hash = path;
+19: }
+20: 
+21: /**
+22:  * Get current route from hash
+23:  */
+24: function getRoute() {
+25:   const hash = window.location.hash.slice(1) || '/login';
+26:   return hash;
+27: }
+28: 
+29: /**
+30:  * Render the current route
+31:  */
+32: function render() {
+33:   const route = getRoute();
+34: 
+35:   // Cleanup previous page
+36:   if (destroyMessagesPage) {
+37:     destroyMessagesPage();
+38:   }
+39: 
+40:   // Clear tokens on logout
+41:   if (route === '/logout') {
+42:     clearTokens();
+43:     navigate('/login');
+44:     return;
+45:   }
+46: 
+47:   let html = '';
+48:   let initFn = null;
+49: 
+50:   switch (route) {
+51:     case '/login':
+52:       html = renderLoginPage();
+53:       initFn = initLoginForm;
+54:       break;
+55:     case '/register':
+56:       html = renderRegisterPage();
+57:       initFn = initRegisterForm;
+58:       break;
+59:     case '/verify-email':
+60:       html = renderVerifyEmailPage();

@@ -138,8 +138,7 @@ export function renderProfilePage(viewUsername = null) {
                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="12" r="4"></circle></svg>
                      </button>
                    </div>
-                   <input type="file" id="photo-input" accept="image/jpeg,image/png,image/webp" style="display:none">
-                   <div id="upload-status" class="upload-status"></div>
+
                  `}${isPublicView ? `
                    <div class="profile-photo-display" id="profile-photo-display"></div>
                  ` : ''}
@@ -147,18 +146,15 @@ export function renderProfilePage(viewUsername = null) {
                   <h2 class="profile-name" id="profile-name"></h2>
                   <p class="profile-username" id="profile-username"></p>
                   <p class="profile-nickname" id="profile-nickname"></p>
+                  <p id="profile-alias"></p>
 
                   <div class="profile-info-grid" id="profile-info-grid">
                     <!-- Identity fields will be populated by JS -->
                   </div>${isPublicView ? '' : `
                   <div class="profile-actions" id="profile-actions">
-                    <button class="profile-action-btn" onclick="window.startEditProfile()">Edit Profile</button>
-                    <button class="profile-action-btn" onclick="window.openCustomization()">Customize Profile</button>
+                    <a class="profile-action-btn" href="#/profile/edit">Edit Profile</a>
                   </div>`}
-                </div>${isPublicView ? '' : `
-                <div id="profile-edit" style="display:none">
-                  <!-- Edit form will be populated by startEditProfile() -->
-                </div>`}
+                </div>
               </div>
           </div>
 
@@ -378,145 +374,7 @@ export function renderProfilePage(viewUsername = null) {
         ~ Welcome to my KomuniPH space ~
       </footer>
 
-      <!-- Theme customization panel -->
-      <div id="theme-customization-panel" class="theme-panel" style="display:none">
-        <div class="theme-panel-header">
-          <h2>Customize Profile</h2>
-          <button class="theme-panel-close" onclick="window.closeCustomization()">&times;</button>
-        </div>
 
-        <div class="theme-panel-body">
-          <div class="theme-section">
-            <h3>Background</h3>
-            <div class="theme-radio-group">
-              <label class="theme-radio">
-                <input type="radio" name="bg-type" value="color" checked onchange="window.setBgType('color')">
-                <span>Solid Color</span>
-              </label>
-              <label class="theme-radio">
-                <input type="radio" name="bg-type" value="gradient" onchange="window.setBgType('gradient')">
-                <span>Gradient</span>
-              </label>
-              <label class="theme-radio">
-                <input type="radio" name="bg-type" value="image" onchange="window.setBgType('image')">
-                <span>Background Image</span>
-              </label>
-            </div>
-
-            <div id="bg-color-controls" class="theme-controls">
-              <label class="theme-label">Background Color</label>
-              <input type="color" id="theme-backgroundColor" value="#fff7ec" onchange="window.updatePreview()">
-            </div>
-
-            <div id="bg-gradient-controls" class="theme-controls" style="display:none">
-              <label class="theme-label">Gradient</label>
-              <select id="theme-backgroundGradient" onchange="window.updatePreview()">
-                <option value="">None</option>
-                <option value="linear-gradient(135deg, #111827, #312e81)">Dark Indigo</option>
-                <option value="linear-gradient(135deg, #0f172a, #1e293b)">Slate</option>
-                <option value="linear-gradient(135deg, #1e1b4b, #312e81)">Deep Purple</option>
-                <option value="linear-gradient(135deg, #0e6e6e, #134e4a)">Teal</option>
-                <option value="linear-gradient(135deg, #7b5aa6, #4c1d95)">Ube</option>
-              </select>
-            </div>
-
-            <div id="bg-image-controls" class="theme-controls" style="display:none">
-              <label class="theme-label">Upload Background</label>
-              <input type="file" id="theme-background-input" accept="image/jpeg,image/png,image/webp" onchange="window.handleBackgroundUpload(this)">
-              <div id="theme-background-status" class="upload-status"></div>
-              <div id="theme-background-preview" class="theme-bg-preview" style="display:none"></div>
-            </div>
-
-            <div class="theme-row">
-              <div class="theme-field">
-                <label class="theme-label">Position</label>
-                <select id="theme-backgroundPosition" onchange="window.updatePreview()">
-                  <option value="center">Center</option>
-                  <option value="top">Top</option>
-                  <option value="bottom">Bottom</option>
-                  <option value="left">Left</option>
-                  <option value="right">Right</option>
-                  <option value="top left">Top Left</option>
-                  <option value="top center">Top Center</option>
-                  <option value="top right">Top Right</option>
-                  <option value="center left">Center Left</option>
-                  <option value="center center">Center Center</option>
-                  <option value="center right">Center Right</option>
-                  <option value="bottom left">Bottom Left</option>
-                  <option value="bottom center">Bottom Center</option>
-                  <option value="bottom right">Bottom Right</option>
-                </select>
-              </div>
-              <div class="theme-field">
-                <label class="theme-label">Size</label>
-                <select id="theme-backgroundSize" onchange="window.updatePreview()">
-                  <option value="cover">Cover (crop to fill)</option>
-                  <option value="contain">Contain (fit inside)</option>
-                  <option value="stretch">Stretch (fill exactly)</option>
-                  <option value="auto">Auto</option>
-                </select>
-              </div>
-              <div class="theme-field">
-                <label class="theme-label">Repeat</label>
-                <select id="theme-backgroundRepeat" onchange="window.updatePreview()">
-                  <option value="no-repeat">No Repeat</option>
-                  <option value="repeat">Repeat</option>
-                  <option value="repeat-x">Repeat X</option>
-                  <option value="repeat-y">Repeat Y</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <div class="theme-section">
-            <h3>Colors</h3>
-            <div class="theme-row">
-              <div class="theme-field">
-                <label class="theme-label">Text</label>
-                <input type="color" id="theme-textColor" value="#2a2130" onchange="window.updatePreview()">
-              </div>
-              <div class="theme-field">
-                <label class="theme-label">Muted Text</label>
-                <input type="color" id="theme-mutedTextColor" value="#6b6072" onchange="window.updatePreview()">
-              </div>
-              <div class="theme-field">
-                <label class="theme-label">Accent</label>
-                <input type="color" id="theme-accentColor" value="#0e6e6e" onchange="window.updatePreview()">
-              </div>
-            </div>
-          </div>
-
-          <div class="theme-section">
-            <h3>Card</h3>
-            <div class="theme-row">
-              <div class="theme-field">
-                <label class="theme-label">Card Color</label>
-                <input type="color" id="theme-cardBackground" value="#fff7ec" onchange="window.updatePreview()">
-              </div>
-              <div class="theme-field">
-                <label class="theme-label">Border Color</label>
-                <input type="color" id="theme-cardBorderColor" value="#f0dfc8" onchange="window.updatePreview()">
-              </div>
-            </div>
-            <div class="theme-row">
-              <div class="theme-field">
-                <label class="theme-label">Transparency: <span id="theme-cardOpacity-value">0.95</span></label>
-                <input type="range" id="theme-cardOpacity" min="0" max="1" step="0.01" value="0.95" oninput="window.updatePreview()">
-              </div>
-              <div class="theme-field">
-                <label class="theme-label">Corner Radius: <span id="theme-cardBorderRadius-value">1.75rem</span></label>
-                <input type="range" id="theme-cardBorderRadius" min="0" max="100" step="1" value="28" oninput="window.updatePreview()">
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="theme-panel-footer">
-          <button class="btn btn-secondary" onclick="window.resetCustomization()">Reset to Default</button>
-          <button class="btn btn-secondary" onclick="window.closeCustomization()">Cancel</button>
-          <button class="btn btn-primary" onclick="window.saveCustomization()">Save</button>
-        </div>
-      </div>
       </div>
     </div>
   `;
@@ -530,7 +388,7 @@ export function renderProfilePage(viewUsername = null) {
 // Default Gradient Slate theme — used when no custom background is set
 const DEFAULT_BACKGROUND_GRADIENT = 'linear-gradient(135deg, #0f172a 0%, #334155 50%, #475569 100%)';
 
-function applyProfileBackground(profile) {
+export function applyProfileBackground(profile) {
   const frame = document.getElementById('profile-frame');
   if (!frame) return;
   const bgLayer = document.getElementById('profile-background-layer');
@@ -558,7 +416,7 @@ function applyProfileBackground(profile) {
   const effectiveCardOpacity = hasBackground ? Math.min(cardOpacity, 0.85) : cardOpacity;
   const cardBgRgba = toRgbaWithOpacity(cardBg, effectiveCardOpacity);
   const cardBorderColor = custom.cardBorderColor || theme.border || '#f0dfc8';
-  const cardBorderRadius = custom.cardBorderRadius || theme.cardRadius || '1.75rem';
+  const cardBorderRadius = custom.cardBorderRadius ?? theme.cardRadius ?? '1.75rem';
   const cardBorderRadiusValue = typeof cardBorderRadius === 'number' ? `${cardBorderRadius}px` : cardBorderRadius;
   const cardShadow = theme.cardShadow || '0 20px 60px -20px rgba(42, 33, 48, 0.35)';
   const textColor = custom.textColor || theme.text || '#2a2130';
@@ -698,7 +556,7 @@ async function loadAndRenderTestimonials(username, showForm) {
  * Render the profile view (name, username, nickname, photo, personal info)
  * from the current profile data. Called by loadProfile() and after save.
  */
-function renderProfileView(profile) {
+export function renderProfileView(profile) {
   if (!profile) return;
 
   const firstName = profile.first_name || '';
@@ -721,6 +579,9 @@ function renderProfileView(profile) {
   if (nameEl) nameEl.textContent = nameDisplay;
   if (usernameEl) usernameEl.textContent = `@${username}`;
   if (nicknameEl) nicknameEl.textContent = nicknameDisplay;
+
+  const aliasEl = document.getElementById('profile-alias');
+  if (aliasEl) aliasEl.textContent = alias ? `Alias: ${alias}` : '';
 
   // Update personal info module
   const infoNameEl = document.getElementById('profile-info-name');
@@ -766,7 +627,7 @@ function renderProfileView(profile) {
     if (profile.profile_photo_url) {
       publicPhotoDisplay.innerHTML = `<img src="${escapeHtmlAttr(profile.profile_photo_url)}" alt="${escapeHtmlAttr(nameDisplay || username)}" class="profile-photo-public">`;
     } else {
-      publicPhotoDisplay.innerHTML = `<div class="profile-photo-public-initials" style="background: var(--theme-accent, var(--kp-teal)); color: white;">${(nameDisplay || username || '?').charAt(0).toUpperCase()}</div>`;
+      publicPhotoDisplay.innerHTML = `<div class="profile-photo-public-initials" style="background: var(--theme-accent, var(--kp-teal)); color: white;">${escapeHtml((nameDisplay || username || '?').charAt(0).toUpperCase())}</div>`;
     }
   }
 
@@ -819,6 +680,10 @@ window.startEditProfile = async function() {
   const barangayValue = (currentProfile && currentProfile.barangay) || '';
 
   edit.innerHTML = `
+    <div class="form-group">
+      <label for="edit-display-name">Display Name *</label>
+      <input type="text" id="edit-display-name" maxlength="100" value="${escapeHtml(currentProfile?.display_name || '')}" placeholder="Your display identity">
+    </div>
     <div class="form-group">
       <label for="edit-first-name">First Name *</label>
       <input type="text" id="edit-first-name" maxlength="100" value="${escapeHtml(firstName)}" placeholder="Enter your first name">
@@ -996,11 +861,12 @@ function escapeHtml(str) {
  * Build the profile display name from identity fields.
  * Falls back to username if no name fields are set.
  */
-function getProfileDisplayName(profile) {
+export function getProfileDisplayName(profile) {
   if (!profile) return '';
   const firstName = profile.first_name || '';
   const middleName = profile.middle_name || '';
   const lastName = profile.last_name || '';
+  if (profile.display_name) return profile.display_name;
   const fullNameParts = [firstName, middleName, lastName].filter(Boolean);
   return fullNameParts.join(' ') || profile.username || '';
 }
@@ -1132,6 +998,7 @@ window.saveProfile = async function() {
 
   try {
     const updated = await profileApi.updateProfile({
+      display_name: document.getElementById('edit-display-name').value.trim(),
       first_name: firstName,
       middle_name: middleName || null,
       last_name: lastName,
@@ -1145,16 +1012,19 @@ window.saveProfile = async function() {
     });
 
     currentProfile = updated;
+    setCurrentUserProfile(updated);
+    document.getElementById('profile-editor')?.dispatchEvent(new CustomEvent('profile-saved', { detail: updated }));
     applyProfileBackground(updated);
 
     // Refresh the profile view with updated values
     renderProfileView(updated);
 
-    // Switch back to profile view
+    // Keep the dedicated workspace open after saving.
     const view = document.getElementById('profile-view');
     const edit = document.getElementById('profile-edit');
     if (view) view.style.display = 'block';
-    if (edit) edit.style.display = 'none';
+    if (edit) edit.style.display = document.getElementById('profile-editor') ? 'block' : 'none';
+    return updated;
   } catch (err) {
     showEditError(err.message || 'Failed to update profile');
   } finally {
@@ -1182,7 +1052,7 @@ window.openCustomization = function() {
   const custom = currentProfile && currentProfile.theme && currentProfile.theme.custom ? currentProfile.theme.custom : {};
 
   // Reset controls to current custom values or defaults
-  const bgType = custom.backgroundImage ? 'image' : custom.backgroundGradient ? 'gradient' : 'color';
+  const bgType = custom.backgroundImage ? 'image' : custom.backgroundGradient ? 'gradient' : custom.backgroundColor ? 'color' : 'default';
   const bgColor = custom.backgroundColor || theme.background || '#fff7ec';
   const bgGradient = custom.backgroundGradient || '';
   const bgPosition = custom.backgroundPosition || 'center';
@@ -1195,7 +1065,8 @@ window.openCustomization = function() {
   const hasBackground = !!custom.backgroundImage || !!custom.backgroundGradient;
   const cardOpacity = custom.cardOpacity != null ? custom.cardOpacity : (hasBackground ? 0.8 : 0.95);
   const cardBorderColor = custom.cardBorderColor || theme.border || '#f0dfc8';
-  const cardBorderRadius = custom.cardBorderRadius || parseInt(theme.cardRadius) || 28;
+  const baseRadius = String(theme.cardRadius || '1.75rem');
+  const cardBorderRadius = custom.cardBorderRadius ?? (parseFloat(baseRadius) * (baseRadius.endsWith('rem') ? 16 : 1));
 
   const setRadio = (name, value) => {
     const radio = panel.querySelector(`input[name="${name}"][value="${value}"]`);
@@ -1254,13 +1125,14 @@ window.openCustomization = function() {
   // Clear background preview
   const bgPreview = document.getElementById('theme-background-preview');
   if (bgPreview) {
-    bgPreview.style.display = 'none';
-    bgPreview.innerHTML = '';
+    const image = custom.backgroundImage || '';
+    bgPreview.style.display = image ? 'block' : 'none';
+    bgPreview.innerHTML = image ? '<img src="' + escapeHtmlAttr(image) + '" alt="Current background">' : '';
   }
 
   panel.style.display = 'block';
   customizationDirty = false;
-  window.updatePreview();
+  applyProfileBackground(currentProfile);
 };
 
 /**
@@ -1291,133 +1163,22 @@ window.setBgType = function(type) {
  * Update live preview
  */
 window.updatePreview = function() {
-  const frame = document.getElementById('profile-frame');
-  if (!frame) return;
-  const bgLayer = document.getElementById('profile-background-layer');
-
-  const bgType = document.querySelector('input[name="bg-type"]:checked')?.value || 'color';
-  const bgColor = document.getElementById('theme-backgroundColor')?.value || '#fff7ec';
-  const bgGradient = document.getElementById('theme-backgroundGradient')?.value || '';
-  const bgPosition = document.getElementById('theme-backgroundPosition')?.value || 'center';
-  const bgRepeat = document.getElementById('theme-backgroundRepeat')?.value || 'no-repeat';
-  const bgSize = document.getElementById('theme-backgroundSize')?.value || 'cover';
-  const textColor = document.getElementById('theme-textColor')?.value || '#2a2130';
-  const mutedTextColor = document.getElementById('theme-mutedTextColor')?.value || '#6b6072';
-  const accentColor = document.getElementById('theme-accentColor')?.value || '#0e6e6e';
-  const cardBg = document.getElementById('theme-cardBackground')?.value || '#fff7ec';
-  const themeGradient = currentProfile?.theme?.config?.backgroundGradient || '';
-  const customTheme = currentProfile?.theme?.custom || {};
-  const hasCustomBg = customTheme.backgroundColor || customTheme.backgroundGradient || customTheme.backgroundImage;
-  const hasBackground = bgType === 'image' || (bgType === 'gradient' && bgGradient) || (!hasCustomBg && !!themeGradient);
-  const defaultCardOpacity = hasBackground ? 0.8 : 0.95;
-  const cardOpacity = parseFloat(document.getElementById('theme-cardOpacity')?.value || String(defaultCardOpacity));
-  const effectiveCardOpacity = hasBackground ? Math.min(cardOpacity, 0.85) : cardOpacity;
-  const cardBgRgba = toRgbaWithOpacity(cardBg, effectiveCardOpacity);
-  const cardBorderColor = document.getElementById('theme-cardBorderColor')?.value || '#f0dfc8';
-  const cardBorderRadius = parseInt(document.getElementById('theme-cardBorderRadius')?.value || '28', 10);
-
-  const opacityValue = document.getElementById('theme-cardOpacity-value');
-  if (opacityValue) opacityValue.textContent = cardOpacity.toFixed(2);
-
-  const radiusValue = document.getElementById('theme-cardBorderRadius-value');
-  if (radiusValue) radiusValue.textContent = `${cardBorderRadius}px`;
-
-  let backgroundValue = bgColor;
-  if (bgType === 'gradient' && bgGradient) {
-    backgroundValue = bgGradient;
-  } else if (bgType === 'color' && !hasCustomBg && themeGradient) {
-    backgroundValue = themeGradient;
-  }
-
-  // Set CSS variables on the frame so all profile elements inherit them
-  frame.style.setProperty('--theme-background', backgroundValue);
-  frame.style.setProperty('--theme-card-background', cardBgRgba);
-  frame.style.setProperty('--theme-card-opacity', effectiveCardOpacity);
-  frame.style.setProperty('--theme-card-border-color', cardBorderColor);
-  frame.style.setProperty('--theme-card-radius', `${cardBorderRadius}px`);
-  frame.style.setProperty('--theme-text', textColor);
-  frame.style.setProperty('--theme-text-secondary', mutedTextColor);
-  frame.style.setProperty('--theme-accent', accentColor);
-
-  // Apply background to the fixed viewport layer, NOT the scrolling frame
-  if (bgLayer) {
-    bgLayer.style.backgroundImage = '';
-    bgLayer.style.background = '';
-    if (bgType === 'image') {
-      const bgImage = currentProfile?.theme?.custom?.backgroundImage || currentProfile?.theme?.config?.backgroundImage || '';
-      if (bgImage) {
-        bgLayer.style.backgroundImage = `url(${bgImage})`;
-        bgLayer.style.backgroundColor = bgColor;
-        bgLayer.style.backgroundPosition = bgPosition;
-        bgLayer.style.backgroundRepeat = bgRepeat;
-        bgLayer.style.backgroundSize = resolveBackgroundSizeCss(bgSize);
-      } else {
-        bgLayer.style.background = backgroundValue;
-      }
-    } else {
-      bgLayer.style.background = backgroundValue;
-    }
-  }
-
+  if (!document.getElementById('profile-editor')) return;
+  const custom = getThemeDraft();
+  document.getElementById('theme-cardOpacity-value').textContent = custom.cardOpacity.toFixed(2);
+  document.getElementById('theme-cardBorderRadius-value').textContent = custom.cardBorderRadius + 'px';
+  applyProfileBackground({ ...currentProfile, theme: { ...currentProfile.theme, custom } });
   customizationDirty = true;
 };
 
 /**
  * Handle background upload
  */
-window.handleBackgroundUpload = async function(input) {
-  const file = input.files[0];
-  if (!file) return;
-
-  const status = document.getElementById('theme-background-status');
-  const preview = document.getElementById('theme-background-preview');
-
-  if (!file.type.startsWith('image/')) {
-    status.textContent = 'Invalid file type. Allowed: JPEG, PNG, WebP';
-    status.className = 'upload-status error';
-    return;
-  }
-
-  if (file.size > 5 * 1024 * 1024) {
-    status.textContent = 'File too large. Maximum size: 5MB';
-    status.className = 'upload-status error';
-    return;
-  }
-
-  status.textContent = 'Uploading...';
-  status.className = 'upload-status';
-  if (preview) preview.style.display = 'none';
-
-  try {
-    const result = await profileApi.uploadBackground(file);
-    status.textContent = 'Background uploaded!';
-    status.className = 'upload-status success';
-
-    // Update currentProfile theme custom
-    if (!currentProfile.theme) currentProfile.theme = { config: {}, custom: {} };
-    if (!currentProfile.theme.custom) currentProfile.theme.custom = {};
-    currentProfile.theme.custom.backgroundImage = result.background_url;
-
-    if (preview) {
-      preview.innerHTML = `<img src="${result.background_url}" alt="Background preview" style="max-width:100%;border-radius:0.5rem">`;
-      preview.style.display = 'block';
-    }
-
-    window.updatePreview();
-    // Automatically select Background Image mode after upload
-    const imageRadio = document.querySelector('input[name="bg-type"][value="image"]');
-    if (imageRadio) imageRadio.checked = true;
-    window.setBgType('image');
-  } catch (err) {
-    status.textContent = err.message || 'Upload failed';
-    status.className = 'upload-status error';
-  }
-};
 
 /**
  * Save theme customization
  */
-window.saveCustomization = async function() {
+export function getThemeDraft() {
   const bgType = document.querySelector('input[name="bg-type"]:checked')?.value || 'color';
   const bgColor = document.getElementById('theme-backgroundColor')?.value || '#fff7ec';
   const bgGradient = document.getElementById('theme-backgroundGradient')?.value || '';
@@ -1432,16 +1193,10 @@ window.saveCustomization = async function() {
   const cardBorderColor = document.getElementById('theme-cardBorderColor')?.value || '#f0dfc8';
   const cardBorderRadius = parseInt(document.getElementById('theme-cardBorderRadius')?.value || '28', 10);
 
-  // Don't save backgroundColor when it matches the theme default — this keeps
-  // the Gradient Slate default active for profiles that haven't explicitly set
-  // a custom color
-  const themeDefaultBg = currentProfile?.theme?.config?.background || '#fff7ec';
-  const isDefaultColor = bgColor === themeDefaultBg || bgColor === '#fff7ec';
-
   const payload = {
     backgroundImage: bgType === 'image' ? (currentProfile?.theme?.custom?.backgroundImage || null) : null,
-    backgroundGradient: bgType === 'gradient' ? bgGradient : null,
-    backgroundColor: (bgType === 'color' && !isDefaultColor) ? bgColor : null,
+    backgroundGradient: bgType === 'gradient' ? (bgGradient || null) : null,
+    backgroundColor: bgType === 'color' ? bgColor : null,
     backgroundPosition: bgPosition,
     backgroundRepeat: bgRepeat,
     backgroundSize: bgSize,
@@ -1454,60 +1209,12 @@ window.saveCustomization = async function() {
     cardBorderRadius
   };
 
-  // Remove nulls
-  for (const key of Object.keys(payload)) {
-    if (payload[key] === null || payload[key] === undefined) {
-      delete payload[key];
-    }
-  }
-
-  try {
-    const updated = await profileApi.updateTheme(payload);
-    currentProfile = updated;
-    applyProfileBackground(updated);
-    window.closeCustomization();
-  } catch (err) {
-    const status = document.getElementById('theme-background-status');
-    if (status) {
-      status.textContent = err.message || 'Failed to save theme';
-      status.className = 'upload-status error';
-    }
-  }
-};
+  return payload;
+}
 
 /**
  * Reset theme customization to default
  */
-window.resetCustomization = async function() {
-  try {
-    const payload = {
-      backgroundImage: null,
-      backgroundGradient: null,
-      backgroundColor: null,
-      backgroundPosition: null,
-      backgroundRepeat: null,
-      backgroundSize: null,
-      textColor: null,
-      mutedTextColor: null,
-      accentColor: null,
-      cardBackground: null,
-      cardOpacity: null,
-      cardBorderColor: null,
-      cardBorderRadius: null
-    };
-
-    const updated = await profileApi.updateTheme(payload);
-    currentProfile = updated;
-    applyProfileBackground(updated);
-    window.closeCustomization();
-  } catch (err) {
-    const status = document.getElementById('theme-background-status');
-    if (status) {
-      status.textContent = err.message || 'Failed to reset theme';
-      status.className = 'upload-status error';
-    }
-  }
-};
 
 /**
  * Handle logout
@@ -1707,77 +1414,12 @@ export function initProfilePage() {
     window.loadProfile();
   }
 
-  // Initialize camera button for profile photo
-  initProfilePhotoCamera();
+
 }
 
 /**
  * Initialize profile photo camera button
  */
-function initProfilePhotoCamera() {
-  const cameraBtn = document.getElementById('profile-photo-camera-btn');
-  const photoInput = document.getElementById('photo-input');
-  
-  if (cameraBtn && photoInput) {
-    cameraBtn.addEventListener('click', () => {
-      photoInput.click();
-    });
-
-    photoInput.addEventListener('change', async () => {
-      const file = photoInput.files[0];
-      if (!file) return;
-
-      const status = document.getElementById('upload-status');
-      status.textContent = 'Uploading...';
-      status.className = 'upload-status';
-
-      try {
-        const result = await profileApi.uploadPhoto(file);
-        status.textContent = 'Photo uploaded successfully!';
-        status.className = 'upload-status success';
-
-        // Reload profile to get updated photo
-        const updatedProfile = await profileApi.getOwnProfile();
-        setCurrentUserProfile(updatedProfile);
-        currentProfile = updatedProfile;
-        applyProfileBackground(updatedProfile);
-
-        const displayName = getProfileDisplayName(updatedProfile);
-        const profilePhotoLarge = document.getElementById('profile-photo-large');
-        const profilePhotoInitials = document.getElementById('profile-photo-initials');
-        if (updatedProfile.profile_photo_url) {
-          if (profilePhotoLarge) {
-            profilePhotoLarge.src = updatedProfile.profile_photo_url;
-            profilePhotoLarge.alt = displayName;
-            profilePhotoLarge.style.display = 'block';
-          }
-          if (profilePhotoInitials) profilePhotoInitials.style.display = 'none';
-        } else {
-          if (profilePhotoLarge) profilePhotoLarge.style.display = 'none';
-          if (profilePhotoInitials) {
-            profilePhotoInitials.style.display = 'flex';
-            profilePhotoInitials.textContent = (displayName || '?').charAt(0).toUpperCase();
-          }
-        }
-
-        // Update public photo display
-        const publicPhotoDisplay = document.getElementById('profile-photo-display');
-        if (publicPhotoDisplay) {
-          if (updatedProfile.profile_photo_url) {
-            publicPhotoDisplay.innerHTML = `<img src="${escapeHtmlAttr(updatedProfile.profile_photo_url)}" alt="${escapeHtmlAttr(displayName)}" class="profile-photo-public">`;
-          } else {
-            publicPhotoDisplay.innerHTML = `<div class="profile-photo-public-initials" style="background: var(--theme-accent, var(--kp-teal)); color: white;">${(displayName || '?').charAt(0).toUpperCase()}</div>`;
-          }
-        }
-      } catch (err) {
-        status.textContent = err.message || 'Upload failed';
-        status.className = 'upload-status error';
-      } finally {
-        photoInput.value = '';
-      }
-    });
-  }
-}
 
 /**
  * Load and render photo gallery (sidebar preview on the profile page)
@@ -1942,3 +1584,154 @@ export async function applyGalleryBackground(username) {
 }
 
 
+
+/** Existing customization controls, mounted only in the editor. */
+export function renderThemeControls() {
+  return `      <!-- Theme customization panel -->
+      <div id="theme-customization-panel" class="theme-panel" style="display:none">
+        <div class="theme-panel-header">
+          <h2>Customize Profile</h2>
+
+        </div>
+
+        <div class="theme-panel-body">
+          <div class="theme-section">
+            <h3>Background</h3>
+            <div class="theme-radio-group">
+              <label class="theme-radio"><input type="radio" name="bg-type" value="default" onchange="window.setBgType('default')"><span>Default Slate</span></label>
+              <label class="theme-radio">
+                <input type="radio" name="bg-type" value="color" checked onchange="window.setBgType('color')">
+                <span>Solid Color</span>
+              </label>
+              <label class="theme-radio">
+                <input type="radio" name="bg-type" value="gradient" onchange="window.setBgType('gradient')">
+                <span>Gradient</span>
+              </label>
+              <label class="theme-radio">
+                <input type="radio" name="bg-type" value="image" onchange="window.setBgType('image')">
+                <span>Background Image</span>
+              </label>
+            </div>
+
+            <div id="bg-color-controls" class="theme-controls">
+              <label class="theme-label">Background Color</label>
+              <input type="color" id="theme-backgroundColor" value="#fff7ec" onchange="window.updatePreview()">
+            </div>
+
+            <div id="bg-gradient-controls" class="theme-controls" style="display:none">
+              <label class="theme-label">Gradient</label>
+              <select id="theme-backgroundGradient" onchange="window.updatePreview()">
+                <option value="">None</option>
+                <option value="linear-gradient(135deg, #111827, #312e81)">Dark Indigo</option>
+                <option value="linear-gradient(135deg, #0f172a, #1e293b)">Slate</option>
+                <option value="linear-gradient(135deg, #1e1b4b, #312e81)">Deep Purple</option>
+                <option value="linear-gradient(135deg, #0e6e6e, #134e4a)">Teal</option>
+                <option value="linear-gradient(135deg, #7b5aa6, #4c1d95)">Ube</option>
+              </select>
+            </div>
+
+            <div id="bg-image-controls" class="theme-controls" style="display:none">
+              <label class="theme-label" for="theme-background-input">Upload New Background</label>
+              <p>Background uploads save immediately. Save Changes to apply positioning and card styles.</p>
+              <input type="file" id="theme-background-input" accept="image/jpeg,image/png,image/webp">
+              <div id="theme-background-status" class="upload-status"></div>
+              <div id="theme-background-preview" class="theme-bg-preview" style="display:none"></div>
+              <button type="button" id="editor-remove-background" class="btn btn-secondary">Remove Background</button>
+            </div>
+
+            <div class="theme-row">
+              <div class="theme-field">
+                <label class="theme-label">Position</label>
+                <select id="theme-backgroundPosition" onchange="window.updatePreview()">
+                  <option value="center">Center</option>
+                  <option value="top">Top</option>
+                  <option value="bottom">Bottom</option>
+                  <option value="left">Left</option>
+                  <option value="right">Right</option>
+                  <option value="top left">Top Left</option>
+                  <option value="top center">Top Center</option>
+                  <option value="top right">Top Right</option>
+                  <option value="center left">Center Left</option>
+                  <option value="center center">Center Center</option>
+                  <option value="center right">Center Right</option>
+                  <option value="bottom left">Bottom Left</option>
+                  <option value="bottom center">Bottom Center</option>
+                  <option value="bottom right">Bottom Right</option>
+                </select>
+              </div>
+              <div class="theme-field">
+                <label class="theme-label">Size</label>
+                <select id="theme-backgroundSize" onchange="window.updatePreview()">
+                  <option value="cover">Cover (crop to fill)</option>
+                  <option value="contain">Contain (fit inside)</option>
+                  <option value="stretch">Stretch (fill exactly)</option>
+                  <option value="auto">Auto</option>
+                </select>
+              </div>
+              <div class="theme-field">
+                <label class="theme-label">Repeat</label>
+                <select id="theme-backgroundRepeat" onchange="window.updatePreview()">
+                  <option value="no-repeat">No Repeat</option>
+                  <option value="repeat">Repeat</option>
+                  <option value="repeat-x">Repeat X</option>
+                  <option value="repeat-y">Repeat Y</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="theme-section">
+            <h3>Colors</h3>
+            <div class="theme-row">
+              <div class="theme-field">
+                <label class="theme-label">Text</label>
+                <input type="color" id="theme-textColor" value="#2a2130" onchange="window.updatePreview()">
+              </div>
+              <div class="theme-field">
+                <label class="theme-label">Muted Text</label>
+                <input type="color" id="theme-mutedTextColor" value="#6b6072" onchange="window.updatePreview()">
+              </div>
+              <div class="theme-field">
+                <label class="theme-label">Accent</label>
+                <input type="color" id="theme-accentColor" value="#0e6e6e" onchange="window.updatePreview()">
+              </div>
+            </div>
+          </div>
+
+          <div class="theme-section">
+            <h3>Card</h3>
+            <div class="theme-row">
+              <div class="theme-field">
+                <label class="theme-label">Card Color</label>
+                <input type="color" id="theme-cardBackground" value="#fff7ec" onchange="window.updatePreview()">
+              </div>
+              <div class="theme-field">
+                <label class="theme-label">Border Color</label>
+                <input type="color" id="theme-cardBorderColor" value="#f0dfc8" onchange="window.updatePreview()">
+              </div>
+            </div>
+            <div class="theme-row">
+              <div class="theme-field">
+                <label class="theme-label">Transparency: <span id="theme-cardOpacity-value">0.95</span></label>
+                <input type="range" id="theme-cardOpacity" min="0" max="1" step="0.01" value="0.95" oninput="window.updatePreview()">
+              </div>
+              <div class="theme-field">
+                <label class="theme-label">Corner Radius: <span id="theme-cardBorderRadius-value">1.75rem</span></label>
+                <input type="range" id="theme-cardBorderRadius" min="0" max="100" step="1" value="28" oninput="window.updatePreview()">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="theme-panel-footer">
+          <button class="btn btn-secondary" id="editor-reset-theme">Reset to Default</button>
+          <button class="btn btn-secondary" id="editor-cancel-theme">Cancel</button>
+          <button class="btn btn-primary" id="editor-save-theme">Save Changes</button>
+        </div>
+      </div>`;
+}
+
+export function setEditorProfile(profile) {
+  currentProfile = profile;
+  setCurrentUserProfile(profile);
+}

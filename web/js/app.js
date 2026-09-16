@@ -3,10 +3,11 @@
  * Router and app initialization
  */
 
-import { isAuthenticated, clearTokens, initAuth } from './api.js';
+import { isAuthenticated, clearTokens, initAuth, restoreTokens } from './api.js';
 import { renderLoginPage, renderRegisterPage, renderVerifyEmailPage, renderForgotPasswordPage, renderResetPasswordPage, renderResetPasswordSuccessPage, initLoginForm, initRegisterForm, initForgotPasswordForm, initResetPasswordForm } from './auth.js';
 import { renderHomePage, initHomePage, renderPlaceholderPage, initPlaceholderPage } from './feed.js';
 import { renderProfilePage, initProfilePage } from './profile.js';
+import { renderProfileEditorPage, initProfileEditorPage, destroyProfileEditorPage, canLeaveProfileEditor } from './profileEditor.js';
 // PHASE-3 GALLERY-SPLIT-01: gallery/album pages live in their own modules
 import { renderGalleryPage, initGalleryPage } from './gallery.js';
 import { renderAlbumPage, initAlbumPage } from './albums.js';
@@ -34,6 +35,14 @@ function getRoute() {
  */
 function render() {
   const route = getRoute();
+
+  // Keep editor drafts when browser Back/Forward would leave the workspace.
+  if (route !== '/profile/edit' && !canLeaveProfileEditor()) {
+    window.location.hash = '/profile/edit';
+    return;
+  }
+  if (route === '/profile/edit' && isAuthenticated() && document.getElementById('profile-editor')) return;
+  destroyProfileEditorPage();
 
   // Cleanup previous page
   if (destroyMessagesPage) {
@@ -80,6 +89,14 @@ function render() {
       }
       html = renderHomePage();
       initFn = initHomePage;
+      break;
+    case '/profile/edit':
+      if (!isAuthenticated()) {
+        navigate('/login');
+        return;
+      }
+      html = renderProfileEditorPage();
+      initFn = initProfileEditorPage;
       break;
     case '/profile':
       if (!isAuthenticated()) {
@@ -167,6 +184,7 @@ window.navigate = navigate;
 
 // Initial render — render route first, then restore auth in the background
 // so the UI never becomes blank while authentication is pending.
+restoreTokens();
 render();
 
 initAuth().then(() => {

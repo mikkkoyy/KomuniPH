@@ -1,0 +1,48 @@
+/* Owner workspace: controls stay neutral while the shared profile preview is themed. */
+.profile-editor {
+  min-height: 100vh;
+  padding: 2rem max(1rem, calc((100vw - 1180px) / 2));
+  background: linear-gradient(135deg, #0f172a, #334155);
+  color: #f1f5f9;
+}
+.profile-editor [hidden] { display: none !important; }
+.editor-heading h1 { font-family: 'Fredoka', sans-serif; font-size: clamp(1.8rem, 4vw, 2.5rem); margin: .5rem 0; }
+.editor-heading a { color: #99f6e4; }
+.editor-heading p, .editor-controls p, .editor-preview > p { color: #cbd5e1; font-size: .9rem; margin: .75rem 0; }
+#editor-status { padding: 1rem 0; overflow-wrap: anywhere; }
+.editor-tabs { display: flex; gap: .5rem; margin-bottom: 1.25rem; }
+.editor-tabs button { border: 1px solid #64748b; color: #e2e8f0; background: #1e293b; padding: .85rem 1rem; border-radius: 1rem; font: inherit; cursor: pointer; }
+.editor-tabs button[aria-selected="true"] { background: #0e6e6e; border-color: #5eead4; color: white; }
+.editor-layout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 1.5rem; align-items: start; }
+.editor-controls { background: rgba(15,23,42,.65); padding: 1.5rem; border: 1px solid #475569; border-radius: 1.5rem; min-width: 0; }
+.editor-controls h2 { font-family: 'Fredoka', sans-serif; font-size: 1.3rem; margin: 1rem 0; }
+.profile-editor .theme-panel { background: transparent; border: 0; box-shadow: none; margin: 0; }
+.profile-editor .theme-panel-body, .profile-editor .theme-panel-header, .profile-editor .theme-panel-footer { padding: 1rem 0; }
+.profile-editor .theme-panel-footer { flex-wrap: wrap; }
+.profile-editor .theme-label, .profile-editor .theme-section h3, .profile-editor .form-group label { color: #e2e8f0; }
+.profile-editor input:not([type="radio"]):not([type="range"]), .profile-editor select, .profile-editor textarea {
+  max-width: 100%; min-width: 0; background: #1e293b; color: #f1f5f9; border: 1px solid #64748b;
+}
+.profile-editor input[type="file"] { width: 100%; margin: .75rem 0; padding: .75rem; border-radius: .75rem; }
+.profile-editor .form-group { min-width: 0; }
+.profile-editor .theme-row { flex-wrap: wrap; }
+.profile-editor .theme-field { min-width: 100px; }
+.profile-editor .theme-radio-group { flex-wrap: wrap; }
+.profile-editor .btn { min-height: 44px; }
+.profile-editor :focus-visible { outline: 2px solid #5eead4; outline-offset: 3px; }
+.profile-editor .error-banner { color: #fecaca; background: #7f1d1d; }
+.editor-photo-preview { display: block; width: 140px; height: 140px; object-fit: cover; border-radius: 1rem; margin-bottom: 1rem; }
+.profile-editor .theme-bg-preview img { width: 100%; max-height: 180px; object-fit: contain; }
+.editor-preview { position: sticky; top: 1rem; min-width: 0; }
+.editor-preview > h2 { font-size: 1.1rem; }
+.editor-preview .profile-frame { width: 100%; min-height: 300px; padding: 1.5rem; border-radius: 1.5rem; overflow: hidden; isolation: isolate; }
+.editor-preview .profile-background-layer { position: absolute; z-index: -1; }
+.editor-preview .profile-module { position: relative; margin: 0; overflow-wrap: anywhere; }
+.editor-preview #profile-info-bio { white-space: pre-wrap; }
+@media (max-width: 800px) {
+  .editor-layout { grid-template-columns: minmax(0, 1fr); }
+  .editor-preview { position: static; }
+  .editor-controls { padding: 1rem; }
+  .profile-editor { padding: 1rem; }
+  .editor-tabs button { flex: 1; padding: .75rem .5rem; }
+}

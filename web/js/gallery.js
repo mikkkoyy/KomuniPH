@@ -421,30 +421,6 @@ export function renderGalleryPage(username) {
 }
 
 /**
- * Render the gallery upload module (owner only) — with drag-and-drop and preview.
- */
-export function renderGalleryUploadModule() {
-  return `
-    <div class="gallery-upload-module" id="gallery-upload-module">
-      <div class="gallery-upload-header">
-        <h3>+ Add Photos</h3>
-        <span class="gallery-upload-hint">Select or drag & drop</span>
-      </div>
-      <div class="gallery-upload-dropzone" id="gallery-upload-dropzone">
-        <input type="file" id="gallery-upload-file" accept="image/*" multiple
-               style="display:none">
-        <div class="gallery-upload-icon">↓</div>
-        <p class="gallery-upload-text">Click or drag photos here</p>
-      </div>
-      <div class="gallery-upload-progress" id="gallery-upload-progress" style="display:none">
-        <div class="gallery-upload-progress-bar" style="width:0%"></div>
-      </div>
-      <div class="gallery-upload-queue" id="gallery-upload-queue"></div>
-    </div>
-  `;
-}
-
-/**
  * Initialise the dedicated Photo Gallery page after it has been mounted.
  * Loads albums + photos, renders the Profile Pictures album first and then
  * every normal album, and wires up the lightbox / upload / delete behaviour.

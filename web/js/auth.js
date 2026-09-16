@@ -47,11 +47,6 @@ function renderBrand() {
  * Render the login page
  */
 export function renderLoginPage() {
-  if (isAuthenticated()) {
-    navigate('/home');
-    return '';
-  }
-
   return renderAuthLayout(`
     <div class="brand">${renderBrand()}</div>
     <div class="card">

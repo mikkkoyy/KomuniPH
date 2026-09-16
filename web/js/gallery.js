@@ -412,12 +412,36 @@ export function renderGalleryPage(username) {
         <div class="profile-module-body">
           ${galleryRoutes.isOwnProfile ? renderGalleryUploadModule() : ''}
           <div class="gallery-albums" id="gallery-albums-grid">
-            <div class="photo-gallery-empty">Loading albums...</div>
+            <div class="photo-gallery-empty">No albums yet. + Create your first album.</div>
           </div>
         </div>
       </section>
     `,
   });
+}
+
+/**
+ * Render the gallery upload module (owner only) — with drag-and-drop and preview.
+ */
+export function renderGalleryUploadModule() {
+  return `
+    <div class="gallery-upload-module" id="gallery-upload-module">
+      <div class="gallery-upload-header">
+        <h3>+ Add Photos</h3>
+        <span class="gallery-upload-hint">Select or drag & drop</span>
+      </div>
+      <div class="gallery-upload-dropzone" id="gallery-upload-dropzone">
+        <input type="file" id="gallery-upload-file" accept="image/*" multiple
+               style="display:none">
+        <div class="gallery-upload-icon">↓</div>
+        <p class="gallery-upload-text">Click or drag photos here</p>
+      </div>
+      <div class="gallery-upload-progress" id="gallery-upload-progress" style="display:none">
+        <div class="gallery-upload-progress-bar" style="width:0%"></div>
+      </div>
+      <div class="gallery-upload-queue" id="gallery-upload-queue"></div>
+    </div>
+  `;
 }
 
 /**
@@ -466,6 +490,7 @@ export async function initGalleryPage(username) {
   renderGalleryAlbums();
   applyGalleryBackground(profileUsername);
 }
+
 /**
  * Refresh the mounted gallery page (after upload / delete).
  */
@@ -498,6 +523,136 @@ window.deleteGalleryPhoto = async function(photoId) {
     alert(err.message || 'Failed to delete photo');
   }
 };
+/**
+ * Hash-navigation entry point for "View All Photos".
+ * Called from the profile preview with no argument (own gallery) or with a
+ * username (public gallery).
+ */
+window.openGalleryPage = function(username) {
+  const target = username || (getCurrentUserProfile() || {}).username || '';
+  if (!target) {
+    console.warn('[GALLERY] Cannot open the gallery without a username');
+    return;
+  }
+  window.navigate(`/profile/${encodeURIComponent(target)}/photos`);
+};
+
+/**
+ * Initialize dedicated gallery page upload with drag-and-drop, preview, and progress.
+ * Used on the standalone gallery page (not profile/album pages).
+ */
+export function initDedicatedGalleryUpload() {
+  const dropzone = document.getElementById('gallery-upload-dropzone');
+  const fileInput = document.getElementById('gallery-upload-file');
+  const progress = document.getElementById('gallery-upload-progress');
+  const progressBar = progress ? progress.querySelector('.gallery-upload-progress-bar') : null;
+  const queueEl = document.getElementById('gallery-upload-queue');
+  const uploadModule = document.getElementById('gallery-upload-module');
+
+  if (!dropzone || !fileInput || !uploadModule) return;
+
+  // Handle click to open file picker
+  dropzone.addEventListener('click', (e) => {
+    if (!e.target.matches('.gallery-upload-dropzone')) {
+      fileInput.click();
+    }
+  });
+
+  // Handle file selection
+  fileInput.addEventListener('change', (e) => {
+    handleFiles(e.target.files);
+  });
+
+  // Handle drag-and-drop
+  dropzone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropzone.classList.add('gallery-upload-dropzone--dragover');
+  });
+
+  dropzone.addEventListener('dragleave', () => {
+    dropzone.classList.remove('gallery-upload-dropzone--dragover');
+  });
+
+  dropzone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropzone.classList.remove('gallery-upload-dropzone--dragover');
+    const files = e.dataTransfer.files;
+    if (files.length) handleFiles(files);
+  });
+
+  /**
+   * Process selected files: show previews, queue upload.
+   */
+  function handleFiles(files) {
+    // Show preview thumbnails
+    if (queueEl) queueEl.innerHTML = '';
+
+    Array.from(files).forEach((file, idx) => {
+      if (!file.type.startsWith('image/')) return;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const thumbUrl = e.target.result;
+        const previewHtml = `
+          <div class="gallery-upload-preview" data-file-index="${idx}">
+            <img src="${thumbUrl}" alt="Preview" style="width:80px;height:80px;object-fit:cover">
+            <button class="gallery-upload-remove" aria-label="Remove">×</button>
+            <span class="gallery-upload-filename">${escapeHtml(file.name)}</span>
+          </div>
+        `;
+        if (queueEl) queueEl.insertAdjacentHTML('beforeend', previewHtml);
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // Upload all images
+    uploadPhotos(Array.from(files).filter(f => f.type.startsWith('image/')));
+  }
+
+  /**
+   * Upload photos to the server.
+   */
+  async function uploadPhotos(files) {
+    if (files.length === 0) return;
+
+    // Show progress
+    if (progressBar) {
+      progress.style.display = 'block';
+      progressBar.style.width = '0%';
+    }
+
+    const formData = new FormData();
+    files.forEach(f => formData.append('photos', f));
+
+    try {
+      const response = await fetch('/api/profile/photos', {
+        method: 'POST',
+        body: formData,
+        credentials: 'include'
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `Upload failed: ${response.status}`);
+      }
+
+      const result = await response.json();
+      // After upload, reload the gallery
+      if (window.refreshActiveGalleryView) {
+        await window.refreshActiveGalleryView();
+      } else {
+        refreshGalleryPage();
+      }
+      // Hide progress, clear queue
+      if (progress) progress.style.display = 'none';
+      if (queueEl) queueEl.innerHTML = '';
+    } catch (err) {
+      console.error('[GALLERY] Upload error:', err);
+      if (progress) progress.style.display = 'none';
+      alert(err.message || 'Upload failed. Try again.');
+    }
+  }
+}
 /**
  * Hash-navigation entry point for "View All Photos".
  * Called from the profile preview with no argument (own gallery) or with a

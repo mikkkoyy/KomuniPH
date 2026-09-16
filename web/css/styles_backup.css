@@ -1694,8 +1694,8 @@ a:hover {
 
 .photo-gallery-grid {
   display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: 0.5rem;
-  grid-template-columns: 1fr;
 }
 
 .photo-gallery-item {
@@ -1761,26 +1761,32 @@ a:hover {
   text-overflow: ellipsis;
 }
 
-
-
 /* Photo Gallery responsive */
-@media (min-width: 769px) {
+@media (min-width: 1440px) {
   .photo-gallery-grid {
-    grid-template-columns: 2fr;
+    grid-template-columns: repeat(4, 1fr);
   }
 }
 
 @media (min-width: 1025px) {
   .photo-gallery-grid {
-    grid-template-columns: 3fr;
+    grid-template-columns: repeat(3, 1fr);
   }
 }
 
-@media (min-width: 1440px) {
+@media (min-width: 769px) {
   .photo-gallery-grid {
-    grid-template-columns: 4fr;
+    grid-template-columns: repeat(2, 1fr);
   }
 }
+
+@media (max-width: 768px) {
+  .photo-gallery-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Gallery Lightbox */
 .gallery-lightbox {
   display: none;
   position: fixed;

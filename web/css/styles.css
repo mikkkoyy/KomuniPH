@@ -840,11 +840,51 @@ a:hover {
   gap: 1rem;
 }
 
-.photo-upload-form {
+/* Profile photo wrapper — positions the camera button over the photo */
+.profile-photo-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+/* Floating camera/upload button at the top-right of the profile photo */
+.profile-photo-camera-btn {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--kp-ink);
+  border: 1px solid var(--kp-border);
+  box-shadow: 0 2px 8px rgba(42, 33, 48, 0.2);
+  cursor: pointer;
+  padding: 0;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 0.5rem;
+  justify-content: center;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+  z-index: 10;
+}
+
+.profile-photo-camera-btn:hover {
+  background: rgba(255, 255, 255, 1);
+  box-shadow: 0 4px 12px rgba(42, 33, 48, 0.3);
+}
+
+.profile-photo-camera-btn:focus-visible {
+  outline: 3px solid var(--kp-teal);
+  outline-offset: 2px;
+  border-radius: 50%;
+}
+
+@media (max-width: 640px) {
+  .profile-photo-camera-btn {
+    width: 2rem;
+    height: 2rem;
+    top: 0.375rem;
+    right: 0.375rem;
+  }
 }
 
 .upload-status {

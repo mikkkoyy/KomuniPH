@@ -13,6 +13,7 @@ import crypto from 'crypto';
 import config from './config.js';
 import { queryOne, queryAll, execute } from './database.js';
 import { jsonResponse, errorResponse, parseBody } from './utils.js';
+import { getCountries, getCities, getBarangays } from './locations.js';
 import { seedDefaultTheme } from './database.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -314,6 +315,56 @@ function isValidAlias(alias) {
  * Update the authenticated user's own profile (identity, bio, alias).
  * PROFILE-04: Extended with first_name, middle_name, last_name, nickname.
  */
+/**
+ * Validate the country -> city -> barangay hierarchy against the seeded
+ * locations data (server/locations.json, served through locations.js).
+ *
+ * Rules:
+ *   - all empty/null  -> valid (location is optional)
+ *   - country given    -> must exist in the seeded countries list
+ *   - city given       -> must belong to the selected country
+ *   - barangay given   -> must belong to the selected city within the country
+ *
+ * Returns an error message string when invalid, or null when valid.
+ * Reuses the existing locations.js data/functions (no duplicate data).
+ *
+ * NOTE: validation is only as good as the seeded data. Corrupt or truncated
+ * barangay lists in other cities (a pre-existing locations.json issue, not
+ * part of this task) may make membership checks unreliable for those
+ * cities. Marikina/Pasig/SanJuan/Mandaluyong entries are clean.
+ */
+export function validateLocationHierarchy(country, city, barangay) {
+  const c = (typeof country === 'string' && country.trim()) || null;
+  const ci = (typeof city === 'string' && city.trim()) || null;
+  const b = (typeof barangay === 'string' && barangay.trim()) || null;
+
+  if (!c && !ci && !b) return null;
+
+  if (c && !getCountries().includes(c)) {
+    return 'Invalid country: ' + c;
+  }
+
+  if (ci) {
+    if (!c) {
+      return 'City provided without a country';
+    }
+    if (!getCities(c).includes(ci)) {
+      return 'Invalid city: ' + ci + ' is not a city of ' + c;
+    }
+  }
+
+  if (b) {
+    if (!ci) {
+      return 'Barangay provided without a city';
+    }
+    if (!getBarangays(c, ci).includes(b)) {
+      return 'Invalid barangay: ' + b + ' does not belong to ' + ci;
+    }
+  }
+
+  return null;
+}
+
 export async function handleUpdateProfile(req, res, user) {
   try {
     let body;
@@ -341,6 +392,17 @@ export async function handleUpdateProfile(req, res, user) {
     // At least one field must be provided
     if (!hasFirstName && !hasMiddleName && !hasLastName && !hasNickname && !hasDisplayName && !hasBio && !hasAlias && !hasBirthday && !hasCountry && !hasCity && !hasBarangay) {
       return errorResponse(res, 422, 'At least one profile field is required');
+    }
+
+    // LOCATION-06: validate country -> city -> barangay membership against the
+    // seeded locations data BEFORE any DB access (fail-fast, HTTP 400). Only
+    // run when the request touches location fields, so unrelated updates never
+    // regress existing profiles. Reuses locations.js (no duplicate data).
+    if (hasCountry || hasCity || hasBarangay) {
+      const locationError = validateLocationHierarchy(body.country, body.city, body.barangay);
+      if (locationError) {
+        return errorResponse(res, 400, locationError);
+      }
     }
 
     const existing = queryOne('SELECT * FROM profiles WHERE user_id = ?', [user.sub]);

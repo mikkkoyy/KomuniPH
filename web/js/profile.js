@@ -4,7 +4,7 @@
 
 import { profileApi, testimonialsApi, galleryApi, albumsApi, authApi, isAuthenticated, getCurrentUserProfile, setCurrentUserProfile } from './api.js';
 import { navigate } from './app.js';
-import { renderGalleryItemHtml, bindGalleryGridLightbox, initGalleryUpload, isOwnUsername, safeDecode } from './gallery.js'; // PHASE-3 GALLERY-SPLIT-01
+import { renderGalleryItemHtml, bindGalleryGridLightbox, initGalleryUpload, isOwnUsername, safeDecode, renderCreateAlbumFormHtml, initCreateAlbumForm, renderAlbumCardsHtml } from './gallery.js'; // PHASE-3 GALLERY-SPLIT-01
 
 let currentProfile = null;
 let customizationDirty = false;
@@ -268,6 +268,20 @@ export function renderProfilePage(viewUsername = null) {
                   No photos yet.
                 </div>
                 <div class="photo-gallery-grid" id="photo-gallery-grid" style="display:none"></div>
+              </div>
+
+              <!-- ALBUMS-UI-01: compact album cards + owner-only Create Album -->
+              <div class="gallery-section-subheader" id="profile-albums-header">
+                <span>Albums</span>
+                ${isPublicView ? '' : `
+                  <span class="gallery-module-actions">
+                    <button type="button" class="btn btn-primary btn-sm" id="profile-create-album-btn" onclick="window.toggleCreateAlbumForm('profile-')">+ Create Album</button>
+                  </span>
+                `}
+              </div>
+              ${isPublicView ? '' : renderCreateAlbumFormHtml('profile-')}
+              <div class="gallery-albums" id="profile-albums-grid">
+                <div class="photo-gallery-empty">Loading albums...</div>
               </div>
               <!-- GALLERY-ROUTES-01: entry point to the dedicated gallery page.
                    Uses the hash router (navigate()) — never a server path. -->
@@ -741,7 +755,7 @@ function renderProfileView(profile) {
   } else {
     if (profilePhotoLarge) profilePhotoLarge.style.display = 'none';
     if (profilePhotoInitials) {
-      profilePhotoInitials.style.display = 'block';
+      profilePhotoInitials.style.display = 'flex';
       profilePhotoInitials.textContent = (nameDisplay || username || '?').charAt(0).toUpperCase();
     }
   }
@@ -1741,7 +1755,7 @@ function initProfilePhotoCamera() {
         } else {
           if (profilePhotoLarge) profilePhotoLarge.style.display = 'none';
           if (profilePhotoInitials) {
-            profilePhotoInitials.style.display = 'block';
+            profilePhotoInitials.style.display = 'flex';
             profilePhotoInitials.textContent = (displayName || '?').charAt(0).toUpperCase();
           }
         }
@@ -1786,6 +1800,37 @@ export async function loadAndRenderGallery(username, isOwnProfile) {
     console.error('[GALLERY] Failed to load gallery:', err);
     renderGallery([], isOwnProfile);
     renderGalleryPreviewMeta(0);
+  }
+
+  // ALBUMS-UI-01: the compact Albums section under the preview grid.
+  await loadAndRenderAlbums(username, isOwnProfile);
+}
+
+/**
+ * Load and render the profile page's Albums section (compact cards).
+ * The owner also gets the Create Album form, which refreshes this section.
+ *
+ * @param {string} username
+ * @param {boolean} isOwnProfile
+ */
+async function loadAndRenderAlbums(username, isOwnProfile) {
+  const gridEl = document.getElementById('profile-albums-grid');
+  if (!gridEl) return;
+
+  try {
+    const response = isOwnProfile
+      ? await albumsApi.getOwnAlbums()
+      : await albumsApi.getAlbums(username);
+    const albums = response.albums || [];
+
+    gridEl.innerHTML = renderAlbumCardsHtml(albums, username);
+
+    if (isOwnProfile) {
+      initCreateAlbumForm('profile-', () => loadAndRenderAlbums(username, true));
+    }
+  } catch (err) {
+    console.error('[ALBUMS] Failed to load albums:', err);
+    gridEl.innerHTML = '<div class="photo-gallery-empty">Could not load albums.</div>';
   }
 }
 

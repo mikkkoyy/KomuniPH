@@ -231,6 +231,7 @@ export function handleGetAlbum(req, res, params) {
         name: album.name,
         description: album.description || '',
         type: album.type,
+        cover_photo_id: album.cover_photo_id || null,
         cover_photo_url: coverUrl,
         photo_count: transformedPhotos.length,
         created_at: album.created_at,
@@ -405,7 +406,12 @@ export async function handleUpdateAlbum(req, res, user, params) {
 
 /**
  * Handle DELETE /api/profile/albums/:id
- * Deletes an album and all its photos.
+ * Deletes an album together with its own photos.
+ *
+ * Only files that belong to this album are removed: the profile photo lives in
+ * a different upload directory, the Profile Pictures album cannot be deleted,
+ * and photo rows are scoped by album_id, so unrelated albums and other users'
+ * files are never touched.
  */
 export function handleDeleteAlbum(req, res, user, params) {
   try {
@@ -445,7 +451,11 @@ export function handleDeleteAlbum(req, res, user, params) {
       }
     }
 
-    // Delete album (cascades to profile_photos via FK)
+    // Remove the album's own photo rows, then the album. The rows must go
+    // explicitly: the album_id foreign key is ON DELETE SET NULL, so deleting
+    // the album on its own would leave rows pointing at files that no longer
+    // exist (broken images in the gallery).
+    execute('DELETE FROM profile_photos WHERE album_id = ?', [params.id]);
     execute('DELETE FROM photo_albums WHERE id = ?', [params.id]);
 
     jsonResponse(res, 200, { message: 'Album deleted successfully' });

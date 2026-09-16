@@ -77,14 +77,32 @@ export function isOwnUsername(username) {
   return String(cached.username).toLowerCase() === String(username).toLowerCase();
 }
 /**
- * Render a single gallery grid item
+ * Render a single gallery grid item (thumbnail tile).
+ *
+ * @param {object} photo
+ * @param {boolean} isOwnProfile - show owner-only controls
+ * @param {object} [options]
+ * @param {boolean} [options.showCoverButton] - owner album view: allow setting the cover
+ * @param {boolean} [options.isCover] - this photo is currently the album cover
  */
-export function renderGalleryItemHtml(photo, isOwnProfile) {
+export function renderGalleryItemHtml(photo, isOwnProfile, options = {}) {
+  // Grids always request the generated 400x400 thumbnail; the full-size image is
+  // only fetched when the lightbox opens. Photos uploaded before thumbnails
+  // existed fall back to the full image instead of showing a broken tile.
+  const thumbSrc = photo.thumbnail_url || photo.image_url || '';
+  const fullSrc = photo.image_url || thumbSrc;
+
   return `
     <div class="photo-gallery-item" data-photo-id="${escapeHtmlAttr(photo.id)}">
-      <img src="${escapeHtmlAttr(photo.thumbnail_url)}" alt="${escapeHtmlAttr(photo.caption || 'Gallery photo')}" class="photo-gallery-thumb" loading="lazy">
+      <img src="${escapeHtmlAttr(thumbSrc)}" alt="${escapeHtmlAttr(photo.caption || 'Gallery photo')}" class="photo-gallery-thumb" loading="lazy"
+           onerror="this.onerror=null;this.src='${escapeHtmlAttr(fullSrc)}'">
       ${isOwnProfile ? `
         <button class="photo-gallery-delete" onclick="window.deleteGalleryPhoto('${escapeHtmlAttr(photo.id)}')" title="Delete photo">&times;</button>
+      ` : ''}
+      ${isOwnProfile && options.showCoverButton ? `
+        <button class="photo-gallery-cover-btn${options.isCover ? ' is-cover' : ''}"
+                onclick="window.setAlbumCover('${escapeHtmlAttr(photo.id)}')"
+                title="${options.isCover ? 'Current album cover' : 'Use as album cover'}">${options.isCover ? 'Cover' : 'Set cover'}</button>
       ` : ''}
       ${photo.caption ? `<div class="photo-gallery-caption">${escapeHtml(photo.caption)}</div>` : ''}
     </div>
@@ -100,7 +118,9 @@ export function renderGalleryItemHtml(photo, isOwnProfile) {
 export function bindGalleryGridLightbox(gridEl, displayedPhotos, lightboxSource = displayedPhotos) {
   gridEl.querySelectorAll('.photo-gallery-item').forEach((item, index) => {
     item.addEventListener('click', (e) => {
+      // Owner controls must not also open the lightbox.
       if (e.target.classList.contains('photo-gallery-delete')) return;
+      if (e.target.classList.contains('photo-gallery-cover-btn')) return;
       const startIndex = lightboxSource === displayedPhotos ? index : 0;
       openLightbox(lightboxSource, startIndex);
     });
@@ -238,6 +258,155 @@ export function renderGalleryUploadModule() {
       <div id="gallery-upload-status" class="upload-status"></div>
     </div>
   `;
+}
+/**
+ * Render the owner-only "Create Album" form.
+ *
+ * @param {string} [prefix] - id prefix so the profile page and the dedicated
+ *   gallery page can each mount their own instance of the same form
+ * @returns {string} HTML string
+ */
+export function renderCreateAlbumFormHtml(prefix = '') {
+  return `
+    <form class="form album-form" id="${prefix}create-album-form" style="display:none" novalidate>
+      <div class="error-banner" id="${prefix}create-album-error" style="display:none"></div>
+      <div class="form-group">
+        <label class="form-label" for="${prefix}create-album-name">Album name</label>
+        <input type="text" id="${prefix}create-album-name" class="form-input" maxlength="100" placeholder="e.g. Summer 2026" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="${prefix}create-album-description">Description (optional)</label>
+        <textarea id="${prefix}create-album-description" rows="2" maxlength="300" placeholder="What is this album about?"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="${prefix}create-album-photos">Photos (optional, up to 20)</label>
+        <input type="file" id="${prefix}create-album-photos" class="form-input" accept="image/jpeg,image/png,image/webp" multiple>
+        <div class="album-form-hint">Selected photos are uploaded straight into the new album.</div>
+      </div>
+      <div class="album-form-actions">
+        <button type="submit" class="btn btn-primary" id="${prefix}create-album-submit">Create Album</button>
+        <button type="button" class="btn btn-secondary" onclick="window.closeCreateAlbum('${prefix}')">Cancel</button>
+        <span class="upload-status" id="${prefix}create-album-status"></span>
+      </div>
+    </form>
+  `;
+}
+/**
+ * Show / hide a Create Album form and keep its toggle button label in sync.
+ */
+export function toggleCreateAlbumForm(prefix = '', open = null) {
+  const form = document.getElementById(`${prefix}create-album-form`);
+  if (!form) return;
+  const shouldOpen = open === null ? form.style.display === 'none' : !!open;
+  form.style.display = shouldOpen ? 'block' : 'none';
+
+  const btn = document.getElementById(`${prefix}create-album-btn`);
+  if (btn) btn.textContent = shouldOpen ? 'Cancel' : '+ Create Album';
+
+  if (shouldOpen) {
+    document.getElementById(`${prefix}create-album-name`)?.focus();
+  } else {
+    form.reset();
+    const errorEl = document.getElementById(`${prefix}create-album-error`);
+    if (errorEl) errorEl.style.display = 'none';
+    const statusEl = document.getElementById(`${prefix}create-album-status`);
+    if (statusEl) statusEl.textContent = '';
+  }
+}
+/**
+ * Refresh callbacks per album-form prefix, invoked after an album is created.
+ */
+const albumFormRefreshHandlers = new Map();
+
+// Inline onclick handlers used by the Create Album markup.
+window.toggleCreateAlbumForm = toggleCreateAlbumForm;
+window.closeCreateAlbum = function (prefix = '') {
+  toggleCreateAlbumForm(prefix, false);
+};
+
+/**
+ * Wire up a Create Album form mounted by renderCreateAlbumFormHtml().
+ *
+ * @param {string} [prefix]
+ * @param {Function} [onCreated] - refresh callback for the page owning the form
+ */
+export function initCreateAlbumForm(prefix = '', onCreated = null) {
+  const form = document.getElementById(`${prefix}create-album-form`);
+  if (!form) return;
+
+  if (typeof onCreated === 'function') {
+    albumFormRefreshHandlers.set(prefix, onCreated);
+  }
+  if (form.dataset.bound === '1') return;
+  form.dataset.bound = '1';
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const nameEl = document.getElementById(`${prefix}create-album-name`);
+    const descriptionEl = document.getElementById(`${prefix}create-album-description`);
+    const filesEl = document.getElementById(`${prefix}create-album-photos`);
+    const errorEl = document.getElementById(`${prefix}create-album-error`);
+    const statusEl = document.getElementById(`${prefix}create-album-status`);
+    const submitBtn = document.getElementById(`${prefix}create-album-submit`);
+
+    const name = (nameEl?.value || '').trim();
+    if (errorEl) errorEl.style.display = 'none';
+
+    if (!name) {
+      if (errorEl) {
+        errorEl.textContent = 'Album name is required';
+        errorEl.style.display = 'block';
+      }
+      return;
+    }
+
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Creating...';
+    }
+    if (statusEl) {
+      statusEl.textContent = '';
+      statusEl.className = 'upload-status';
+    }
+
+    try {
+      const created = await albumsApi.createAlbum(name, (descriptionEl?.value || '').trim());
+      const albumId = created?.album?.id;
+
+      const files = filesEl?.files ? Array.from(filesEl.files) : [];
+      if (albumId && files.length > 0) {
+        if (statusEl) statusEl.textContent = `Uploading ${files.length} photo(s)...`;
+        await galleryApi.uploadPhotos(files, albumId);
+      }
+
+      toggleCreateAlbumForm(prefix, false);
+
+      const refresh = albumFormRefreshHandlers.get(prefix);
+      if (refresh) await refresh();
+    } catch (err) {
+      if (errorEl) {
+        errorEl.textContent = err.message || 'Could not create the album.';
+        errorEl.style.display = 'block';
+      }
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Create Album';
+      }
+    }
+  });
+}
+/**
+ * Render album cards (or the empty state) for an album grid container.
+ * Shared by the dedicated gallery page and the profile page.
+ */
+export function renderAlbumCardsHtml(albums, username) {
+  const list = albums || [];
+  if (list.length === 0) {
+    return '<div class="photo-gallery-empty">No albums yet.</div>';
+  }
+  return list.map(album => renderAlbumCardHtml(album, username)).join('');
 }
 /**
  * Album id used as the upload target for the currently mounted gallery view.
@@ -407,10 +576,29 @@ export function renderGalleryPage(username) {
       <section class="profile-module">
         <div class="profile-module-header">
           <span>Photo Gallery</span>
-          <span id="gallery-album-total"></span>
+          <span class="gallery-module-actions">
+            ${galleryRoutes.isOwnProfile
+              ? `<button type="button" class="btn btn-primary btn-sm" id="create-album-btn" onclick="window.toggleCreateAlbumForm('')">+ Create Album</button>`
+              : ''}
+            <span id="gallery-album-total"></span>
+          </span>
         </div>
         <div class="profile-module-body">
           ${galleryRoutes.isOwnProfile ? renderGalleryUploadModule() : ''}
+          ${galleryRoutes.isOwnProfile ? renderCreateAlbumFormHtml('') : ''}
+
+          <div class="gallery-section-subheader">
+            <span>All Photos</span>
+            <span id="gallery-photos-total"></span>
+          </div>
+          <div class="photo-gallery">
+            <div class="photo-gallery-empty" id="gallery-photos-empty">Loading photos...</div>
+            <div class="photo-gallery-grid" id="gallery-photos-grid" style="display:none"></div>
+          </div>
+
+          <div class="gallery-section-subheader">
+            <span>Albums</span>
+          </div>
           <div class="gallery-albums" id="gallery-albums-grid">
             <div class="photo-gallery-empty">No albums yet. + Create your first album.</div>
           </div>
@@ -463,8 +651,55 @@ export async function initGalleryPage(username) {
   // Owner-only multi-upload (reuses the profile sidebar upload flow)
   if (galleryRoutes.isOwnProfile) initGalleryUpload();
 
+  renderGalleryPhotos();
   renderGalleryAlbums();
+
+  // Owner-only Create Album form: refresh the grids once the album exists.
+  if (galleryRoutes.isOwnProfile) {
+    initCreateAlbumForm('', async () => {
+      await refreshGalleryPage();
+      renderGalleryAlbums();
+      renderGalleryPhotos();
+    });
+  }
+
   applyGalleryBackground(profileUsername);
+}
+
+/**
+ * Render the "All Photos" thumbnail grid on the dedicated gallery page.
+ * Every photo (regardless of album) is shown as a compact thumbnail tile;
+ * the full-size image is only fetched when the lightbox is opened.
+ */
+function renderGalleryPhotos() {
+  const gridEl = document.getElementById('gallery-photos-grid');
+  const emptyEl = document.getElementById('gallery-photos-empty');
+  const totalEl = document.getElementById('gallery-photos-total');
+  if (!gridEl || !emptyEl) return;
+
+  const photos = galleryRoutes.photos || [];
+  const isOwner = galleryRoutes.isOwnProfile;
+
+  if (totalEl) {
+    totalEl.textContent = photos.length
+      ? `${photos.length} photo${photos.length === 1 ? '' : 's'}`
+      : '';
+  }
+
+  if (photos.length === 0) {
+    gridEl.style.display = 'none';
+    gridEl.innerHTML = '';
+    emptyEl.style.display = 'block';
+    emptyEl.textContent = isOwner
+      ? 'No photos yet. Use Upload Photos to add some.'
+      : `@${galleryRoutes.username} has no photos yet.`;
+    return;
+  }
+
+  emptyEl.style.display = 'none';
+  gridEl.style.display = 'grid';
+  gridEl.innerHTML = photos.map(photo => renderGalleryItemHtml(photo, isOwner)).join('');
+  bindGalleryGridLightbox(gridEl, photos, photos);
 }
 
 /**

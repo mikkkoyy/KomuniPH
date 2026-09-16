@@ -170,6 +170,21 @@ window.navigate = navigate;
 render();
 
 initAuth().then(() => {
-  // Auth state restoration complete; UI already rendered.
-  // No re-render needed unless the session changes the current route.
+  // Auth state restoration complete; the UI already rendered so it never
+  // became blank while authentication was pending.
+  //
+  // OWNER-VIEW-AFTER-REFRESH: pages mounted before the session was known
+  // cannot tell owner from visitor (isOwnUsername() has no cached profile
+  // yet), so a hard refresh on #/profile, #/profile/:user/photos or
+  // #/profile/:user/photos/:albumId would show the public view and hide the
+  // owner-only controls. Re-render such routes once now that auth is known.
+  // The auth pages themselves do not depend on the session.
+  const route = getRoute();
+  const sessionIndependentRoutes = [
+    '/login', '/register', '/verify-email',
+    '/forgot-password', '/reset-password', '/reset-success',
+  ];
+  if (!sessionIndependentRoutes.includes(route)) {
+    render();
+  }
 });

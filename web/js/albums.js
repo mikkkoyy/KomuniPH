@@ -53,7 +53,12 @@ export function renderAlbumPage(username, albumId) {
           <span class="gallery-back-link">
             <a href="#/profile/${escapeHtmlAttr(profileUsername)}/photos" class="gallery-back-to-gallery">&larr; Back to Gallery</a>
           </span>
-          <span class="gallery-album-owner">${isOwner ? 'Your album' : `@${escapeHtml(profileUsername)}`}</span>
+          <span class="gallery-module-actions">
+            ${isOwner
+              ? `<button type="button" class="btn btn-secondary btn-sm" id="album-manage-toggle" onclick="window.toggleAlbumManage()">Manage Album</button>`
+              : ''}
+            <span class="gallery-album-owner">${isOwner ? 'Your album' : `@${escapeHtml(profileUsername)}`}</span>
+          </span>
         </div>
         <div class="profile-module-body">
           <div class="album-header" id="album-header">
@@ -61,8 +66,11 @@ export function renderAlbumPage(username, albumId) {
             <div class="album-header-text">
               <h2 class="album-title" id="album-title">Loading album...</h2>
               <div class="album-meta" id="album-meta"></div>
+              <div class="album-description" id="album-description"></div>
             </div>
           </div>
+
+          ${isOwner ? renderAlbumManageFormHtml() : ''}
 
           ${isOwner ? renderGalleryUploadModule() : ''}
 
@@ -75,6 +83,156 @@ export function renderAlbumPage(username, albumId) {
     `,
   });
 }
+
+/**
+ * Owner-only album management form (rename, description, delete).
+ * Reuses the app's existing .form / .album-form controls.
+ */
+function renderAlbumManageFormHtml() {
+  return `
+    <form class="form album-form" id="album-manage-form" style="display:none" novalidate>
+      <div class="error-banner" id="album-manage-error" style="display:none"></div>
+      <div class="form-group">
+        <label class="form-label" for="album-manage-name">Album name</label>
+        <input type="text" id="album-manage-name" class="form-input" maxlength="100" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="album-manage-description">Description (optional)</label>
+        <textarea id="album-manage-description" rows="2" maxlength="300" placeholder="Describe this album"></textarea>
+      </div>
+      <div class="album-form-actions">
+        <button type="submit" class="btn btn-primary" id="album-manage-save">Save Changes</button>
+        <button type="button" class="btn btn-secondary" onclick="window.toggleAlbumManage(false)">Cancel</button>
+        <button type="button" class="btn btn-danger" id="album-manage-delete">Delete Album</button>
+        <span class="upload-status" id="album-manage-status"></span>
+      </div>
+      <div class="album-form-hint">
+        To change the album cover, hover a photo below and choose &ldquo;Set cover&rdquo;.
+        Deleting the album also deletes its photos.
+      </div>
+    </form>
+  `;
+}
+
+/**
+ * Initialise album management for the owner: rename, description and delete.
+ * Ownership is enforced server-side — these controls only hide the buttons.
+ */
+function initAlbumManageForm(username) {
+  const form = document.getElementById('album-manage-form');
+  if (!form) return;
+
+  const album = galleryRoutes.album;
+  if (!album) return;
+
+  const nameEl = document.getElementById('album-manage-name');
+  const descriptionEl = document.getElementById('album-manage-description');
+  // Prefill on every mount so the values reflect the latest saved album.
+  if (nameEl) nameEl.value = album.name || '';
+  if (descriptionEl) descriptionEl.value = album.description || '';
+
+  if (form.dataset.bound === '1') return;
+  form.dataset.bound = '1';
+
+  const errorEl = document.getElementById('album-manage-error');
+  const statusEl = document.getElementById('album-manage-status');
+  const saveBtn = document.getElementById('album-manage-save');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (errorEl) errorEl.style.display = 'none';
+
+    const name = (nameEl?.value || '').trim();
+    if (!name) {
+      if (errorEl) {
+        errorEl.textContent = 'Album name cannot be empty';
+        errorEl.style.display = 'block';
+      }
+      return;
+    }
+
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+    }
+
+    try {
+      await albumsApi.updateAlbum(album.id, {
+        name,
+        description: (descriptionEl?.value || '').trim(),
+      });
+      await refreshAlbumPage();
+      setGalleryStatus('Album updated.');
+    } catch (err) {
+      if (errorEl) {
+        errorEl.textContent = err.message || 'Could not update the album.';
+        errorEl.style.display = 'block';
+      }
+    } finally {
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save Changes';
+      }
+      if (statusEl) statusEl.textContent = '';
+    }
+  });
+
+  const deleteBtn = document.getElementById('album-manage-delete');
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', async () => {
+      const count = (galleryRoutes.photos || []).length;
+      const photoNote = count > 0
+        ? ` and its ${count} photo${count === 1 ? '' : 's'}`
+        : '';
+      if (!window.confirm(`Delete the album "${album.name}"${photoNote}? This cannot be undone.`)) {
+        return;
+      }
+
+      deleteBtn.disabled = true;
+      try {
+        await albumsApi.deleteAlbum(album.id);
+        // Back to the gallery, which re-renders from fresh data.
+        window.navigate(`/profile/${encodeURIComponent(username)}/photos`);
+      } catch (err) {
+        setGalleryStatus(`Could not delete album: ${err.message || 'Unknown error'}`, true);
+        deleteBtn.disabled = false;
+      }
+    });
+  }
+}
+
+/**
+ * Show / hide the album management form.
+ */
+function toggleAlbumManage(open = null) {
+  const form = document.getElementById('album-manage-form');
+  if (!form) return;
+  const shouldOpen = open === null ? form.style.display === 'none' : !!open;
+  form.style.display = shouldOpen ? 'block' : 'none';
+
+  const btn = document.getElementById('album-manage-toggle');
+  if (btn) btn.textContent = shouldOpen ? 'Close' : 'Manage Album';
+}
+
+// Inline onclick handler used by the Manage Album button.
+window.toggleAlbumManage = toggleAlbumManage;
+
+/**
+ * Set one of the album's own photos as the album cover (owner only).
+ */
+window.setAlbumCover = async function (photoId) {
+  const album = galleryRoutes.album;
+  if (!album || !galleryRoutes.isOwnProfile) return;
+  if (album.cover_photo_id === photoId) return;
+
+  try {
+    await albumsApi.updateAlbum(album.id, { cover_photo_id: photoId });
+    await refreshAlbumPage();
+    setGalleryStatus('Album cover updated.');
+  } catch (err) {
+    setGalleryStatus(`Could not update the cover: ${err.message || 'Unknown error'}`, true);
+  }
+};
 
 /**
  * Initialise the album page: load the album + its photos and show ONLY those.
@@ -113,7 +271,10 @@ export async function initAlbumPage(username, albumId) {
 
   renderAlbumHeader(profileUsername);
   renderAlbumPhotos(galleryRoutes.photos, galleryRoutes.isOwnProfile);
-  if (galleryRoutes.isOwnProfile) initGalleryUpload();
+  if (galleryRoutes.isOwnProfile) {
+    initGalleryUpload();
+    initAlbumManageForm(profileUsername);
+  }
   applyGalleryBackground(profileUsername);
 }
 
@@ -149,6 +310,13 @@ function renderAlbumHeader(username) {
 
   if (titleEl) titleEl.textContent = albumName;
   if (metaEl) metaEl.textContent = `${count} photo${count === 1 ? '' : 's'} · @${username}`;
+
+  const descriptionEl = document.getElementById('album-description');
+  if (descriptionEl) {
+    const description = album ? (album.description || '') : '';
+    descriptionEl.textContent = description;
+    descriptionEl.style.display = description ? 'block' : 'none';
+  }
   if (coverEl) {
     const coverThumb = album && album.cover_photo_url;
     coverEl.innerHTML = coverThumb
@@ -178,7 +346,13 @@ function renderAlbumPhotos(photos, isOwnProfile) {
 
   emptyEl.style.display = 'none';
   gridEl.style.display = 'grid';
-  gridEl.innerHTML = photos.map(photo => renderGalleryItemHtml(photo, isOwnProfile)).join('');
+
+  // Owner-only: each tile can be promoted to the album cover.
+  const coverId = galleryRoutes.album ? galleryRoutes.album.cover_photo_id : null;
+  gridEl.innerHTML = photos.map(photo => renderGalleryItemHtml(photo, isOwnProfile, {
+    showCoverButton: isOwnProfile,
+    isCover: !!coverId && photo.id === coverId,
+  })).join('');
 
   // The lightbox navigates through this album's photos only.
   bindGalleryGridLightbox(gridEl, photos, photos);

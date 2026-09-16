@@ -1,6 +1,6 @@
 /** Dedicated owner workspace; profile data and uploads use the existing APIs. */
 import { profileApi } from './api.js';
-import { applyProfileBackground, renderProfileView, renderThemeControls, setEditorProfile, getThemeDraft } from './profile.js';
+import { applyProfileBackground, renderProfileView, renderThemeControls, setEditorProfile, getThemeDraft, renderProfilePage, loadProfilePreviewContent } from './profile.js';
 
 let root = null;
 let dirty = false;
@@ -10,22 +10,28 @@ let savedProfile = null;
 let busy = false;
 let photoFile = null;
 let photoPreviewUrl = null;
+let privacyDirty = false;
+let previewLoaded = false;
+let activeTab = 'identity';
 
 export function renderProfileEditorPage() {
   return `<main id="profile-editor" class="profile-editor">
     <header class="editor-heading"><a href="#/profile">← Return to profile</a>
-      <p>YOUR PERSONAL SPACE</p><h1>Profile Management</h1>
-      <p>Edit your identity and make your KomuniPH profile your own.</p></header>
+      <p class="editor-eyebrow">YOUR PERSONAL SPACE</p><h1>Edit Profile</h1>
+      <p>Manage how people see you. Make this space your own.</p></header>
     <p id="editor-status" role="status" aria-live="polite">Loading your profile…</p>
     <div id="editor-workspace" hidden>
       <div class="editor-tabs" role="tablist" aria-label="Profile management">
         <button id="identity-tab" role="tab" aria-selected="true" aria-controls="identity-panel" data-tab="identity">Edit Profile</button>
         <button id="customize-tab" role="tab" aria-selected="false" aria-controls="customize-panel" data-tab="customize" tabindex="-1">Customize Profile</button>
+        <button id="privacy-tab" role="tab" aria-selected="false" aria-controls="privacy-panel" data-tab="privacy" tabindex="-1">Privacy</button>
       </div>
+      <button id="editor-open-preview" class="btn btn-secondary">Preview Profile ↗</button>
       <div class="editor-layout"><div class="editor-controls">
         <section id="identity-panel" role="tabpanel" aria-labelledby="identity-tab">
           <h2>Profile Photo</h2><p>Choose a photo, preview it, then upload. Photo uploads save immediately.</p>
-          <label class="btn btn-secondary" for="editor-photo-input">Change Profile Photo</label>
+          <div id="editor-current-photo" aria-label="Current profile photo"></div>
+          <label for="editor-photo-input">Change Profile Photo</label>
           <input id="editor-photo-input" type="file" accept="image/jpeg,image/png,image/webp">
           <img id="editor-photo-preview" class="editor-photo-preview" alt="Selected profile photo" hidden>
           <button id="editor-photo-upload" class="btn btn-primary" disabled>Upload Photo</button>
@@ -38,19 +44,22 @@ export function renderProfileEditorPage() {
           ${renderThemeControls()}
           <p>Testimonials, gallery and albums remain on your profile. Widget visibility and decorations are not configurable yet.</p>
         </section>
-      </div>
-      <aside class="editor-preview" aria-label="Live profile preview">
-        <h2>Profile Preview</h2><p>Your identity and profile-card styling, without the editing controls.</p>
-        <div class="profile-frame" id="profile-frame" data-view="preview">
-          <div class="profile-background-layer" id="profile-background-layer" aria-hidden="true"></div>
-          <div class="profile-module"><div class="profile-module-header">Profile</div>
-            <div class="profile-module-body"><div id="profile-photo-display"></div>
-              <div id="profile-view"><h2 id="profile-name" class="profile-name"></h2>
-              <p id="profile-username" class="profile-username"></p><p id="profile-nickname"></p><p id="profile-alias"></p>
-              <p id="profile-info-bio"></p></div>
-            </div></div>
-        </div>
-      </aside></div>
+        <section id="privacy-panel" role="tabpanel" aria-labelledby="privacy-tab" hidden>
+          <h2>Privacy</h2><p>Choose what belongs on your public profile.</p>
+          <h3>Profile identity</h3>
+          <p>Your display name, nickname and bio are public. Your username stays your account handle. Legal-name fields and email are never included in the public profile response.</p>
+          <label class="editor-toggle" for="editor-alias-visible"><span>Show my alias<span class="editor-help">Use your alias as part of your public identity.</span></span><input id="editor-alias-visible" type="checkbox" role="switch"></label>
+          <h3>Birthday</h3><p>Your birthday is hidden unless you choose to share it. Edit the date under Edit Profile.</p>
+          <label class="editor-toggle" for="editor-birthday-visible"><span>Show my birthday<span class="editor-help">Off means hidden from everyone visiting your profile.</span></span><input id="editor-birthday-visible" type="checkbox" role="switch"></label>
+          <p>Profiles are public. Private-profile access is not currently supported.</p>
+          <div class="edit-actions"><button id="editor-save-privacy" class="btn btn-primary">Save Privacy Changes</button><button id="editor-cancel-privacy" class="btn btn-secondary">Discard Changes</button></div>
+        </section>
+      </div></div>
+      <section id="editor-full-preview" hidden aria-label="Full profile preview">
+        <div class="editor-preview-toolbar"><div><strong>Preview</strong><p>Visitor view with your unsaved changes. Nothing is saved by opening preview.</p></div><button id="editor-back" class="btn btn-secondary">← Back to Editor</button></div>
+        <p id="editor-preview-status" role="status"></p>
+        <div id="editor-preview-content">${renderProfilePage(null, { preview: true })}</div>
+      </section>
     </div>
   </main>`;
 }
@@ -76,6 +85,9 @@ export function destroyProfileEditorPage() {
   busy = false;
   photoFile = null;
   photoPreviewUrl = null;
+  privacyDirty = false;
+  previewLoaded = false;
+  activeTab = 'identity';
 }
 
 function setStatus(message) {
@@ -84,6 +96,7 @@ function setStatus(message) {
 }
 
 function selectTab(name) {
+  activeTab = name;
   for (const tab of root.querySelectorAll('[data-tab]')) {
     const selected = tab.dataset.tab === name;
     tab.setAttribute('aria-selected', String(selected));
@@ -117,7 +130,9 @@ export async function initProfileEditorPage() {
       tab.addEventListener('keydown', event => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
         event.preventDefault();
-        const next = event.key === 'Home' ? 'identity' : event.key === 'End' ? 'customize' : tab.dataset.tab === 'identity' ? 'customize' : 'identity';
+        const names = ['identity', 'customize', 'privacy'];
+        const index = names.indexOf(tab.dataset.tab);
+        const next = event.key === 'Home' ? names[0] : event.key === 'End' ? names[2] : names[(index + (event.key === 'ArrowRight' ? 1 : 2)) % 3];
         selectTab(next);
         root.querySelector(`#${next}-tab`).focus();
       });
@@ -125,6 +140,14 @@ export async function initProfileEditorPage() {
     bindIdentityForm();
     bindUploads();
     bindThemeActions();
+    bindPrivacy();
+    root.querySelector('#editor-open-preview').onclick = openFullPreview;
+    root.querySelector('#editor-back').onclick = closeFullPreview;
+    // Preview is read-only, including gallery links and testimonial actions.
+    root.querySelector('#editor-preview-content').addEventListener('click', event => {
+      if (event.target.closest('a, button, .photo-gallery-item')) { event.preventDefault(); event.stopPropagation(); }
+    }, true);
+    renderIdentityDraft();
     const onDraftChange = event => {
       if (event.target.closest('#profile-edit')) {
         identityDirty = true;
@@ -148,14 +171,20 @@ export async function initProfileEditorPage() {
 
 
 function updateDirty() {
-  dirty = identityDirty || themeDirty || !!photoFile;
+  dirty = identityDirty || themeDirty || privacyDirty || !!photoFile;
 }
 
 function renderIdentityDraft() {
   if (!savedProfile) return;
   const value = id => root.querySelector(`#${id}`)?.value || '';
   renderProfileView({ ...savedProfile, display_name: value('edit-display-name'),
-    bio: value('edit-bio'), nickname: value('edit-nickname'), alias: value('edit-alias') });
+    bio: value('edit-bio'), nickname: value('edit-nickname'), alias: value('edit-alias'),
+    birthday: value('edit-birthday'), birthday_visible: root.querySelector('#editor-birthday-visible').checked,
+    alias_enabled: root.querySelector('#editor-alias-visible').checked,
+    country: value('edit-country'), city: value('edit-city'), barangay: value('edit-barangay'),
+    profile_photo_url: photoPreviewUrl || savedProfile.profile_photo_url });
+  root.querySelector('#editor-current-photo').replaceChildren(root.querySelector('#profile-photo-display').cloneNode(true));
+  root.querySelector('#editor-current-photo [id]')?.removeAttribute('id');
   root.querySelector('#profile-view').style.display = 'block';
 }
 
@@ -275,6 +304,7 @@ function bindUploads() {
       }
     } catch (error) { status.textContent = error.message; input.value = ''; }
     root.querySelector('#editor-photo-upload').disabled = !photoFile;
+    renderIdentityDraft();
     updateDirty();
   };
   root.querySelector('#editor-photo-upload').onclick = () => runAction(async () => {
@@ -290,6 +320,7 @@ function bindUploads() {
       preview.hidden = true;
       URL.revokeObjectURL(photoPreviewUrl);
       photoPreviewUrl = null;
+      previewLoaded = false;
       updateDirty();
       status.textContent = 'Profile photo uploaded and saved successfully.';
     } catch (error) { status.textContent = error.message; }
@@ -322,6 +353,80 @@ function bindUploads() {
       finally { input.value = ''; }
     });
   };
+}
+
+function bindPrivacy() {
+  const birthday = root.querySelector('#editor-birthday-visible');
+  const alias = root.querySelector('#editor-alias-visible');
+  const reset = () => {
+    birthday.checked = !!savedProfile.birthday_visible;
+    alias.checked = !!savedProfile.alias_enabled;
+    privacyDirty = false;
+    updateDirty();
+    renderIdentityDraft();
+  };
+  reset();
+  for (const control of [birthday, alias]) control.onchange = () => {
+    privacyDirty = true;
+    updateDirty();
+    renderIdentityDraft();
+  };
+  root.querySelector('#editor-save-privacy').onclick = () => runAction(async () => {
+    savedProfile = await profileApi.updateProfile({ birthday_visible: birthday.checked, alias_enabled: alias.checked });
+    setEditorProfile(savedProfile);
+    privacyDirty = false;
+    updateDirty();
+    renderIdentityDraft();
+    setStatus('Privacy changes saved successfully.');
+  });
+  root.querySelector('#editor-cancel-privacy').onclick = () => {
+    if (privacyDirty && !window.confirm('Discard your privacy changes?')) return;
+    reset();
+    setStatus('Privacy changes discarded.');
+  };
+}
+
+async function openFullPreview() {
+  if (busy) return;
+  renderIdentityDraft();
+  // Replace the merged custom config too, so cleared background values do not
+  // fall back to an older saved image. Opening preview performs no writes.
+  const custom = themeDirty ? getThemeDraft() : savedProfile.theme?.custom || {};
+  applyProfileBackground({ ...savedProfile, theme: { ...savedProfile.theme,
+    config: { ...savedProfile.theme?.config, ...custom }, custom } });
+  root.classList.add('is-previewing');
+  root.querySelector('#editor-full-preview').hidden = false;
+  root.querySelector('#editor-back').focus();
+  window.scrollTo(0, 0);
+  if (!previewLoaded) {
+    const mounted = root;
+    const status = root.querySelector('#editor-preview-status');
+    status.textContent = 'Loading your gallery, albums and testimonials…';
+    await runAction(async () => {
+      try {
+        await loadProfilePreviewContent(savedProfile.username);
+        if (root !== mounted) return;
+        // Read-only preview: keep links visually faithful but out of tab order.
+        root.querySelectorAll('#editor-preview-content a, #editor-preview-content button').forEach(control => {
+          control.tabIndex = -1;
+          control.setAttribute('aria-disabled', 'true');
+        });
+        previewLoaded = true;
+        status.textContent = '';
+      } catch (error) {
+        status.textContent = `Could not load profile content: ${error.message}. Return to the editor and reopen preview to retry.`;
+      }
+    });
+    if (root === mounted) root.querySelector('#editor-back').focus();
+  }
+}
+
+function closeFullPreview() {
+  root.classList.remove('is-previewing');
+  root.querySelector('#editor-full-preview').hidden = true;
+  selectTab(activeTab);
+  root.querySelector('#editor-open-preview').focus();
+  window.scrollTo(0, 0);
 }
 
 function validateImage(file) {

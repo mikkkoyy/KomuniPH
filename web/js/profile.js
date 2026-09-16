@@ -72,14 +72,14 @@ function createAvatar(username, displayName, photoUrl, size = 5) {
 /**
  * Render the profile page
  */
-export function renderProfilePage(viewUsername = null) {
+export function renderProfilePage(viewUsername = null, { preview = false } = {}) {
   // PROFILE-PHOTO-SPA-01: the signed-in owner's own profile must ALWAYS render
   // in own mode, even when the URL is #/profile/:username (the "Profile" link
   // on the gallery / album pages). Only other users' profiles get the public
   // view with the small circular avatar. This keeps the header photo identical
   // no matter which path led here (Home -> Profile, Gallery -> Back,
   // Album -> Back, refresh, Back/Forward).
-  const isPublicView = !!viewUsername && !isOwnUsername(viewUsername);
+  const isPublicView = preview || (!!viewUsername && !isOwnUsername(viewUsername));
   if (!isPublicView && !isAuthenticated()) {
     navigate('/login');
     return '';
@@ -98,7 +98,7 @@ export function renderProfilePage(viewUsername = null) {
       </header>
 
        <!-- Navigation -->
-       ${isPublicView && !isAuthenticated() ? '' : `<nav class="profile-nav" id="profile-nav">
+       ${preview || (isPublicView && !isAuthenticated()) ? '' : `<nav class="profile-nav" id="profile-nav">
          <a href="#/home" class="profile-nav-link">Home</a>
          <a href="#/profile" class="profile-nav-link profile-nav-active">My Profile ▼</a>
          <a href="#/connections" class="profile-nav-link">My Connections ▼</a>
@@ -597,7 +597,7 @@ export function renderProfileView(profile) {
    }
    const infoBirthdayEl = document.getElementById('profile-info-birthday');
    if (infoBirthdayEl) {
-     infoBirthdayEl.textContent = profile.birthday || '';
+     infoBirthdayEl.textContent = profile.birthday_visible ? (profile.birthday || '') : '';
    }
    if (infoBioEl) infoBioEl.textContent = bio || '';
 
@@ -685,15 +685,15 @@ window.startEditProfile = async function() {
       <input type="text" id="edit-display-name" maxlength="100" value="${escapeHtml(currentProfile?.display_name || '')}" placeholder="Your display identity">
     </div>
     <div class="form-group">
-      <label for="edit-first-name">First Name *</label>
+      <label for="edit-first-name">First Name (private) *</label>
       <input type="text" id="edit-first-name" maxlength="100" value="${escapeHtml(firstName)}" placeholder="Enter your first name">
     </div>
     <div class="form-group">
-      <label for="edit-middle-name">Middle Name</label>
+      <label for="edit-middle-name">Middle Name (private)</label>
       <input type="text" id="edit-middle-name" maxlength="100" value="${escapeHtml(middleName)}" placeholder="Enter your middle name (optional)">
     </div>
     <div class="form-group">
-      <label for="edit-last-name">Last Name *</label>
+      <label for="edit-last-name">Last Name (private) *</label>
       <input type="text" id="edit-last-name" maxlength="100" value="${escapeHtml(lastName)}" placeholder="Enter your last name">
     </div>
     <div class="form-group">
@@ -702,10 +702,10 @@ window.startEditProfile = async function() {
     </div>
     <div class="form-group">
       <label for="edit-bio">Bio</label>
-      <textarea id="edit-bio" rows="3" maxlength="500">${escapeHtml(bioValue)}</textarea>
+      <textarea id="edit-bio" rows="4" maxlength="500" placeholder="Tell people a little about yourself…">${escapeHtml(bioValue)}</textarea>
     </div>
     <div class="form-group">
-      <label for="edit-birthday">Birthday</label>
+      <label for="edit-birthday">Birthday (visibility in Privacy)</label>
       <input type="date" id="edit-birthday" value="${escapeHtml(birthdayValue)}">
     </div>
     <div class="form-group">
@@ -863,12 +863,8 @@ function escapeHtml(str) {
  */
 export function getProfileDisplayName(profile) {
   if (!profile) return '';
-  const firstName = profile.first_name || '';
-  const middleName = profile.middle_name || '';
-  const lastName = profile.last_name || '';
-  if (profile.display_name) return profile.display_name;
-  const fullNameParts = [firstName, middleName, lastName].filter(Boolean);
-  return fullNameParts.join(' ') || profile.username || '';
+  // Public identity never falls back to private/legal name fields.
+  return profile.display_name || profile.username || '';
 }
 
 /**
@@ -1729,6 +1725,19 @@ export function renderThemeControls() {
           <button class="btn btn-primary" id="editor-save-theme">Save Changes</button>
         </div>
       </div>`;
+}
+
+/** Reuse the public modules on demand; no edit/upload handlers in preview. */
+export async function loadProfilePreviewContent(username) {
+  const [testimonials, gallery, albums] = await Promise.all([
+    testimonialsApi.getTestimonials(username), galleryApi.getPhotos(username), albumsApi.getAlbums(username)
+  ]);
+  renderTestimonials((testimonials.testimonials || []).map(item => ({ ...item, is_current_user_author: false })));
+  const photos = gallery.photos || [];
+  renderGallery(photos.slice(0, PROFILE_GALLERY_PREVIEW_LIMIT), false, photos);
+  renderGalleryPreviewMeta(photos.length);
+  const grid = document.getElementById('profile-albums-grid');
+  if (grid) grid.innerHTML = renderAlbumCardsHtml(albums.albums || [], username);
 }
 
 export function setEditorProfile(profile) {

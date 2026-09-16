@@ -46,3 +46,83 @@
   .profile-editor { padding: 1rem; }
   .editor-tabs button { flex: 1; padding: .75rem .5rem; }
 }
+
+/* Scoped social workspace controls; never override the visitor profile theme. */
+.profile-editor { background: #101923; padding: 2rem max(1rem, calc((100% - 1080px) / 2)); color-scheme: dark; }
+.editor-heading { margin-bottom: 1.5rem; }
+.editor-heading .editor-eyebrow { letter-spacing: .16em; font-size: .75rem; color: #89cfc7; margin-top: 1.5rem; }
+.editor-heading h1 { font-weight: 600; }
+.editor-layout { display: block; }
+.editor-controls { background: rgba(28,41,55,.78); border-color: #354555; box-shadow: 0 18px 48px #0003; padding: clamp(1rem, 3vw, 2rem); }
+.editor-tabs { display: inline-flex; background: #1c2937; padding: .35rem; border: 1px solid #354555; border-radius: 1rem; flex-wrap: wrap; }
+.editor-tabs button { border: 0; background: transparent; border-radius: .7rem; font-weight: 600; }
+.editor-tabs button[aria-selected="true"] { background: #285954; color: #e5fffa; box-shadow: 0 2px 8px #0003; }
+#editor-open-preview { margin: 0 0 1.25rem .75rem; }
+.editor-controls h2 { color: #f1f5f9; margin-top: 1.5rem; font-size: 1.4rem; }
+.editor-controls h3 { color: #e2e8f0; font-size: 1.05rem; margin-top: 1.5rem; }
+.editor-controls p { line-height: 1.65; max-width: 70ch; }
+.profile-editor .editor-controls label { color: #dde7ef; font-size: .95rem; font-weight: 500; }
+#profile-edit { display: grid !important; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1.25rem; margin-top: 1.5rem; }
+#profile-edit .form-group:has(#edit-display-name), #profile-edit .form-group:has(#edit-bio), #profile-edit .edit-actions, #edit-profile-error { grid-column: 1 / -1; }
+.editor-controls input:not([type="radio"]):not([type="range"]):not([type="checkbox"]), .editor-controls select, .editor-controls textarea {
+  appearance: none; width: 100%; min-height: 48px; padding: .8rem 1rem;
+  border-radius: .8rem; border: 1px solid #4a5d70; background: #152230; color: #f1f5f9;
+  font: inherit; font-size: 1rem; box-shadow: inset 0 1px 2px #0002;
+  transition: border-color .15s, background .15s;
+}
+.editor-controls textarea { resize: vertical; min-height: 120px; line-height: 1.6; }
+.editor-controls select { appearance: auto; }
+.editor-controls option { background: #152230; color: #f1f5f9; }
+.editor-controls input::placeholder, .editor-controls textarea::placeholder { color: #9aabba; opacity: 1; }
+.editor-controls input:focus, .editor-controls textarea:focus, .editor-controls select:focus { border-color: #78d9c9; background: #1a2c3a; }
+.editor-controls [aria-invalid="true"], .editor-controls .error { border-color: #fca5a5; }
+.editor-controls :disabled { opacity: .55; cursor: not-allowed; }
+.profile-editor .btn { border: 1px solid #53697c; border-radius: .8rem; padding: .75rem 1.1rem; font: inherit; font-weight: 600; min-height: 46px; cursor: pointer; box-shadow: none; }
+.profile-editor .btn-secondary { color: #e2e8f0; background: #233547; }
+.profile-editor .btn-primary { color: #082b26; background: #79dac7; border-color: #79dac7; }
+.profile-editor .btn:hover:not(:disabled) { filter: brightness(1.1); transform: none; }
+.profile-editor #editor-remove-background { color: #fecaca; border-color: #9c5c65; background: #412d36; align-self: start; }
+.profile-editor .edit-actions { display: flex; gap: .75rem; flex-wrap: wrap; margin-top: 1.25rem; }
+.editor-controls input[type="file"] { border-style: dashed !important; padding: .75rem; }
+.editor-controls input[type="file"]::file-selector-button { border: 0; border-radius: .5rem; padding: .65rem .8rem; margin-right: .7rem; background: #304b60; color: #f1f5f9; font: inherit; cursor: pointer; }
+#editor-current-photo .profile-photo-public, #editor-current-photo .profile-photo-public-initials { width: 96px; height: 96px; margin: .75rem 0; }
+.profile-editor .theme-panel-header, .profile-editor .theme-panel-footer { border-color: #354555; }
+.profile-editor .theme-radio { color: #e2e8f0; border: 1px solid #4a5d70; border-radius: .75rem; padding: .8rem; }
+.profile-editor .theme-radio:has(:checked) { background: #285954; border-color: #79dac7; }
+.editor-controls input[type="radio"], .editor-controls input[type="range"] { accent-color: #79dac7; min-height: 24px; }
+.editor-controls input[type="color"] { cursor: pointer; padding: .3rem !important; }
+.editor-controls input[type="color"]::-webkit-color-swatch { border: 0; border-radius: .45rem; }
+.editor-toggle { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; padding: 1.2rem 0; border-bottom: 1px solid #354555; cursor: pointer; }
+.editor-help { display: block; color: #b9c8d4; font-size: .875rem; font-weight: 400; line-height: 1.6; margin-top: .3rem; }
+.profile-editor .editor-toggle input { appearance: none; flex: 0 0 48px; width: 48px; height: 28px; border-radius: 999px; background: #415366; border: 1px solid #8193a3; padding: 3px; cursor: pointer; }
+.editor-toggle input::before { content: ''; display: block; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform .15s; }
+.profile-editor .editor-toggle input:checked { background: #268374; border-color: #79dac7; }
+.editor-toggle input:checked::before { transform: translateX(18px); }
+
+
+
+/* Full-width mode keeps the production profile grid and viewport backdrop. */
+.profile-editor.is-previewing { padding: 0; color-scheme: normal; }
+.is-previewing > .editor-heading, .is-previewing > #editor-status,
+.is-previewing .editor-tabs, .is-previewing #editor-open-preview,
+.is-previewing .editor-layout { display: none; }
+.editor-preview-toolbar { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem max(1rem, calc((100% - 1040px) / 2)); background: #142330; color: #f1f5f9; border-bottom: 1px solid #415366; }
+.editor-preview-toolbar p { font-size: .875rem; color: #becdda; margin: .25rem 0 0; }
+#editor-preview-status:not(:empty) { position: relative; z-index: 2; padding: 1rem; background: #142330; }
+#editor-preview-content .profile-frame { width: 100%; }
+#editor-preview-content { color: var(--kp-ink); }
+#editor-preview-content [aria-disabled="true"] { cursor: default; }
+@media (max-width: 600px) {
+  .profile-editor { padding: 1rem; }
+  .profile-editor.is-previewing { padding: 0; }
+  #profile-edit { grid-template-columns: minmax(0,1fr); }
+  .editor-tabs { display: flex; }
+  #editor-open-preview { margin-left: 0; width: 100%; }
+  .editor-preview-toolbar { flex-wrap: wrap; }
+  .editor-preview-toolbar .btn { width: 100%; }
+  .profile-editor .theme-field { min-width: 120px; }
+  .profile-editor .edit-actions .btn { flex: 1 1 auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .editor-controls *, .editor-toggle input::before { transition: none !important; }
+}

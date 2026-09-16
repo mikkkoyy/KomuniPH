@@ -154,6 +154,8 @@ const PROFILE_SELECT = `
     p.theme_id,
     p.custom_theme_config,
     p.birthday,
+    p.birthday_visible,
+
     p.country,
     p.city,
     p.barangay,
@@ -208,7 +210,9 @@ function buildTheme(profile) {
  */
 function getProfileByUserId(userId) {
   const profile = queryOne(`${PROFILE_SELECT} WHERE p.user_id = ?`, [userId]);
+
   if (profile) {
+    profile.birthday_visible = profile.birthday_visible === 1;
     profile.alias_enabled = Boolean(profile.alias_enabled);
     profile.first_name = profile.first_name || '';
     profile.middle_name = profile.middle_name || '';
@@ -254,15 +258,9 @@ export function handleGetPublicProfile(req, res, params) {
   try {
     const profile = queryOne(`
       SELECT
-        p.id,
-        p.user_id,
         u.username,
-        p.first_name,
-        p.middle_name,
-        p.last_name,
         p.nickname,
         p.display_name,
-        p.real_name,
         p.alias,
         p.alias_enabled,
         p.bio,
@@ -270,7 +268,8 @@ export function handleGetPublicProfile(req, res, params) {
         p.cover_photo_url,
         p.theme_id,
         p.custom_theme_config,
-        p.birthday,
+        CASE WHEN p.birthday_visible = 1 THEN p.birthday ELSE NULL END AS birthday,
+        p.birthday_visible,
         p.country,
         p.city,
         p.barangay,
@@ -287,16 +286,15 @@ export function handleGetPublicProfile(req, res, params) {
 
     // Convert alias_enabled from integer to boolean
     profile.alias_enabled = Boolean(profile.alias_enabled);
-    // PROFILE-04: Ensure identity fields have safe defaults
-    profile.first_name = profile.first_name || '';
-    profile.middle_name = profile.middle_name || '';
-    profile.last_name = profile.last_name || '';
+    profile.birthday_visible = profile.birthday_visible === 1;
+    if (!profile.alias_enabled) profile.alias = null;
     profile.nickname = profile.nickname || '';
     profile.birthday = profile.birthday || null;
     profile.country = profile.country || null;
     profile.city = profile.city || null;
     profile.barangay = profile.barangay || null;
     profile.theme = buildTheme(profile);
+    delete profile.custom_theme_config;
 
     jsonResponse(res, 200, profile);
   } catch (err) {
@@ -389,8 +387,15 @@ export async function handleUpdateProfile(req, res, user) {
     const hasCity = Object.prototype.hasOwnProperty.call(body, 'city');
     const hasBarangay = Object.prototype.hasOwnProperty.call(body, 'barangay');
 
+    const hasBirthdayVisible = Object.prototype.hasOwnProperty.call(body, 'birthday_visible');
+    const hasAliasEnabled = Object.prototype.hasOwnProperty.call(body, 'alias_enabled');
+    for (const key of ['birthday_visible', 'alias_enabled']) {
+      if (Object.prototype.hasOwnProperty.call(body, key) && typeof body[key] !== 'boolean') {
+        return errorResponse(res, 422, `${key} must be true or false`);
+      }
+    }
     // At least one field must be provided
-    if (!hasFirstName && !hasMiddleName && !hasLastName && !hasNickname && !hasDisplayName && !hasBio && !hasAlias && !hasBirthday && !hasCountry && !hasCity && !hasBarangay) {
+    if (!hasBirthdayVisible && !hasAliasEnabled && !hasFirstName && !hasMiddleName && !hasLastName && !hasNickname && !hasDisplayName && !hasBio && !hasAlias && !hasBirthday && !hasCountry && !hasCity && !hasBarangay) {
       return errorResponse(res, 422, 'At least one profile field is required');
     }
 
@@ -581,8 +586,11 @@ export async function handleUpdateProfile(req, res, user) {
     }
 
     execute(
-      "UPDATE profiles SET first_name = ?, middle_name = ?, last_name = ?, nickname = ?, display_name = ?, bio = ?, alias = ?, birthday = ?, country = ?, city = ?, barangay = ?, custom_theme_config = ?, updated_at = datetime('now') WHERE user_id = ?",
-      [firstName, middleName, lastName, nickname, displayName, bio, alias, birthday, country, city, barangay, customThemeConfig, user.sub]
+      "UPDATE profiles SET first_name = ?, middle_name = ?, last_name = ?, nickname = ?, display_name = ?, bio = ?, alias = ?, birthday = ?, birthday_visible = ?, alias_enabled = ?, country = ?, city = ?, barangay = ?, custom_theme_config = ?, updated_at = datetime('now') WHERE user_id = ?",
+      [firstName, middleName, lastName, nickname, displayName, bio, alias, birthday,
+        hasBirthdayVisible ? Number(body.birthday_visible) : existing.birthday_visible,
+        hasAliasEnabled ? Number(body.alias_enabled) : existing.alias_enabled,
+        country, city, barangay, customThemeConfig, user.sub]
     );
 
     const updated = getProfileByUserId(user.sub);

@@ -89,6 +89,86 @@ try {
   assert.equal((await own()).username, owner.username);
   report('Identity, bio and alias persist; username unchanged; public profile has no editor controls');
 
+  // Privacy defaults, server projection, and full-width unsaved visitor preview.
+  const publicProfile = async () => (await api('/profile/' + owner.username)).data;
+  assert.equal((await own()).birthday_visible, false);
+  await field('edit-birthday', '1990-09-12');
+  await page.click('#save-profile-btn');
+  await status('information saved successfully');
+  assert.equal((await publicProfile()).birthday, null);
+  for (const key of ['email', 'password', 'password_hash', 'first_name', 'middle_name', 'last_name', 'real_name', 'id', 'user_id', 'access_token', 'refresh_token', 'custom_theme_config']) {
+    assert.ok(!(key in await publicProfile()), `Public response must omit ${key}`);
+  }
+  assert.equal((await api('/profile', 'PATCH', { birthday_visible: 'false' }, owner.token)).status, 422);
+  assert.equal((await api('/profile', 'PATCH', { birthday_visible: true })).status, 401);
+  await page.click('#privacy-tab');
+  await page.click('#editor-birthday-visible');
+  await page.click('#editor-alias-visible');
+  await page.click('#editor-save-privacy');
+  await status('Privacy changes saved successfully');
+  assert.equal((await publicProfile()).birthday, '1990-09-12');
+  assert.equal((await publicProfile()).alias, owner.username + 'alias');
+  await page.reload({ waitUntil: 'networkidle0' });
+  await page.click('#privacy-tab');
+  assert.equal(await page.$eval('#editor-birthday-visible', e => e.checked), true);
+  await page.click('#editor-birthday-visible');
+  await page.click('#identity-tab');
+  await field('edit-display-name', 'Unsaved visitor identity');
+  await field('edit-bio', 'Unsaved visitor biography');
+  await page.click('#customize-tab');
+  await field('theme-accentColor', '#42bbaa');
+  const beforePreview = await own();
+  for (const width of [390, 768, 1280, 1366]) {
+    await page.setViewport({ width, height: 900 });
+    for (const tab of ['identity', 'customize', 'privacy']) {
+      await page.click(`#${tab}-tab`);
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Editor overflow ${width}/${tab}`);
+      const clipped = await page.$$eval(`#${tab}-panel input, #${tab}-panel select, #${tab}-panel textarea, #${tab}-panel button`, controls => controls.filter(e => {
+        const r = e.getBoundingClientRect();
+        return r.width && r.height && (r.left < 0 || r.right > innerWidth + 1);
+      }).map(e => e.id));
+      assert.deepEqual(clipped, [], `Clipped controls at ${width}/${tab}`);
+    }
+    await page.screenshot({ path: `.tmp-privacy-${width}.png`, fullPage: true });
+    await page.click('#editor-open-preview');
+    await page.waitForSelector('#editor-back:not(:disabled)', { visible: true });
+    await page.waitForFunction(() => document.getElementById('editor-preview-status').textContent === '');
+    assert.ok(await page.$eval('#profile-frame', e => Math.abs(e.getBoundingClientRect().width - innerWidth) <= 1), `Full-width preview ${width}`);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Preview overflow ${width}`);
+    assert.equal(await page.$eval('#profile-name', e => e.textContent), 'Unsaved visitor identity');
+    assert.equal(await page.$eval('#profile-info-bio', e => e.textContent), 'Unsaved visitor biography');
+    assert.equal(await page.$eval('#profile-info-birthday', e => e.textContent), '');
+    assert.equal(await page.$eval('#profile-frame', e => e.style.getPropertyValue('--theme-accent')), '#42bbaa');
+    assert.ok(await page.$('#photo-gallery-module'));
+    assert.ok(await page.$('#profile-albums-grid'));
+    assert.equal(await page.$('#profile-create-album-btn'), null);
+    await page.screenshot({ path: `.tmp-full-preview-${width}.png`, fullPage: true });
+    await page.click('#editor-back');
+    assert.equal(await page.$eval('#edit-display-name', e => e.value), 'Unsaved visitor identity');
+  }
+  assert.deepEqual(await own(), beforePreview, 'Opening preview performs no writes');
+  await page.click('#privacy-tab');
+  await page.click('#editor-save-privacy');
+  await status('Privacy changes saved successfully');
+  assert.equal((await publicProfile()).birthday, null);
+  assert.equal((await own()).birthday, '1990-09-12');
+  // Other account's privacy update must never change this owner's setting.
+  await api('/profile?user_id=' + beforePreview.user_id, 'PATCH', { birthday_visible: true, user_id: beforePreview.user_id }, other.token);
+  assert.equal((await own()).birthday_visible, false);
+  await page.click('#identity-tab');
+  await field('edit-display-name', 'Profile Editor Identity');
+  await field('edit-bio', 'A profile made for viewing.');
+  await page.click('#save-profile-btn');
+  await status('information saved successfully');
+  await page.click('#customize-tab');
+  page.once('dialog', dialog => dialog.accept());
+  await page.click('#editor-cancel-theme');
+  await page.reload({ waitUntil: 'networkidle0' });
+  await page.click('#privacy-tab');
+  assert.equal(await page.$eval('#editor-birthday-visible', e => e.checked), false);
+  await page.click('#identity-tab');
+  report('Server birthday/alias privacy, private identity omission, full-width unsaved preview and back at all four widths');
+
   await chooseImage('#editor-photo-input', 'text/plain');
   assert.match(await page.$eval('#editor-photo-status', e => e.textContent), /JPEG/);
   await chooseImage('#editor-photo-input');

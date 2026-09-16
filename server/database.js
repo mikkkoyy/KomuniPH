@@ -290,6 +290,13 @@ export function initDatabase() {
     // Column already exists — safe no-op.
   }
 
+  // Profile privacy: opt-in birthday sharing, including existing accounts.
+  const profileColumns = database.prepare('PRAGMA table_info(profiles)').all();
+  if (!profileColumns.some(column => column.name === 'birthday_visible')) {
+    database.exec('ALTER TABLE profiles ADD COLUMN birthday_visible INTEGER NOT NULL DEFAULT 0 CHECK (birthday_visible IN (0, 1))');
+  }
+
+
   // PROFILE-06: Add location fields to profiles table.
   try {
     database.exec('ALTER TABLE profiles ADD COLUMN birthday TEXT');

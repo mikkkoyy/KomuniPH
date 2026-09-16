@@ -165,7 +165,11 @@ window.addEventListener('hashchange', render);
 // same hash navigation instead of touching window.location directly.
 window.navigate = navigate;
 
-// Initial render — restore auth first, then route
+// Initial render — render route first, then restore auth in the background
+// so the UI never becomes blank while authentication is pending.
+render();
+
 initAuth().then(() => {
-  render();
+  // Auth state restoration complete; UI already rendered.
+  // No re-render needed unless the session changes the current route.
 });

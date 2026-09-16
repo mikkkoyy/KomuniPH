@@ -38,3 +38,6 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Temporary debug/test scripts and outputs (prefix-based)
+.tmp-*

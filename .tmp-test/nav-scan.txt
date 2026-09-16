@@ -1,3 +1,0 @@
-web/js/profile.js:584: window.loadProfile = async function() {
-web/js/profile.js:2899: window.navigate(`/profile/${encodeURIComponent(galleryRoutes.username)}/photos/${encodeURIComponent(albumId)}`);
-web/js/profile.js:2913: window.navigate(`/profile/${encodeURIComponent(target)}/photos`);

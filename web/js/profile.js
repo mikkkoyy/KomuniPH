@@ -1260,11 +1260,6 @@ function formatTestimonialDate(dateStr) {
   return `${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
 }
 
-function escapeHtmlAttr(str) {
-  if (!str) return '';
-  return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
 function renderTestimonialCard(testimonial) {
   const author = testimonial.author || {};
   const displayName = author.display_name || author.username || 'Anonymous';

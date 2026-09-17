@@ -1416,11 +1416,23 @@ a:hover {
   margin-bottom: 1rem;
 }
 
+.profile-main {
+  grid-column: 1;
+}
+
+.profile-sidebar {
+  grid-column: 2;
+}
+
 /* For responsive, use mobile-first approach */
 @media (max-width: 640px) {
   .profile-content {
     grid-template-columns: 1fr;
     gap: 1rem;
+  }
+  .profile-main,
+  .profile-sidebar {
+    grid-column: auto;
   }
 }
 
@@ -1538,11 +1550,17 @@ a:hover {
   margin-bottom: 0.75rem;
 }
 
-/* Profile header layout: photo + identity on left, bio on right */
+/* Profile header layout: photo column (photo + name below) on left, bio on right */
 .profile-header-row {
   display: flex;
   align-items: flex-start;
   gap: 1.5rem;
+}
+
+.profile-header-photo-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .profile-header-photo {
@@ -1550,10 +1568,8 @@ a:hover {
 }
 
 .profile-header-identity {
-  flex: 1;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
+  text-align: center;
 }
 
 .profile-header-bio {
@@ -1583,6 +1599,13 @@ a:hover {
 @media (max-width: 768px) {
   .profile-header-row {
     flex-direction: column;
+    align-items: center;
+  }
+  .profile-header-photo-column {
+    align-items: center;
+  }
+  .profile-header-identity {
+    text-align: center;
   }
   .profile-header-bio {
     flex: 0 0 auto;

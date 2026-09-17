@@ -4,7 +4,7 @@
 
 import { profileApi, testimonialsApi, galleryApi, albumsApi, authApi, isAuthenticated, getCurrentUserProfile, setCurrentUserProfile } from './api.js';
 import { navigate } from './app.js';
-import { renderGalleryItemHtml, bindGalleryGridLightbox, initGalleryUpload, isOwnUsername, safeDecode, renderCreateAlbumFormHtml, initCreateAlbumForm, renderAlbumCardsHtml } from './gallery.js'; // PHASE-3 GALLERY-SPLIT-01
+import { renderGalleryItemHtml, bindGalleryGridLightbox, isOwnUsername, safeDecode, renderAlbumCardsHtml } from './gallery.js'; // PHASE-3 GALLERY-SPLIT-01
 
 let currentProfile = null;
 let customizationDirty = false;
@@ -157,43 +157,44 @@ export function renderProfilePage(viewUsername = null, { preview = false } = {})
               <span></span>
             </div>
 <div class="profile-module-body">
-                 <div class="profile-header-row">
-                   <div class="profile-header-photo">
-                 <div id="profile-photo-section">${isPublicView ? '' : `
-                   <div class="profile-photo-wrapper" id="profile-photo-wrapper">
-                     <img class="profile-photo-large" id="profile-photo-large"
-                          src="" alt="Profile photo"
-                          style="display:none">
-                     <div class="profile-photo-large" id="profile-photo-initials"
-                          style="display:none; background: var(--theme-accent, var(--kp-teal)); color: white;">
-                       ?
+                  <div class="profile-header-row">
+                    <div class="profile-header-photo-column">
+                      <div class="profile-header-photo">
+                        <div id="profile-photo-section">${isPublicView ? '' : `
+                          <div class="profile-photo-wrapper" id="profile-photo-wrapper">
+                            <img class="profile-photo-large" id="profile-photo-large"
+                                 src="" alt="Profile photo"
+                                 style="display:none">
+                            <div class="profile-photo-large" id="profile-photo-initials"
+                                 style="display:none; background: var(--theme-accent, var(--kp-teal)); color: white;">
+                              ?
+                            </div>
+                            <button class="profile-photo-camera-btn" id="profile-photo-camera-btn" title="Change profile picture" aria-label="Change profile picture">
+                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="12" r="4"></circle></svg>
+                            </button>
+                          </div>
+                        `}${isPublicView ? `
+                          <div class="profile-photo-display" id="profile-photo-display"></div>
+` : ''}
+                       </div>
                      </div>
-                     <button class="profile-photo-camera-btn" id="profile-photo-camera-btn" title="Change profile picture" aria-label="Change profile picture">
-                       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="12" r="4"></circle></svg>
-                     </button>
-                   </div>
-
-                 `}${isPublicView ? `
-                   <div class="profile-photo-display" id="profile-photo-display"></div>
-                 ` : ''}
+                       <div id="profile-view" class="profile-header-identity">
+                        <h2 class="profile-name" id="profile-name"></h2>
+                        <p class="profile-nickname" id="profile-nickname"></p>
+                        <p id="profile-alias"></p>
+                      </div>
                     </div>
-                   </div>
-                   <div id="profile-view" class="profile-header-identity">
-                     <h2 class="profile-name" id="profile-name"></h2>
-                     <p class="profile-nickname" id="profile-nickname"></p>
-                     <p id="profile-alias"></p>
-                   </div>
-                   <div class="profile-header-bio" id="profile-header-bio">
-                     <div class="profile-bio-box" id="profile-bio-box">
-                       <div class="profile-bio-text" id="profile-bio-text"></div>
-                     </div>
-                   </div>
-                 </div>${isPublicView ? '' : `
-                  <div class="profile-actions" id="profile-actions">
-                    <a class="profile-action-btn" href="#/profile/edit">Edit Profile</a>
-                  </div>`}
-                 </div>
-               </div>
+                    <div class="profile-header-bio" id="profile-header-bio">
+                      <div class="profile-bio-box" id="profile-bio-box">
+                        <div class="profile-bio-text" id="profile-bio-text"></div>
+                      </div>
+                    </div>
+                  </div>${isPublicView ? '' : `
+                   <div class="profile-actions" id="profile-actions">
+                     <a class="profile-action-btn" href="#/profile/edit">Edit Profile</a>
+                   </div>`}
+</div>
+                </div>
 
             <!-- Personal Information Module -->
            <div class="profile-module" id="personal-info-module">
@@ -257,13 +258,13 @@ export function renderProfilePage(viewUsername = null, { preview = false } = {})
                     <div class="edit-actions">
                       <button type="submit" class="btn btn-primary" id="testimonial-submit-btn">Submit Testimonial</button>
                     </div>
-                  </form>
+</form>
                 </div>
               </div>
             </div>
-          </div>
+            </div>
 
-         <!-- Sidebar column -->
+          <!-- Sidebar column -->
          <div class="profile-sidebar" id="profile-sidebar">
           <!-- Friend Space module -->
           <div class="sidebar-module" id="friend-space-module">
@@ -287,14 +288,6 @@ export function renderProfilePage(viewUsername = null, { preview = false } = {})
               Photo Gallery
             </div>
             <div class="sidebar-module-body" id="photo-gallery-body">
-              ${isPublicView ? '' : `
-                <div class="photo-gallery-upload" id="photo-gallery-upload">
-                  <input type="file" id="gallery-photo-input" accept="image/jpeg,image/png,image/webp" multiple style="display:none">
-                  <button class="btn btn-primary btn-sm" onclick="document.getElementById('gallery-photo-input').click()">Upload Photos</button>
-                  <div id="gallery-upload-queue" class="gallery-upload-queue" style="display:none"></div>
-                  <div id="gallery-upload-status" class="upload-status"></div>
-                </div>
-              `}
               <div class="photo-gallery" id="photo-gallery">
                 <div class="photo-gallery-empty" id="photo-gallery-empty">
                   No photos yet.
@@ -302,16 +295,10 @@ export function renderProfilePage(viewUsername = null, { preview = false } = {})
                 <div class="photo-gallery-grid" id="photo-gallery-grid" style="display:none"></div>
               </div>
 
-              <!-- ALBUMS-UI-01: compact album cards + owner-only Create Album -->
+              <!-- ALBUMS-UI-01: compact album cards -->
               <div class="gallery-section-subheader" id="profile-albums-header">
                 <span>Albums</span>
-                ${isPublicView ? '' : `
-                  <span class="gallery-module-actions">
-                    <button type="button" class="btn btn-primary btn-sm" id="profile-create-album-btn" onclick="window.toggleCreateAlbumForm('profile-')">+ Create Album</button>
-                  </span>
-                `}
               </div>
-              ${isPublicView ? '' : renderCreateAlbumFormHtml('profile-')}
               <div class="gallery-albums" id="profile-albums-grid">
                 <div class="photo-gallery-empty">Loading albums...</div>
               </div>
@@ -605,7 +592,7 @@ export function renderProfileView(profile) {
 
   // PROFILE-04: Build the display name from real name fields, NOT username
   const nameDisplay = getProfileDisplayName(profile) || '';
-  const nicknameDisplay = nickname ? `"${nickname}"` : '';
+  const nicknameDisplay = nickname || '';
 
   // Update profile name display in the frame
   const nameEl = document.getElementById('profile-name');
@@ -1475,7 +1462,6 @@ export async function loadAndRenderGallery(username, isOwnProfile) {
     // across the whole gallery, and "View All Photos" links to the full page.
     renderGallery(photos.slice(0, PROFILE_GALLERY_PREVIEW_LIMIT), isOwnProfile, photos);
     renderGalleryPreviewMeta(photos.length);
-    initGalleryUpload();
   } catch (err) {
     console.error('[GALLERY] Failed to load gallery:', err);
     renderGallery([], isOwnProfile);
@@ -1504,10 +1490,6 @@ async function loadAndRenderAlbums(username, isOwnProfile) {
     const albums = response.albums || [];
 
     gridEl.innerHTML = renderAlbumCardsHtml(albums, username);
-
-    if (isOwnProfile) {
-      initCreateAlbumForm('profile-', () => loadAndRenderAlbums(username, true));
-    }
   } catch (err) {
     console.error('[ALBUMS] Failed to load albums:', err);
     gridEl.innerHTML = '<div class="photo-gallery-empty">Could not load albums.</div>';

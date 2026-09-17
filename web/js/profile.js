@@ -176,6 +176,7 @@ export function renderProfilePage(viewUsername = null, { preview = false } = {})
                  `}${isPublicView ? `
                    <div class="profile-photo-display" id="profile-photo-display"></div>
                  ` : ''}
+                    </div>
                    </div>
                    <div id="profile-view" class="profile-header-identity">
                      <h2 class="profile-name" id="profile-name"></h2>
@@ -191,11 +192,10 @@ export function renderProfilePage(viewUsername = null, { preview = false } = {})
                   <div class="profile-actions" id="profile-actions">
                     <a class="profile-action-btn" href="#/profile/edit">Edit Profile</a>
                   </div>`}
-                </div>
-              </div>
-          </div>
+                 </div>
+               </div>
 
-           <!-- Personal Information Module -->
+            <!-- Personal Information Module -->
            <div class="profile-module" id="personal-info-module">
              <div class="profile-module-header">
                Personal Information
@@ -262,10 +262,9 @@ export function renderProfilePage(viewUsername = null, { preview = false } = {})
               </div>
             </div>
           </div>
-        </div>
 
-        <!-- Sidebar column -->
-        <div class="profile-sidebar" id="profile-sidebar">
+         <!-- Sidebar column -->
+         <div class="profile-sidebar" id="profile-sidebar">
           <!-- Friend Space module -->
           <div class="sidebar-module" id="friend-space-module">
             <div class="sidebar-module-header">

@@ -85,7 +85,7 @@
 .profile-editor .edit-actions { display: flex; gap: .75rem; flex-wrap: wrap; margin-top: 1.25rem; }
 .editor-controls input[type="file"] { border-style: dashed !important; padding: .75rem; }
 .editor-controls input[type="file"]::file-selector-button { border: 0; border-radius: .5rem; padding: .65rem .8rem; margin-right: .7rem; background: #304b60; color: #f1f5f9; font: inherit; cursor: pointer; }
-#editor-current-photo .profile-photo-public, #editor-current-photo .profile-photo-public-initials { width: 96px; height: 96px; margin: .75rem 0; }
+#editor-current-photo .profile-photo-public, #editor-current-photo .profile-photo-public-initials { width: 96px; height: 128px; margin: .75rem 0; }
 .profile-editor .theme-panel-header, .profile-editor .theme-panel-footer { border-color: #354555; }
 .profile-editor .theme-radio { color: #e2e8f0; border: 1px solid #4a5d70; border-radius: .75rem; padding: .8rem; }
 .profile-editor .theme-radio:has(:checked) { background: #285954; border-color: #79dac7; }

@@ -1448,18 +1448,18 @@ a:hover {
   padding: 1rem;
 }
 
-/* Large profile photo section */
+/* Large profile photo section — rectangular on the profile page only */
 .profile-photo-large {
   width: 180px;
-  height: 180px;
+  height: 240px;
   max-width: 100%;
-  aspect-ratio: 1 / 1;
-  border-radius: var(--theme-card-radius, var(--kp-card-radius));
+  aspect-ratio: 3 / 4;
+  border-radius: calc(var(--theme-card-radius, var(--kp-card-radius)) / 2);
   object-fit: cover;
    background: var(--theme-card-background, #fff7ec);
    margin: 0 auto 1rem;
    border: 1px solid var(--theme-card-border-color, var(--kp-border));
- }
+  }
 
 /* Initials shown when the user has no profile photo yet.
    profile.js sets display via inline style, these centre the letter. */
@@ -1474,7 +1474,7 @@ a:hover {
 @media (max-width: 640px) {
   .profile-photo-large {
     width: 150px;
-    height: 150px;
+    height: 200px;
   }
 
   #profile-photo-initials {
@@ -1490,8 +1490,9 @@ a:hover {
 
 .profile-photo-public {
   width: 180px;
-  height: 180px;
-  border-radius: 50%;
+  height: 240px;
+  aspect-ratio: 3 / 4;
+  border-radius: calc(var(--theme-card-radius, var(--kp-card-radius)) / 2);
   object-fit: cover;
   border: 3px solid var(--theme-card-background, rgba(255, 247, 236, 0.95));
   box-shadow: var(--theme-card-shadow, 0 20px 60px -20px rgba(42, 33, 48, 0.35));
@@ -1499,8 +1500,9 @@ a:hover {
 
 .profile-photo-public-initials {
   width: 180px;
-  height: 180px;
-  border-radius: 50%;
+  height: 240px;
+  aspect-ratio: 3 / 4;
+  border-radius: calc(var(--theme-card-radius, var(--kp-card-radius)) / 2);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1511,32 +1513,86 @@ a:hover {
   box-shadow: var(--theme-card-shadow, 0 20px 60px -20px rgba(42, 33, 48, 0.35));
 }
 
- /* Profile name and username */
-.profile-name {
-  font-size: 1.5rem;
-  font-weight: 600;
-  color: var(--theme-text, var(--kp-ink));
-  text-align: center;
-  margin-bottom: 0.25rem;
+  /* Profile name */
+  .profile-name {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--theme-text, var(--kp-ink));
+    text-align: left;
+    margin-bottom: 0.25rem;
+  }
+
+  .profile-nickname {
+    font-size: 0.875rem;
+    font-style: italic;
+    color: var(--theme-text, var(--kp-ink));
+    text-align: left;
+    margin-bottom: 0.5rem;
+  }
+
+  /* Alias appears as secondary identity without a label */
+  #profile-alias {
+    font-size: 0.95rem;
+    color: var(--theme-text-secondary, var(--kp-ink-soft));
+    text-align: left;
+    margin-bottom: 0.75rem;
 }
 
-.profile-username {
-  font-size: 0.875rem;
-  color: var(--theme-text-secondary, var(--kp-ink-soft));
-  text-align: center;
-  margin-bottom: 0.5rem;
-}
+  /* Profile header layout: photo + identity on left, bio on right */
+  .profile-header-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 1.5rem;
+  }
 
-.profile-nickname {
-  font-size: 0.875rem;
-  font-style: italic;
-  color: var(--theme-text, var(--kp-ink));
-  text-align: center;
-  margin-bottom: 0.5rem;
-}
+  .profile-header-photo {
+    flex: 0 0 auto;
+  }
 
-/* Personal information module */
-.profile-info-grid {
+  .profile-header-identity {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .profile-header-bio {
+    flex: 0 0 320px;
+    max-width: 320px;
+  }
+
+  .profile-bio-box {
+    background: var(--theme-card-background, rgba(255, 247, 236, 0.9));
+    border: 1px solid var(--theme-card-border-color, var(--kp-border));
+    border-radius: var(--theme-card-radius, var(--kp-card-radius));
+    padding: 1rem;
+    color: var(--theme-text, var(--kp-ink));
+    font-size: 0.9rem;
+    line-height: 1.6;
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+    white-space: pre-wrap;
+  }
+
+  .profile-bio-empty {
+    color: var(--theme-text-secondary, var(--kp-ink-soft));
+    font-style: italic;
+    opacity: 0.6;
+  }
+
+  @media (max-width: 768px) {
+    .profile-header-row {
+      flex-direction: column;
+    }
+    .profile-header-bio {
+      flex: 0 0 auto;
+      max-width: 100%;
+      width: 100%;
+    }
+  }
+
+  /* Personal information module */
+  .profile-info-grid {
   display: grid;
   grid-template-columns: 120px 1fr;
   gap: 0.5rem 1rem;

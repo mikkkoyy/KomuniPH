@@ -157,6 +157,8 @@ export function renderProfilePage(viewUsername = null, { preview = false } = {})
               <span></span>
             </div>
 <div class="profile-module-body">
+                 <div class="profile-header-row">
+                   <div class="profile-header-photo">
                  <div id="profile-photo-section">${isPublicView ? '' : `
                    <div class="profile-photo-wrapper" id="profile-photo-wrapper">
                      <img class="profile-photo-large" id="profile-photo-large"
@@ -174,15 +176,18 @@ export function renderProfilePage(viewUsername = null, { preview = false } = {})
                  `}${isPublicView ? `
                    <div class="profile-photo-display" id="profile-photo-display"></div>
                  ` : ''}
-                <div id="profile-view">
-                  <h2 class="profile-name" id="profile-name"></h2>
-                  <p class="profile-username" id="profile-username"></p>
-                  <p class="profile-nickname" id="profile-nickname"></p>
-                  <p id="profile-alias"></p>
-
-                  <div class="profile-info-grid" id="profile-info-grid">
-                    <!-- Identity fields will be populated by JS -->
-                  </div>${isPublicView ? '' : `
+                   </div>
+                   <div id="profile-view" class="profile-header-identity">
+                     <h2 class="profile-name" id="profile-name"></h2>
+                     <p class="profile-nickname" id="profile-nickname"></p>
+                     <p id="profile-alias"></p>
+                   </div>
+                   <div class="profile-header-bio" id="profile-header-bio">
+                     <div class="profile-bio-box" id="profile-bio-box">
+                       <div class="profile-bio-text" id="profile-bio-text"></div>
+                     </div>
+                   </div>
+                 </div>${isPublicView ? '' : `
                   <div class="profile-actions" id="profile-actions">
                     <a class="profile-action-btn" href="#/profile/edit">Edit Profile</a>
                   </div>`}
@@ -605,15 +610,26 @@ export function renderProfileView(profile) {
 
   // Update profile name display in the frame
   const nameEl = document.getElementById('profile-name');
-  const usernameEl = document.getElementById('profile-username');
   const nicknameEl = document.getElementById('profile-nickname');
 
   if (nameEl) nameEl.textContent = nameDisplay;
-  if (usernameEl) usernameEl.textContent = `@${username}`;
   if (nicknameEl) nicknameEl.textContent = nicknameDisplay;
 
   const aliasEl = document.getElementById('profile-alias');
-  if (aliasEl) aliasEl.textContent = alias ? `Alias: ${alias}` : '';
+  if (aliasEl) aliasEl.textContent = alias ? alias : '';
+
+  // Update bio in the profile header (right side)
+  const headerBioEl = document.getElementById('profile-bio-text');
+  const bioBoxEl = document.getElementById('profile-bio-box');
+  if (headerBioEl) headerBioEl.textContent = bio || '';
+  if (bioBoxEl) {
+    if (bio) {
+      bioBoxEl.classList.remove('profile-bio-empty');
+    } else {
+      bioBoxEl.classList.add('profile-bio-empty');
+      headerBioEl.textContent = 'No bio added yet.';
+    }
+  }
 
   // Update personal info module
   const infoNameEl = document.getElementById('profile-info-name');

@@ -59,6 +59,38 @@ function resolveBackgroundSizeCss(bgSize) {
 }
 
 /**
+ * Shared profile avatar presentation.
+ *
+ * Every profile photo in the app (public profile, editor, full-page preview,
+ * initials fallback) must go through this helper so the avatar keeps ONE
+ * consistent shape: a square box (aspect-ratio 1/1 + object-fit cover) shown
+ * as a circle. `variant` picks the sizing context; the shape never changes.
+ */
+function escapeHtmlAttr(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('"', '&quot;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+}
+
+/**
+ * Shared profile avatar presentation.
+ *
+ * Every profile photo in the app (public profile, editor, full-page preview,
+ * initials fallback) must go through this helper so the avatar keeps ONE
+ * consistent shape: a square box (aspect-ratio 1/1 + object-fit cover) shown
+ * as a circle. `variant` picks the sizing context; the shape never changes.
+ */
+function avatarImg(photoUrl, alt, variant = 'avatar-public') {
+  return `<img src="${escapeHtmlAttr(photoUrl)}" alt="${escapeHtmlAttr(alt)}" class="profile-avatar-img ${variant}" style="aspect-ratio:1 / 1">`;
+}
+
+function avatarInitials(nameDisplay, username, variant = 'avatar-public') {
+  return `<div class="profile-avatar-initials ${variant}" style="aspect-ratio:1 / 1;background: var(--theme-accent, var(--kp-teal)); color: white;">${escapeHtml((nameDisplay || username || '?').charAt(0).toUpperCase())}</div>`;
+}
+
+/**
  * Create avatar HTML
  */
 function createAvatar(username, displayName, photoUrl, size = 5) {

@@ -156,7 +156,7 @@ if defined EXISTING_PID (
     echo [INFO] KomuniPH is already running (PID %EXISTING_PID%).
     echo [INFO] Reusing existing server.
     set "SERVER_PID=%EXISTING_PID%"
-    goto VERIFY_HEALTH
+    goto :VERIFY_HEALTH
 )
 
 echo [DEBUG] No existing KomuniPH process found.

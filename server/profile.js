@@ -159,6 +159,12 @@ const PROFILE_SELECT = `
     p.country,
     p.city,
     p.barangay,
+    p.school,
+    p.education,
+    p.work,
+    p.company,
+    p.hometown,
+    p.interests,
     p.created_at,
     p.updated_at
   FROM profiles p
@@ -222,6 +228,12 @@ function getProfileByUserId(userId) {
     profile.country = profile.country || null;
     profile.city = profile.city || null;
     profile.barangay = profile.barangay || null;
+    profile.school = profile.school || null;
+    profile.education = profile.education || null;
+    profile.work = profile.work || null;
+    profile.company = profile.company || null;
+    profile.hometown = profile.hometown || null;
+    profile.interests = profile.interests || null;
     profile.theme = buildTheme(profile);
   }
   return profile;
@@ -259,7 +271,6 @@ export function handleGetPublicProfile(req, res, params) {
     const profile = queryOne(`
       SELECT
         u.username,
-        p.nickname,
         p.display_name,
         p.alias,
         p.alias_enabled,
@@ -273,6 +284,12 @@ export function handleGetPublicProfile(req, res, params) {
         p.country,
         p.city,
         p.barangay,
+        p.school,
+        p.education,
+        p.work,
+        p.company,
+        p.hometown,
+        p.interests,
         p.created_at,
         p.updated_at
       FROM profiles p
@@ -288,11 +305,16 @@ export function handleGetPublicProfile(req, res, params) {
     profile.alias_enabled = Boolean(profile.alias_enabled);
     profile.birthday_visible = profile.birthday_visible === 1;
     if (!profile.alias_enabled) profile.alias = null;
-    profile.nickname = profile.nickname || '';
     profile.birthday = profile.birthday || null;
     profile.country = profile.country || null;
     profile.city = profile.city || null;
     profile.barangay = profile.barangay || null;
+    profile.school = profile.school || null;
+    profile.education = profile.education || null;
+    profile.work = profile.work || null;
+    profile.company = profile.company || null;
+    profile.hometown = profile.hometown || null;
+    profile.interests = profile.interests || null;
     profile.theme = buildTheme(profile);
     delete profile.custom_theme_config;
 
@@ -386,6 +408,12 @@ export async function handleUpdateProfile(req, res, user) {
     const hasCountry = Object.prototype.hasOwnProperty.call(body, 'country');
     const hasCity = Object.prototype.hasOwnProperty.call(body, 'city');
     const hasBarangay = Object.prototype.hasOwnProperty.call(body, 'barangay');
+    const hasSchool = Object.prototype.hasOwnProperty.call(body, 'school');
+    const hasEducation = Object.prototype.hasOwnProperty.call(body, 'education');
+    const hasWork = Object.prototype.hasOwnProperty.call(body, 'work');
+    const hasCompany = Object.prototype.hasOwnProperty.call(body, 'company');
+    const hasHometown = Object.prototype.hasOwnProperty.call(body, 'hometown');
+    const hasInterests = Object.prototype.hasOwnProperty.call(body, 'interests');
 
     const hasBirthdayVisible = Object.prototype.hasOwnProperty.call(body, 'birthday_visible');
     const hasAliasEnabled = Object.prototype.hasOwnProperty.call(body, 'alias_enabled');
@@ -395,7 +423,7 @@ export async function handleUpdateProfile(req, res, user) {
       }
     }
     // At least one field must be provided
-    if (!hasBirthdayVisible && !hasAliasEnabled && !hasFirstName && !hasMiddleName && !hasLastName && !hasNickname && !hasDisplayName && !hasBio && !hasAlias && !hasBirthday && !hasCountry && !hasCity && !hasBarangay) {
+    if (!hasBirthdayVisible && !hasAliasEnabled && !hasFirstName && !hasMiddleName && !hasLastName && !hasNickname && !hasDisplayName && !hasBio && !hasAlias && !hasBirthday && !hasCountry && !hasCity && !hasBarangay && !hasSchool && !hasEducation && !hasWork && !hasCompany && !hasHometown && !hasInterests) {
       return errorResponse(res, 422, 'At least one profile field is required');
     }
 
@@ -426,6 +454,12 @@ export async function handleUpdateProfile(req, res, user) {
     let country = existing.country || null;
     let city = existing.city || null;
     let barangay = existing.barangay || null;
+    let school = existing.school || null;
+    let education = existing.education || null;
+    let work = existing.work || null;
+    let company = existing.company || null;
+    let hometown = existing.hometown || null;
+    let interests = existing.interests || null;
     let customThemeConfig = existing.custom_theme_config;
 
     // PROFILE-04: first_name validation - required when provided, trimmed, 1-100 chars
@@ -585,12 +619,60 @@ export async function handleUpdateProfile(req, res, user) {
       barangay = body.barangay === null ? null : body.barangay.trim() || null;
     }
 
+    // school: optional, string
+    if (hasSchool) {
+      if (body.school !== null && typeof body.school !== 'string') {
+        return errorResponse(res, 422, 'School must be a string or null');
+      }
+      school = body.school === null ? null : body.school.trim() || null;
+    }
+
+    // education: optional, string
+    if (hasEducation) {
+      if (body.education !== null && typeof body.education !== 'string') {
+        return errorResponse(res, 422, 'Education must be a string or null');
+      }
+      education = body.education === null ? null : body.education.trim() || null;
+    }
+
+    // work: optional, string
+    if (hasWork) {
+      if (body.work !== null && typeof body.work !== 'string') {
+        return errorResponse(res, 422, 'Work must be a string or null');
+      }
+      work = body.work === null ? null : body.work.trim() || null;
+    }
+
+    // company: optional, string
+    if (hasCompany) {
+      if (body.company !== null && typeof body.company !== 'string') {
+        return errorResponse(res, 422, 'Company must be a string or null');
+      }
+      company = body.company === null ? null : body.company.trim() || null;
+    }
+
+    // hometown: optional, string
+    if (hasHometown) {
+      if (body.hometown !== null && typeof body.hometown !== 'string') {
+        return errorResponse(res, 422, 'Hometown must be a string or null');
+      }
+      hometown = body.hometown === null ? null : body.hometown.trim() || null;
+    }
+
+    // interests: optional, string
+    if (hasInterests) {
+      if (body.interests !== null && typeof body.interests !== 'string') {
+        return errorResponse(res, 422, 'Interests must be a string or null');
+      }
+      interests = body.interests === null ? null : body.interests.trim() || null;
+    }
+
     execute(
-      "UPDATE profiles SET first_name = ?, middle_name = ?, last_name = ?, nickname = ?, display_name = ?, bio = ?, alias = ?, birthday = ?, birthday_visible = ?, alias_enabled = ?, country = ?, city = ?, barangay = ?, custom_theme_config = ?, updated_at = datetime('now') WHERE user_id = ?",
+      "UPDATE profiles SET first_name = ?, middle_name = ?, last_name = ?, nickname = ?, display_name = ?, bio = ?, alias = ?, birthday = ?, birthday_visible = ?, alias_enabled = ?, country = ?, city = ?, barangay = ?, school = ?, education = ?, work = ?, company = ?, hometown = ?, interests = ?, custom_theme_config = ?, updated_at = datetime('now') WHERE user_id = ?",
       [firstName, middleName, lastName, nickname, displayName, bio, alias, birthday,
         hasBirthdayVisible ? Number(body.birthday_visible) : existing.birthday_visible,
         hasAliasEnabled ? Number(body.alias_enabled) : existing.alias_enabled,
-        country, city, barangay, customThemeConfig, user.sub]
+        country, city, barangay, school, education, work, company, hometown, interests, customThemeConfig, user.sub]
     );
 
     const updated = getProfileByUserId(user.sub);

@@ -64,7 +64,7 @@ export function initDatabase() {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    -- Profiles table
+-- Profiles table
     CREATE TABLE IF NOT EXISTS profiles (
       id TEXT PRIMARY KEY,
       user_id TEXT UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -77,9 +77,16 @@ export function initDatabase() {
       cover_photo_url TEXT,
       theme_id TEXT REFERENCES profile_themes(id),
       birthday TEXT,
+      birthday_visible INTEGER NOT NULL DEFAULT 0,
       country TEXT,
       city TEXT,
       barangay TEXT,
+      school TEXT,
+      education TEXT,
+      work TEXT,
+      company TEXT,
+      hometown TEXT,
+      interests TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -319,6 +326,38 @@ export function initDatabase() {
     // Column already exists — safe no-op.
   }
 
+  // PROFILE-MODERN-01: Add modern personal information fields
+  try {
+    database.exec('ALTER TABLE profiles ADD COLUMN school TEXT');
+  } catch (err) {
+    // Column already exists — safe no-op.
+  }
+  try {
+    database.exec('ALTER TABLE profiles ADD COLUMN education TEXT');
+  } catch (err) {
+    // Column already exists — safe no-op.
+  }
+  try {
+    database.exec('ALTER TABLE profiles ADD COLUMN work TEXT');
+  } catch (err) {
+    // Column already exists — safe no-op.
+  }
+  try {
+    database.exec('ALTER TABLE profiles ADD COLUMN company TEXT');
+  } catch (err) {
+    // Column already exists — safe no-op.
+  }
+  try {
+    database.exec('ALTER TABLE profiles ADD COLUMN hometown TEXT');
+  } catch (err) {
+    // Column already exists — safe no-op.
+  }
+  try {
+    database.exec('ALTER TABLE profiles ADD COLUMN interests TEXT');
+  } catch (err) {
+    // Column already exists — safe no-op.
+  }
+
   // PHOTO-ALBUM-01: Add album_id column to existing profile_photos tables.
   try {
     database.exec('ALTER TABLE profile_photos ADD COLUMN album_id TEXT REFERENCES photo_albums(id) ON DELETE SET NULL');
@@ -405,7 +444,13 @@ export function initDatabase() {
           birthday = COALESCE(birthday, NULL),
           country = COALESCE(country, NULL),
           city = COALESCE(city, NULL),
-          barangay = COALESCE(barangay, NULL)
+          barangay = COALESCE(barangay, NULL),
+          school = COALESCE(school, NULL),
+          education = COALESCE(education, NULL),
+          work = COALESCE(work, NULL),
+          company = COALESCE(company, NULL),
+          hometown = COALESCE(hometown, NULL),
+          interests = COALESCE(interests, NULL)
       WHERE first_name IS NULL
     `).run();
     if (updated && updated.changes > 0) {

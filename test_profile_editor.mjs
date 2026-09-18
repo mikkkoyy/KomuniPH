@@ -136,8 +136,8 @@ try {
     assert.ok(await page.$eval('#profile-frame', e => Math.abs(e.getBoundingClientRect().width - innerWidth) <= 1), `Full-width preview ${width}`);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `Preview overflow ${width}`);
     assert.equal(await page.$eval('#profile-name', e => e.textContent), 'Unsaved visitor identity');
-    assert.equal(await page.$eval('#profile-info-bio', e => e.textContent), 'Unsaved visitor biography');
-    assert.equal(await page.$eval('#profile-info-birthday', e => e.textContent), '');
+    assert.equal(await page.$eval('#personal-info-bio', e => e.textContent), 'Unsaved visitor biography');
+    assert.equal(await page.$eval('#personal-info-city', e => e.textContent), '');
     assert.equal(await page.$eval('#profile-frame', e => e.style.getPropertyValue('--theme-accent')), '#42bbaa');
     assert.ok(await page.$('#photo-gallery-module'));
     assert.ok(await page.$('#profile-albums-grid'));

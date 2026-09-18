@@ -141,13 +141,12 @@ REM ==========================================================
 REM DETERMINISTIC PID MANAGEMENT
 REM ==========================================================
 
-set "KOMUNIPH_CMD=node server\index.js"
 set "KOMUNIPH_DIR=%CD%"
 set "SERVER_PID="
 
 REM Function to find existing KomuniPH process by command line
 set "EXISTING_PID="
-for /f "tokens=2 delims=," %%a in ('powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -like '*server\\index.js*' } | Select-Object -ExpandProperty ProcessId | ForEach-Object { Write-Output $_ }" 2^>nul') do set "EXISTING_PID=%%a"
+for /f "tokens=*" %%a in ('powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -like '*server\\index.js*' } | Select-Object -ExpandProperty ProcessId" 2^>nul') do set "EXISTING_PID=%%a"
 
 if defined EXISTING_PID (
     echo [INFO] KomuniPH is already running (PID %EXISTING_PID%).
@@ -174,11 +173,11 @@ if not errorlevel 1 (
         
         REM Check if it's a node.exe running server\index.js
         set "PORT_IS_KOMUNIPH="
-        for /f "tokens=2 delims=," %%p in ('powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"ProcessId=%PORT_PID%\" | Where-Object { $_.CommandLine -like '*server\\index.js*' } | Select-Object -ExpandProperty ProcessId" 2^>nul') do set "PORT_IS_KOMUNIPH=%%p"
+        for /f "tokens=*" %%p in ('powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"ProcessId=%PORT_PID%\" | Where-Object { $_.CommandLine -like '*server\\index.js*' } | Select-Object -ExpandProperty ProcessId" 2^>nul') do set "PORT_IS_KOMUNIPH=%%p"
         
         if defined PORT_IS_KOMUNIPH (
             echo [INFO] Existing KomuniPH process (PID %PORT_PID%) found on port 3000.
-            echo [ACTION] Stopping existing KomuniPH server (PID %PORT_PID%)....
+            echo [ACTION] Stopping existing KomuniPH server (PID %PORT_PID%)...
             taskkill /PID %PORT_PID% /F >nul 2>&1
             timeout /t 1 /nobreak >nul
             echo [OK] Previous server stopped.
@@ -206,7 +205,7 @@ echo Starting KomuniPH server...
 echo.
 
 REM Use PowerShell to start the process and capture the exact PID
-for /f "tokens=*" %%a in ('powershell -NoProfile -Command "cd '%KOMUNIPH_DIR%'; $proc = Start-Process -FilePath 'node' -ArgumentList 'server\index.js' -WorkingDirectory '%KOMUNIPH_DIR%' -PassThru; Write-Output $proc.Id" 2^>nul') do set "SERVER_PID=%%a"
+for /f "tokens=*" %%a in ('powershell -NoProfile -Command "cd \"%KOMUNIPH_DIR%\"; $proc = Start-Process -FilePath \"node\" -ArgumentList \"server\\index.js\" -WorkingDirectory \"%KOMUNIPH_DIR%\" -PassThru; Write-Output $proc.Id" 2^>nul') do set "SERVER_PID=%%a"
 
 if not defined SERVER_PID (
     echo [ERROR] Failed to start KomuniPH server.

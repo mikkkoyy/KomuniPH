@@ -5,6 +5,7 @@
 
 import { queryOne, queryAll, execute, transaction } from './database.js';
 import { generateId, now, jsonResponse, errorResponse, parseBody, parseQuery } from './utils.js';
+import { isEligible } from './communities.js';
 
 /**
  * Handle GET /api/feed
@@ -17,41 +18,37 @@ export function handleGetFeed(req, res, user) {
     const offset = parseInt(params.offset || '0', 10);
 
     const posts = queryAll(`
-      SELECT
-        p.id,
-        p.content,
-        p.created_at,
-        p.updated_at,
-        p.edited_at,
-        u.username,
-        pr.display_name,
-        pr.alias,
-        pr.alias_enabled,
-        pr.bio,
-        pr.profile_photo_url,
-        pr.cover_photo_url,
-        (SELECT COUNT(*) FROM reactions r WHERE r.post_id = p.id) as like_count,
-        (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id) as comment_count,
-        (SELECT COUNT(*) FROM reactions r WHERE r.post_id = p.id AND r.user_id = ?) as liked_by_current_user,
-        CASE WHEN p.author_id = ? THEN 1 ELSE 0 END as is_current_user_author
-      FROM posts p
-      JOIN users u ON p.author_id = u.id
-      LEFT JOIN profiles pr ON p.author_id = pr.user_id
-      ORDER BY p.created_at DESC
-      LIMIT ? OFFSET ?
+SELECT
+          p.id,
+          p.content,
+          p.created_at,
+          p.updated_at,
+          p.edited_at,
+          u.username,
+          pr.display_name,
+          pr.bio,
+          pr.profile_photo_url,
+          pr.cover_photo_url,
+          (SELECT COUNT(*) FROM reactions r WHERE r.post_id = p.id) as like_count,
+          (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id) as comment_count,
+          (SELECT COUNT(*) FROM reactions r WHERE r.post_id = p.id AND r.user_id = ?) as liked_by_current_user,
+          CASE WHEN p.author_id = ? THEN 1 ELSE 0 END as is_current_user_author
+        FROM posts p
+          JOIN users u ON p.author_id = u.id
+          LEFT JOIN profiles pr ON p.author_id = pr.user_id
+        ORDER BY p.created_at DESC
+        LIMIT ? OFFSET ?
     `, [user.sub, user.sub, limit, offset]);
 
     const totalCount = queryOne('SELECT COUNT(*) as count FROM posts');
     const hasMore = offset + limit < totalCount.count;
 
     // Transform posts to match frontend expectations
-    const transformedPosts = posts.map(post => ({
+const transformedPosts = posts.map(post => ({
       id: post.id,
       author: {
         username: post.username,
         display_name: post.display_name,
-        alias: post.alias,
-        alias_enabled: Boolean(post.alias_enabled),
         bio: post.bio,
         profile_photo_url: post.profile_photo_url,
         cover_photo_url: post.cover_photo_url,
@@ -86,6 +83,7 @@ export async function handleCreatePost(req, res, user) {
   try {
     const body = await parseBody(req);
     const { content } = body;
+    const communityId = body.community_id || null;
 
     if (!content || content.trim().length === 0) {
       return errorResponse(res, 422, 'Post content is required');
@@ -95,12 +93,36 @@ export async function handleCreatePost(req, res, user) {
       return errorResponse(res, 422, 'Post content must be less than 5000 characters');
     }
 
+    // COMMUNITY-01: community posts require an active membership in the target
+    // community AND current geographic eligibility. community_id is validated
+    // server-side; a forged id can never scope a post to another community.
+    if (communityId) {
+      const community = queryOne('SELECT * FROM communities WHERE id = ?', [communityId]);
+      if (!community) {
+        return errorResponse(res, 404, 'Community not found');
+      }
+      const member = queryOne(
+        'SELECT id FROM community_members WHERE community_id = ? AND user_id = ?',
+        [communityId, user.sub]
+      );
+      if (!member) {
+        return errorResponse(res, 403, 'You must be a member to post in this community');
+      }
+      const profile = queryOne(
+        'SELECT country, city, barangay FROM profiles WHERE user_id = ?',
+        [user.sub]
+      );
+      if (!isEligible(community, profile)) {
+        return errorResponse(res, 403, 'You are no longer eligible for this community');
+      }
+    }
+
     const postId = generateId();
     const timestamp = now();
 
     execute(
-      'INSERT INTO posts (id, author_id, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-      [postId, user.sub, content.trim(), timestamp, timestamp]
+      'INSERT INTO posts (id, author_id, content, community_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [postId, user.sub, content.trim(), communityId, timestamp, timestamp]
     );
 
     // Fetch the created post with author info

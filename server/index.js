@@ -27,6 +27,15 @@ import {
   handleGetProfilePicturesAlbum,
 } from './albums.js';
 import {
+  handleListCommunities,
+  handleGetCommunity,
+  handleJoinCommunity,
+  handleLeaveCommunity,
+  handleGetCommunityMembers,
+  handleGetCommunityPosts,
+  initCommunities,
+} from './communities.js';
+import {
   handleGetFeed,
   handleCreatePost,
   handleUpdatePost,
@@ -382,6 +391,48 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
     return handleGetUnreadCount(req, res, user);
   }
 
+  // Community routes (auth required)
+  if (method === 'GET' && path === '/api/communities') {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleListCommunities(req, res, user);
+  }
+
+  const communityMatch = matchRoute('/api/communities/:id', path);
+  if (method === 'GET' && communityMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleGetCommunity(req, res, user, communityMatch);
+  }
+
+  const communityJoinMatch = matchRoute('/api/communities/:id/join', path);
+  if (method === 'POST' && communityJoinMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleJoinCommunity(req, res, user, communityJoinMatch);
+  }
+
+  const communityLeaveMatch = matchRoute('/api/communities/:id/leave', path);
+  if (method === 'POST' && communityLeaveMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleLeaveCommunity(req, res, user, communityLeaveMatch);
+  }
+
+  const communityMembersMatch = matchRoute('/api/communities/:id/members', path);
+  if (method === 'GET' && communityMembersMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleGetCommunityMembers(req, res, user, communityMembersMatch);
+  }
+
+  const communityPostsMatch = matchRoute('/api/communities/:id/posts', path);
+  if (method === 'GET' && communityPostsMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleGetCommunityPosts(req, res, user, communityPostsMatch);
+  }
+
   // 404 for unknown API routes
   errorResponse(res, 404, 'API endpoint not found');
 }
@@ -456,6 +507,10 @@ function start() {
 
   // PROFILE-02: seed default theme and backfill existing profiles
   seedDefaultTheme();
+
+  // COMMUNITY-01: seed Nationwide communities and City/Barangay communities
+  // derived from existing profile locations (idempotent).
+  initCommunities();
 
   // Create HTTP server
   const server = createServer(handleRequest);

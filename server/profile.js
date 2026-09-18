@@ -146,8 +146,6 @@ const PROFILE_SELECT = `
     p.nickname,
     p.display_name,
     p.real_name,
-    p.alias,
-    p.alias_enabled,
     p.bio,
     p.profile_photo_url,
     p.cover_photo_url,
@@ -219,11 +217,12 @@ function getProfileByUserId(userId) {
 
   if (profile) {
     profile.birthday_visible = profile.birthday_visible === 1;
-    profile.alias_enabled = Boolean(profile.alias_enabled);
+    profile.real_name_visible = profile.real_name_visible === 1;
     profile.first_name = profile.first_name || '';
     profile.middle_name = profile.middle_name || '';
     profile.last_name = profile.last_name || '';
     profile.nickname = profile.nickname || '';
+    profile.real_name = profile.real_name || '';
     profile.birthday = profile.birthday || null;
     profile.country = profile.country || null;
     profile.city = profile.city || null;
@@ -252,9 +251,6 @@ export function handleGetProfile(req, res, user) {
       return errorResponse(res, 404, 'Profile not found');
     }
 
-    // Convert alias_enabled from integer to boolean
-    profile.alias_enabled = Boolean(profile.alias_enabled);
-
     jsonResponse(res, 200, profile);
   } catch (err) {
     console.error('[PROFILE] Get profile error:', err);
@@ -271,9 +267,8 @@ export function handleGetPublicProfile(req, res, params) {
     const profile = queryOne(`
       SELECT
         u.username,
+        CASE WHEN p.real_name_visible = 1 THEN p.real_name ELSE NULL END AS real_name,
         p.display_name,
-        p.alias,
-        p.alias_enabled,
         p.bio,
         p.profile_photo_url,
         p.cover_photo_url,
@@ -301,10 +296,7 @@ export function handleGetPublicProfile(req, res, params) {
       return errorResponse(res, 404, 'Profile not found');
     }
 
-    // Convert alias_enabled from integer to boolean
-    profile.alias_enabled = Boolean(profile.alias_enabled);
     profile.birthday_visible = profile.birthday_visible === 1;
-    if (!profile.alias_enabled) profile.alias = null;
     profile.birthday = profile.birthday || null;
     profile.country = profile.country || null;
     profile.city = profile.city || null;
@@ -315,6 +307,9 @@ export function handleGetPublicProfile(req, res, params) {
     profile.company = profile.company || null;
     profile.hometown = profile.hometown || null;
     profile.interests = profile.interests || null;
+    if (profile.real_name === null) {
+      delete profile.real_name;
+    }
     profile.theme = buildTheme(profile);
     delete profile.custom_theme_config;
 
@@ -402,8 +397,9 @@ export async function handleUpdateProfile(req, res, user) {
     const hasLastName = Object.prototype.hasOwnProperty.call(body, 'last_name');
     const hasNickname = Object.prototype.hasOwnProperty.call(body, 'nickname');
     const hasDisplayName = Object.prototype.hasOwnProperty.call(body, 'display_name');
+    const hasRealName = Object.prototype.hasOwnProperty.call(body, 'real_name');
+    const hasRealNameVisible = Object.prototype.hasOwnProperty.call(body, 'real_name_visible');
     const hasBio = Object.prototype.hasOwnProperty.call(body, 'bio');
-    const hasAlias = Object.prototype.hasOwnProperty.call(body, 'alias');
     const hasBirthday = Object.prototype.hasOwnProperty.call(body, 'birthday');
     const hasCountry = Object.prototype.hasOwnProperty.call(body, 'country');
     const hasCity = Object.prototype.hasOwnProperty.call(body, 'city');
@@ -416,14 +412,10 @@ export async function handleUpdateProfile(req, res, user) {
     const hasInterests = Object.prototype.hasOwnProperty.call(body, 'interests');
 
     const hasBirthdayVisible = Object.prototype.hasOwnProperty.call(body, 'birthday_visible');
-    const hasAliasEnabled = Object.prototype.hasOwnProperty.call(body, 'alias_enabled');
-    for (const key of ['birthday_visible', 'alias_enabled']) {
-      if (Object.prototype.hasOwnProperty.call(body, key) && typeof body[key] !== 'boolean') {
-        return errorResponse(res, 422, `${key} must be true or false`);
-      }
-    }
+    // alias and alias_enabled fields removed from public-facing profile API per project requirement
+
     // At least one field must be provided
-    if (!hasBirthdayVisible && !hasAliasEnabled && !hasFirstName && !hasMiddleName && !hasLastName && !hasNickname && !hasDisplayName && !hasBio && !hasAlias && !hasBirthday && !hasCountry && !hasCity && !hasBarangay && !hasSchool && !hasEducation && !hasWork && !hasCompany && !hasHometown && !hasInterests) {
+    if (!hasBirthdayVisible && !hasRealNameVisible && !hasFirstName && !hasMiddleName && !hasLastName && !hasNickname && !hasDisplayName && !hasRealName && !hasBio && !hasBirthday && !hasCountry && !hasCity && !hasBarangay && !hasSchool && !hasEducation && !hasWork && !hasCompany && !hasHometown && !hasInterests) {
       return errorResponse(res, 422, 'At least one profile field is required');
     }
 
@@ -448,9 +440,12 @@ export async function handleUpdateProfile(req, res, user) {
     let lastName = existing.last_name || '';
     let nickname = existing.nickname || '';
     let displayName = existing.display_name;
+    let realName = existing.real_name || '';
+    let realNameVisible = existing.real_name_visible || 0;
     let bio = existing.bio;
     let alias = existing.alias;
     let birthday = existing.birthday || null;
+    let birthdayVisible = existing.birthday_visible || 0;
     let country = existing.country || null;
     let city = existing.city || null;
     let barangay = existing.barangay || null;
@@ -531,6 +526,34 @@ export async function handleUpdateProfile(req, res, user) {
       displayName = trimmed;
     }
 
+    // real_name: optional, string or null, trimmed, max 100 chars
+    if (hasRealName) {
+      if (body.real_name !== null && typeof body.real_name !== 'string') {
+        return errorResponse(res, 422, 'Real name must be a string or null');
+      }
+      const trimmed = body.real_name === null ? '' : body.real_name.trim();
+      if (trimmed.length > 100) {
+        return errorResponse(res, 422, 'Real name must be less than 100 characters');
+      }
+      realName = trimmed || null;
+    }
+
+    // real_name_visible: optional, boolean
+    if (hasRealNameVisible) {
+      if (typeof body.real_name_visible !== 'boolean') {
+        return errorResponse(res, 422, 'real_name_visible must be a boolean');
+      }
+      realNameVisible = body.real_name_visible ? 1 : 0;
+    }
+
+    // birthday_visible: optional, boolean
+    if (hasBirthdayVisible) {
+      if (typeof body.birthday_visible !== 'boolean') {
+        return errorResponse(res, 422, 'birthday_visible must be a boolean');
+      }
+      birthdayVisible = body.birthday_visible ? 1 : 0;
+    }
+
     // bio: optional, string or null, trimmed, max 500 chars (empty -> NULL)
     if (hasBio) {
       if (body.bio !== null && typeof body.bio !== 'string') {
@@ -543,30 +566,8 @@ export async function handleUpdateProfile(req, res, user) {
       bio = trimmed ? trimmed : null;
     }
 
-    // alias: optional, trimmed, max 50 chars, predictable charset,
-    // unique across profiles (excluding own record). Empty/null clears it.
-    if (hasAlias) {
-      if (body.alias !== null && typeof body.alias !== 'string') {
-        return errorResponse(res, 422, 'Alias must be a string or null');
-      }
-      const trimmed = body.alias === null ? '' : body.alias.trim();
-      if (trimmed.length > 50) {
-        return errorResponse(res, 422, 'Alias must be less than 50 characters');
-      }
-      if (trimmed && !isValidAlias(trimmed)) {
-        return errorResponse(res, 422, 'Alias may only contain letters, numbers, underscore, dot, and hyphen');
-      }
-      if (trimmed) {
-        const conflict = queryOne(
-          'SELECT user_id FROM profiles WHERE alias = ? COLLATE NOCASE AND user_id != ?',
-          [trimmed, user.sub]
-        );
-        if (conflict) {
-          return errorResponse(res, 409, 'Alias is already taken');
-        }
-      }
-      alias = trimmed || null;
-    }
+    // alias and alias_enabled fields are removed from the public-facing profile
+    // API; leftover handling above was removed with them. birthday follows:
 
     // birthday: optional, ISO date string (YYYY-MM-DD)
     if (hasBirthday) {
@@ -668,10 +669,11 @@ export async function handleUpdateProfile(req, res, user) {
     }
 
     execute(
-      "UPDATE profiles SET first_name = ?, middle_name = ?, last_name = ?, nickname = ?, display_name = ?, bio = ?, alias = ?, birthday = ?, birthday_visible = ?, alias_enabled = ?, country = ?, city = ?, barangay = ?, school = ?, education = ?, work = ?, company = ?, hometown = ?, interests = ?, custom_theme_config = ?, updated_at = datetime('now') WHERE user_id = ?",
-      [firstName, middleName, lastName, nickname, displayName, bio, alias, birthday,
-        hasBirthdayVisible ? Number(body.birthday_visible) : existing.birthday_visible,
-        hasAliasEnabled ? Number(body.alias_enabled) : existing.alias_enabled,
+      "UPDATE profiles SET first_name = ?, middle_name = ?, last_name = ?, nickname = ?, display_name = ?, real_name = ?, real_name_visible = ?, bio = ?, birthday = ?, birthday_visible = ?, country = ?, city = ?, barangay = ?, school = ?, education = ?, work = ?, company = ?, hometown = ?, interests = ?, custom_theme_config = ?, updated_at = datetime('now') WHERE user_id = ?",
+      [firstName, middleName, lastName, nickname, displayName, realName,
+        hasRealNameVisible ? Number(realNameVisible) : existing.real_name_visible || 0,
+        bio, birthday,
+        birthdayVisible,
         country, city, barangay, school, education, work, company, hometown, interests, customThemeConfig, user.sub]
     );
 

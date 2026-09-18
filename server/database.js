@@ -245,6 +245,46 @@ export function initDatabase() {
     -- conversation_participants may already exist without last_read_at;
     -- ALTER TABLE is safe to attempt even if the column is already present
     -- on SQLite builds that already ran MESSAGE-01.
+
+    -- COMMUNITY-01: Location-based communities
+    -- A community is anchored to a geographic scope. Uniqueness is enforced
+    -- with partial unique indexes so identical geographic communities cannot
+    -- be created accidentally (e.g. two nationwide+Philippines, two
+    -- city+Philippines+Angeles City, or two barangay+Philippines+Angeles
+    -- City+Balibago communities).
+    CREATE TABLE IF NOT EXISTS communities (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      slug TEXT NOT NULL,
+      type TEXT NOT NULL CHECK (type IN ('nationwide', 'city', 'barangay')),
+      description TEXT,
+      country TEXT,
+      city TEXT,
+      barangay TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_communities_nationwide
+      ON communities(country) WHERE type = 'nationwide';
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_communities_city
+      ON communities(country, city) WHERE type = 'city';
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_communities_barangay
+      ON communities(country, city, barangay) WHERE type = 'barangay';
+    CREATE INDEX IF NOT EXISTS idx_communities_type ON communities(type);
+
+    -- COMMUNITY-01: Community memberships.
+    -- community_id + user_id is unique so duplicate memberships are impossible.
+    CREATE TABLE IF NOT EXISTS community_members (
+      id TEXT PRIMARY KEY,
+      community_id TEXT NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      joined_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(community_id, user_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_community_members_community_id ON community_members(community_id);
+    CREATE INDEX IF NOT EXISTS idx_community_members_user_id ON community_members(user_id);
   `);
 
   // MESSAGE-02: Add last_read_at column to existing conversation_participants tables.
@@ -254,6 +294,20 @@ export function initDatabase() {
     database.exec('ALTER TABLE conversation_participants ADD COLUMN last_read_at TEXT');
   } catch (err) {
     // Column already exists or table does not exist yet — both are safe no-ops.
+  }
+
+  // COMMUNITY-01: Add community_id to existing posts tables.
+  // Existing posts keep community_id NULL; community posts are scoped to their
+  // community for the community feed while remaining part of the shared feed.
+  try {
+    database.exec('ALTER TABLE posts ADD COLUMN community_id TEXT REFERENCES communities(id) ON DELETE SET NULL');
+  } catch (err) {
+    // Column already exists or table does not exist yet — both are safe no-ops.
+  }
+  try {
+    database.exec('CREATE INDEX IF NOT EXISTS idx_posts_community_id ON posts(community_id)');
+  } catch (err) {
+    // Index already exists — safe no-op.
   }
 
   // PROFILE-02: Add theme_id column to existing profiles tables.
@@ -301,6 +355,9 @@ export function initDatabase() {
   const profileColumns = database.prepare('PRAGMA table_info(profiles)').all();
   if (!profileColumns.some(column => column.name === 'birthday_visible')) {
     database.exec('ALTER TABLE profiles ADD COLUMN birthday_visible INTEGER NOT NULL DEFAULT 0 CHECK (birthday_visible IN (0, 1))');
+  }
+  if (!profileColumns.some(column => column.name === 'real_name_visible')) {
+    database.exec('ALTER TABLE profiles ADD COLUMN real_name_visible INTEGER NOT NULL DEFAULT 0 CHECK (real_name_visible IN (0, 1))');
   }
 
 

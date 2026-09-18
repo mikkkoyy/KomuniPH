@@ -48,9 +48,10 @@ export function renderProfileEditorPage() {
           <h2>Privacy</h2><p>Choose what belongs on your public profile.</p>
           <h3>Profile identity</h3>
           <p>Your display name, nickname and bio are public. Your username stays your account handle. Legal-name fields and email are never included in the public profile response.</p>
-          <label class="editor-toggle" for="editor-alias-visible"><span>Show my alias<span class="editor-help">Use your alias as part of your public identity.</span></span><input id="editor-alias-visible" type="checkbox" role="switch"></label>
           <h3>Birthday</h3><p>Your birthday is hidden unless you choose to share it. Edit the date under Edit Profile.</p>
           <label class="editor-toggle" for="editor-birthday-visible"><span>Show my birthday<span class="editor-help">Off means hidden from everyone visiting your profile.</span></span><input id="editor-birthday-visible" type="checkbox" role="switch"></label>
+          <h3>Real Name</h3><p>Your legal name is hidden unless you choose to share it. Edit the name under Edit Profile.</p>
+          <label class="editor-toggle" for="editor-real-name-visible"><span>Show my real name<span class="editor-help">Off means hidden from everyone visiting your profile.</span></span><input id="editor-real-name-visible" type="checkbox" role="switch"></label>
           <p>Profiles are public. Private-profile access is not currently supported.</p>
           <div class="edit-actions"><button id="editor-save-privacy" class="btn btn-primary">Save Privacy Changes</button><button id="editor-cancel-privacy" class="btn btn-secondary">Discard Changes</button></div>
         </section>
@@ -178,9 +179,10 @@ function renderIdentityDraft() {
   if (!savedProfile) return;
   const value = id => root.querySelector(`#${id}`)?.value || '';
   renderProfileView({ ...savedProfile, display_name: value('edit-display-name'),
-    bio: value('edit-bio'), nickname: value('edit-nickname'), alias: value('edit-alias'),
+    bio: value('edit-bio'),
+    real_name: value('edit-real-name'),
     birthday: value('edit-birthday'), birthday_visible: root.querySelector('#editor-birthday-visible').checked,
-    alias_enabled: root.querySelector('#editor-alias-visible').checked,
+    real_name_visible: root.querySelector('#editor-real-name-visible').checked,
     country: value('edit-country'), city: value('edit-city'), barangay: value('edit-barangay'),
     profile_photo_url: photoPreviewUrl || savedProfile.profile_photo_url });
   root.querySelector('#editor-current-photo').replaceChildren(root.querySelector('#profile-photo-display').cloneNode(true));
@@ -357,22 +359,27 @@ function bindUploads() {
 
 function bindPrivacy() {
   const birthday = root.querySelector('#editor-birthday-visible');
-  const alias = root.querySelector('#editor-alias-visible');
+  const realName = root.querySelector('#editor-real-name-visible');
   const reset = () => {
     birthday.checked = !!savedProfile.birthday_visible;
-    alias.checked = !!savedProfile.alias_enabled;
+    realName.checked = !!savedProfile.real_name_visible;
     privacyDirty = false;
     updateDirty();
     renderIdentityDraft();
   };
   reset();
-  for (const control of [birthday, alias]) control.onchange = () => {
+  birthday.onchange = () => {
+    privacyDirty = true;
+    updateDirty();
+    renderIdentityDraft();
+  };
+  realName.onchange = () => {
     privacyDirty = true;
     updateDirty();
     renderIdentityDraft();
   };
   root.querySelector('#editor-save-privacy').onclick = () => runAction(async () => {
-    savedProfile = await profileApi.updateProfile({ birthday_visible: birthday.checked, alias_enabled: alias.checked });
+    savedProfile = await profileApi.updateProfile({ birthday_visible: birthday.checked, real_name_visible: realName.checked });
     setEditorProfile(savedProfile);
     privacyDirty = false;
     updateDirty();

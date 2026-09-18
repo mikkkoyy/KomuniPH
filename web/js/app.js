@@ -12,6 +12,7 @@ import { renderProfileEditorPage, initProfileEditorPage, destroyProfileEditorPag
 import { renderGalleryPage, initGalleryPage } from './gallery.js';
 import { renderAlbumPage, initAlbumPage } from './albums.js';
 import { renderMessagesPage, initMessagesPage, destroyMessagesPage } from './messages.js';
+import { renderCommunityPage, initCommunityPage, renderCommunityDetailPage, initCommunityDetailPage } from './communities.js';
 
 const app = document.getElementById('app');
 
@@ -138,10 +139,24 @@ function render() {
       html = renderPlaceholderPage('Community Groups', 'Find and join communities that interest you.', '👥', 'groups');
       initFn = initPlaceholderPage;
       break;
+    case '/community':
+      if (!isAuthenticated()) {
+        navigate('/login');
+        return;
+      }
+      html = renderCommunityPage();
+      initFn = initCommunityPage;
+      break;
     default:
       // GALLERY-ROUTES-01: gallery + album hash routes MUST be matched before
       // the public-profile catch-all below, because `(.+)` also matches "/"
       // and would otherwise swallow /profile/:user/photos[/:albumId].
+      const communityDetailMatch = route.match(/^\/community\/([^/]+)$/);
+      if (communityDetailMatch) {
+        html = renderCommunityDetailPage(communityDetailMatch[1]);
+        initFn = () => initCommunityDetailPage(communityDetailMatch[1]);
+        break;
+      }
       const galleryMatch = route.match(/^\/profile\/([^/]+)\/photos$/);
       if (galleryMatch) {
         html = renderGalleryPage(galleryMatch[1]);

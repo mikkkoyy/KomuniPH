@@ -250,19 +250,15 @@ export function renderProfilePage(viewUsername = null, { preview = false } = {})
                  </div>
                </div>
 
-               <div class="personal-info-section">
-                 <h4 class="personal-info-section-title">Personal</h4>
-                 <div class="personal-info-interests">
-                   <span class="personal-info-label">Interests</span>
-                   <div class="interests-tags" id="personal-info-interests"></div>
-                 </div>
-                 <div class="personal-info-bio">
-                   <span class="personal-info-label">About Me</span>
-                   <span class="personal-info-value" id="personal-info-bio"></span>
-                 </div>
-               </div>
-             </div>
-           </div>
+<div class="personal-info-section">
+                  <h4 class="personal-info-section-title">Personal</h4>
+                  <div class="personal-info-interests">
+                    <span class="personal-info-label">Interests</span>
+                    <div class="interests-tags" id="personal-info-interests"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
 
             <!-- Testimonials Module -->
             <div class="profile-module" id="testimonials-module">
@@ -620,7 +616,6 @@ export function renderProfileView(profile) {
   const nickname = profile.nickname || '';
   const username = profile.username || '';
   const bio = profile.bio || '';
-  const alias = profile.alias_enabled && profile.alias ? profile.alias : '';
 
   // PROFILE-04: Build the display name from real name fields, NOT username
   const nameDisplay = getProfileDisplayName(profile) || '';
@@ -632,9 +627,6 @@ export function renderProfileView(profile) {
 
   if (nameEl) nameEl.textContent = nameDisplay;
   if (nicknameEl) nicknameEl.textContent = nicknameDisplay;
-
-  const aliasEl = document.getElementById('profile-alias');
-  if (aliasEl) aliasEl.textContent = alias ? alias : '';
 
   // Update bio in the profile header (right side)
   const headerBioEl = document.getElementById('profile-bio-text');
@@ -723,7 +715,6 @@ export function renderProfileView(profile) {
   const sidebarImg = document.getElementById('sidebar-avatar-img');
   const sidebarInitials = document.getElementById('sidebar-avatar-initials');
   const sidebarName = document.getElementById('sidebar-display-name');
-  const sidebarAlias = document.getElementById('sidebar-alias');
 
   if (sidebarImg) {
     if (profile.profile_photo_url) {
@@ -739,7 +730,6 @@ export function renderProfileView(profile) {
     }
   }
   if (sidebarName) sidebarName.textContent = nameDisplay;
-  if (sidebarAlias) sidebarAlias.textContent = alias ? `@${alias}` : '';
   initProfilePhotoUpload();
 }
 
@@ -816,51 +806,54 @@ window.startEditProfile = async function() {
     error.textContent = '';
   }
 
-  const firstName = (currentProfile && currentProfile.first_name) || '';
-  const middleName = (currentProfile && currentProfile.middle_name) || '';
-  const lastName = (currentProfile && currentProfile.last_name) || '';
-  const aliasValue = (currentProfile && currentProfile.alias) || '';
-  const bioValue = (currentProfile && currentProfile.bio) || '';
-  const birthdayValue = (currentProfile && currentProfile.birthday) || '';
-  const countryValue = (currentProfile && currentProfile.country) || '';
-  const cityValue = (currentProfile && currentProfile.city) || '';
-  const barangayValue = (currentProfile && currentProfile.barangay) || '';
-  const schoolValue = (currentProfile && currentProfile.school) || '';
-  const educationValue = (currentProfile && currentProfile.education) || '';
-  const workValue = (currentProfile && currentProfile.work) || '';
-  const companyValue = (currentProfile && currentProfile.company) || '';
-  const hometownValue = (currentProfile && currentProfile.hometown) || '';
-  const interestsValue = (currentProfile && currentProfile.interests) || '';
+const firstName = (currentProfile && currentProfile.first_name) || '';
+   const middleName = (currentProfile && currentProfile.middle_name) || '';
+   const lastName = (currentProfile && currentProfile.last_name) || '';
+   const bioValue = (currentProfile && currentProfile.bio) || '';
+   const birthdayValue = (currentProfile && currentProfile.birthday) || '';
+   const countryValue = (currentProfile && currentProfile.country) || '';
+   const cityValue = (currentProfile && currentProfile.city) || '';
+   const barangayValue = (currentProfile && currentProfile.barangay) || '';
+   const schoolValue = (currentProfile && currentProfile.school) || '';
+   const educationValue = (currentProfile && currentProfile.education) || '';
+   const workValue = (currentProfile && currentProfile.work) || '';
+   const companyValue = (currentProfile && currentProfile.company) || '';
+   const hometownValue = (currentProfile && currentProfile.hometown) || '';
+   const interestsValue = (currentProfile && currentProfile.interests) || '';
+   const realNameValue = (currentProfile && currentProfile.real_name) || '';
 
-  edit.innerHTML = `
-    <div class="form-group">
-      <label for="edit-display-name">Display Name *</label>
-      <input type="text" id="edit-display-name" maxlength="100" value="${escapeHtml(currentProfile?.display_name || '')}" placeholder="Your display identity">
-    </div>
-
-    <fieldset class="form-section">
-      <legend>Identity</legend>
-      <div class="form-row">
-        <div class="form-group">
-          <label for="edit-first-name">First Name (private) *</label>
-          <input type="text" id="edit-first-name" maxlength="100" value="${escapeHtml(firstName)}" placeholder="Enter your first name">
-        </div>
-        <div class="form-group">
-          <label for="edit-middle-name">Middle Name (private)</label>
-          <input type="text" id="edit-middle-name" maxlength="100" value="${escapeHtml(middleName)}" placeholder="Enter your middle name (optional)">
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label for="edit-last-name">Last Name (private) *</label>
-          <input type="text" id="edit-last-name" maxlength="100" value="${escapeHtml(lastName)}" placeholder="Enter your last name">
-        </div>
-        <div class="form-group">
-          <label for="edit-display-name">Display Name *</label>
-          <input type="text" id="edit-display-name" maxlength="100" value="${escapeHtml(currentProfile?.display_name || '')}" placeholder="Your display identity">
-        </div>
-      </div>
-    </fieldset>
+   edit.innerHTML = `
+     <fieldset class="form-section">
+       <legend>Identity</legend>
+       <div class="form-row">
+         <div class="form-group">
+           <label for="edit-first-name">First Name (private) *</label>
+           <input type="text" id="edit-first-name" maxlength="100" value="${escapeHtml(firstName)}" placeholder="Enter your first name">
+         </div>
+         <div class="form-group">
+           <label for="edit-middle-name">Middle Name (private)</label>
+           <input type="text" id="edit-middle-name" maxlength="100" value="${escapeHtml(middleName)}" placeholder="Enter your middle name (optional)">
+         </div>
+       </div>
+       <div class="form-row">
+         <div class="form-group">
+           <label for="edit-last-name">Last Name (private) *</label>
+           <input type="text" id="edit-last-name" maxlength="100" value="${escapeHtml(lastName)}" placeholder="Enter your last name">
+         </div>
+         <div class="form-group">
+           <label for="edit-display-name">Display Name *</label>
+           <input type="text" id="edit-display-name" maxlength="100" value="${escapeHtml(currentProfile?.display_name || '')}" placeholder="Your display identity">
+         </div>
+       </div>
+       <div class="form-group">
+         <label for="edit-real-name">Real Name (legal name)</label>
+         <input type="text" id="edit-real-name" maxlength="100" value="${escapeHtml(realNameValue)}" placeholder="Your legal name">
+       </div>
+       <div class="form-group">
+         <label for="edit-birthday">Birthday (visibility in Privacy)</label>
+         <input type="date" id="edit-birthday" value="${escapeHtml(birthdayValue)}">
+       </div>
+     </fieldset>
 
     <fieldset class="form-section">
       <legend>Education</legend>
@@ -892,25 +885,27 @@ window.startEditProfile = async function() {
       <legend>Location</legend>
       <div class="form-row">
         <div class="form-group">
-          <label for="edit-city">Current City</label>
-          <input type="text" id="edit-city" maxlength="100" value="${escapeHtml(cityValue)}" placeholder="e.g., Manila">
+          <label for="edit-country">Country</label>
+          <select id="edit-country" onchange="window.onCountryChange()">
+            <option value="">Select a country</option>
+          </select>
         </div>
         <div class="form-group">
-          <label for="edit-hometown">Hometown</label>
-          <input type="text" id="edit-hometown" maxlength="100" value="${escapeHtml(hometownValue)}" placeholder="e.g., Batangas">
+          <label for="edit-city">Current City</label>
+          <select id="edit-city" onchange="window.onCityChange()">
+            <option value="">Select a city</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="edit-barangay">Barangay</label>
+          <select id="edit-barangay">
+            <option value="">Select a barangay</option>
+          </select>
         </div>
       </div>
       <div class="form-group">
-        <label for="edit-country">Country</label>
-        <select id="edit-country" onchange="window.onCountryChange()">
-          <option value="">Select a country</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label for="edit-barangay">Barangay</label>
-        <select id="edit-barangay">
-          <option value="">Select a barangay</option>
-        </select>
+        <label for="edit-hometown">Hometown</label>
+        <input type="text" id="edit-hometown" maxlength="100" value="${escapeHtml(hometownValue)}" placeholder="e.g., Batangas">
       </div>
     </fieldset>
 
@@ -927,32 +922,6 @@ window.startEditProfile = async function() {
       <label for="edit-bio">Bio</label>
       <textarea id="edit-bio" rows="4" maxlength="500" placeholder="Tell people a little about yourself…">${escapeHtml(bioValue)}</textarea>
     </div>
-    <div class="form-group">
-      <label for="edit-birthday">Birthday (visibility in Privacy)</label>
-      <input type="date" id="edit-birthday" value="${escapeHtml(birthdayValue)}">
-    </div>
-    <div class="form-group">
-      <label for="edit-country">Country</label>
-      <select id="edit-country" onchange="window.onCountryChange()">
-        <option value="">Select a country</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label for="edit-city">City</label>
-      <select id="edit-city" onchange="window.onCityChange()">
-        <option value="">Select a city</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label for="edit-barangay">Barangay</label>
-      <select id="edit-barangay">
-        <option value="">Select a barangay</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label for="edit-alias">Alias</label>
-      <input type="text" id="edit-alias" maxlength="50" value="${escapeHtml(aliasValue)}" placeholder="Optional">
-    </div>
     <div id="edit-profile-error" class="error-banner" style="display:none"></div>
     <div class="edit-actions">
       <button class="btn btn-primary" id="save-profile-btn" onclick="window.saveProfile()">Save Changes</button>
@@ -964,6 +933,17 @@ window.startEditProfile = async function() {
   edit.style.display = 'block';
 
   populateLocationDropdowns(countryValue, cityValue, barangayValue);
+
+  // Live preview for display name
+  const displayNameInput = document.getElementById('edit-display-name');
+  if (displayNameInput) {
+    displayNameInput.addEventListener('input', () => {
+      if (currentProfile) {
+        const previewProfile = { ...currentProfile, display_name: displayNameInput.value };
+        renderProfileView(previewProfile);
+      }
+    });
+  }
 };
 
 window.onCountryChange = function() {
@@ -1099,23 +1079,24 @@ window.cancelEditProfile = function() {
   const error = document.getElementById('edit-profile-error');
   if (!view || !edit) return;
 
-  const firstName = (currentProfile && currentProfile.first_name) || '';
-  const middleName = (currentProfile && currentProfile.middle_name) || '';
-  const lastName = (currentProfile && currentProfile.last_name) || '';
-  const aliasValue = (currentProfile && currentProfile.alias) || '';
-  const bioValue = (currentProfile && currentProfile.bio) || '';
-  const birthdayValue = (currentProfile && currentProfile.birthday) || '';
-  const countryValue = (currentProfile && currentProfile.country) || '';
-  const cityValue = (currentProfile && currentProfile.city) || '';
-  const barangayValue = (currentProfile && currentProfile.barangay) || '';
-  const schoolValue = (currentProfile && currentProfile.school) || '';
-  const educationValue = (currentProfile && currentProfile.education) || '';
-  const workValue = (currentProfile && currentProfile.work) || '';
-  const companyValue = (currentProfile && currentProfile.company) || '';
-  const hometownValue = (currentProfile && currentProfile.hometown) || '';
-  const interestsValue = (currentProfile && currentProfile.interests) || '';
+const firstName = (currentProfile && currentProfile.first_name) || '';
+   const middleName = (currentProfile && currentProfile.middle_name) || '';
+   const lastName = (currentProfile && currentProfile.last_name) || '';
+   const aliasValue = (currentProfile && currentProfile.alias) || '';
+   const bioValue = (currentProfile && currentProfile.bio) || '';
+   const birthdayValue = (currentProfile && currentProfile.birthday) || '';
+   const countryValue = (currentProfile && currentProfile.country) || '';
+   const cityValue = (currentProfile && currentProfile.city) || '';
+   const barangayValue = (currentProfile && currentProfile.barangay) || '';
+   const schoolValue = (currentProfile && currentProfile.school) || '';
+   const educationValue = (currentProfile && currentProfile.education) || '';
+   const workValue = (currentProfile && currentProfile.work) || '';
+   const companyValue = (currentProfile && currentProfile.company) || '';
+   const hometownValue = (currentProfile && currentProfile.hometown) || '';
+   const interestsValue = (currentProfile && currentProfile.interests) || '';
+   const realNameValue = (currentProfile && currentProfile.real_name) || '';
 
-  const firstNameInput = document.getElementById('edit-first-name');
+   const firstNameInput = document.getElementById('edit-first-name');
   const middleNameInput = document.getElementById('edit-middle-name');
   const lastNameInput = document.getElementById('edit-last-name');
   const schoolInput = document.getElementById('edit-school');
@@ -1124,9 +1105,9 @@ window.cancelEditProfile = function() {
   const companyInput = document.getElementById('edit-company');
   const hometownInput = document.getElementById('edit-hometown');
   const interestsInput = document.getElementById('edit-interests');
-  const aliasInput = document.getElementById('edit-alias');
   const bioInput = document.getElementById('edit-bio');
   const birthdayInput = document.getElementById('edit-birthday');
+  const realNameInput = document.getElementById('edit-real-name');
   if (firstNameInput) firstNameInput.value = firstName;
   if (middleNameInput) middleNameInput.value = middleName;
   if (lastNameInput) lastNameInput.value = lastName;
@@ -1136,9 +1117,9 @@ window.cancelEditProfile = function() {
   if (companyInput) companyInput.value = companyValue;
   if (hometownInput) hometownInput.value = hometownValue;
   if (interestsInput) interestsInput.value = interestsValue;
-  if (aliasInput) aliasInput.value = aliasValue;
   if (bioInput) bioInput.value = bioValue;
   if (birthdayInput) birthdayInput.value = birthdayValue;
+  if (realNameInput) realNameInput.value = realNameValue;
 
   populateLocationDropdowns(countryValue, cityValue, barangayValue);
 
@@ -1164,23 +1145,23 @@ window.saveProfile = async function() {
     error.style.display = 'block';
   };
 
-  const firstName = (document.getElementById('edit-first-name')?.value || '').trim();
-  const middleName = (document.getElementById('edit-middle-name')?.value || '').trim();
-  const lastName = (document.getElementById('edit-last-name')?.value || '').trim();
-  const alias = (document.getElementById('edit-alias')?.value || '').trim();
-  const bio = (document.getElementById('edit-bio')?.value || '').trim();
-  const birthday = (document.getElementById('edit-birthday')?.value || '').trim();
-  const country = (document.getElementById('edit-country')?.value || '').trim();
-  const city = (document.getElementById('edit-city')?.value || '').trim();
-  const barangay = (document.getElementById('edit-barangay')?.value || '').trim();
-  const school = (document.getElementById('edit-school')?.value || '').trim();
-  const education = (document.getElementById('edit-education')?.value || '').trim();
-  const work = (document.getElementById('edit-work')?.value || '').trim();
-  const company = (document.getElementById('edit-company')?.value || '').trim();
-  const hometown = (document.getElementById('edit-hometown')?.value || '').trim();
-  const interests = (document.getElementById('edit-interests')?.value || '').trim();
+const firstName = (document.getElementById('edit-first-name')?.value || '').trim();
+   const middleName = (document.getElementById('edit-middle-name')?.value || '').trim();
+   const lastName = (document.getElementById('edit-last-name')?.value || '').trim();
+   const bio = (document.getElementById('edit-bio')?.value || '').trim();
+   const birthday = (document.getElementById('edit-birthday')?.value || '').trim();
+   const country = (document.getElementById('edit-country')?.value || '').trim();
+   const city = (document.getElementById('edit-city')?.value || '').trim();
+   const barangay = (document.getElementById('edit-barangay')?.value || '').trim();
+   const school = (document.getElementById('edit-school')?.value || '').trim();
+   const education = (document.getElementById('edit-education')?.value || '').trim();
+   const work = (document.getElementById('edit-work')?.value || '').trim();
+   const company = (document.getElementById('edit-company')?.value || '').trim();
+   const hometown = (document.getElementById('edit-hometown')?.value || '').trim();
+   const interests = (document.getElementById('edit-interests')?.value || '').trim();
+   const realName = (document.getElementById('edit-real-name')?.value || '').trim();
 
-  // Validate first_name (required)
+   // Validate first_name (required)
   if (!firstName) {
     showEditError('First name is required');
     return;
@@ -1197,12 +1178,6 @@ window.saveProfile = async function() {
   }
   if (lastName.length > 100) {
     showEditError('Last name must be less than 100 characters');
-    return;
-  }
-
-  // Validate alias (optional, max 50)
-  if (alias.length > 50) {
-    showEditError('Alias must be less than 50 characters');
     return;
   }
 
@@ -1260,8 +1235,8 @@ window.saveProfile = async function() {
       first_name: firstName,
       middle_name: middleName || null,
       last_name: lastName,
-      alias: alias || null,
       bio: bio || null,
+      real_name: realName || null,
       birthday: birthday || null,
       country: country || null,
       city: city || null,

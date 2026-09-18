@@ -333,10 +333,12 @@ export const feedApi = {
     return apiRequest(`/feed?limit=${limit}&offset=${offset}`);
   },
 
-  async createPost(content) {
+  async createPost(content, communityId = null) {
+    const body = { content };
+    if (communityId) body.community_id = communityId;
     return apiRequest('/feed/posts', {
       method: 'POST',
-      body: { content },
+      body,
     });
   },
 
@@ -534,5 +536,38 @@ export const albumsApi = {
     const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     if (albumId) params.set('album_id', albumId);
     return apiRequest(`/profiles/${username}/photos?${params.toString()}`);
+  },
+};
+
+/**
+ * Communities API (COMMUNITY-01)
+ */
+export const communityApi = {
+  async getCommunities() {
+    return apiRequest('/communities');
+  },
+
+  async getCommunity(communityId) {
+    return apiRequest(`/communities/${communityId}`);
+  },
+
+  async join(communityId) {
+    return apiRequest(`/communities/${communityId}/join`, {
+      method: 'POST',
+    });
+  },
+
+  async leave(communityId) {
+    return apiRequest(`/communities/${communityId}/leave`, {
+      method: 'POST',
+    });
+  },
+
+  async getMembers(communityId, limit = 50, offset = 0) {
+    return apiRequest(`/communities/${communityId}/members?limit=${limit}&offset=${offset}`);
+  },
+
+  async getPosts(communityId, limit = 20, offset = 0) {
+    return apiRequest(`/communities/${communityId}/posts?limit=${limit}&offset=${offset}`);
   },
 };

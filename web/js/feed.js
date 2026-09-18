@@ -11,6 +11,17 @@ let feedData = { posts: [], limit: 20, offset: 0, has_more: false };
 let currentFeedOffset = 0;
 
 /**
+ * COMMUNITY-01: Replace the shared feed state (posts array, etc.) so the
+ * global like/comment/edit helpers can operate on community feed posts too.
+ * The community page loads posts through the same feed API shape and sets them
+ * here before rendering.
+ */
+export function setFeedData(data) {
+  feedData = data || { posts: [], limit: 20, offset: 0, has_more: false };
+  currentFeedOffset = feedData.offset || 0;
+}
+
+/**
  * Format timestamp to relative time
  */
 function formatTimestamp(iso) {
@@ -68,9 +79,9 @@ export function getSidebarHtml(activeRoute = 'home') {
     { route: 'notifications', label: 'Notifications', href: null, isButton: false, comingSoon: true },
     { route: 'saved', label: 'Saved', href: null, isButton: false, comingSoon: true },
     { route: 'divider-1', label: null, href: null, isDivider: true },
+    { route: 'community', label: 'Communities', href: '#/community', isButton: false },
     { route: 'creator-studio', label: 'Creator Studio', href: '#/creator-studio', isButton: false },
     { route: 'marketplace', label: 'Marketplace', href: '#/marketplace', isButton: false },
-    { route: 'groups', label: 'Community Groups', href: '#/groups', isButton: false },
     { route: 'divider-2', label: null, href: null, isDivider: true },
     { route: 'settings', label: 'Settings', href: null, isButton: false, comingSoon: true },
   ];
@@ -263,7 +274,7 @@ export function renderHomePage() {
 /**
  * Render a post card
  */
-function renderPostCard(post) {
+export function renderPostCard(post) {
   const authorName = post.author.display_name || post.author.username;
   const authorAlias = post.author.alias_enabled && post.author.alias ? post.author.alias : null;
 
@@ -663,6 +674,64 @@ function showToast(message) {
 }
 
 /**
+ * COMMUNITY-01: Mobile navigation. The bottom bar only fits a few items, so
+ * the Menu button opens a slide-up sheet with the full set of destinations.
+ * Shared by the home and community pages.
+ */
+export function openMobileMenu() {
+  let sheet = document.getElementById('mobile-menu-sheet');
+  if (sheet) {
+    sheet.classList.add('open');
+    return;
+  }
+
+  const items = [
+    { href: '#/home', label: 'Home', icon: '🏠' },
+    { href: '#/profile', label: 'Profile', icon: '👤' },
+    { href: '#/messages', label: 'Messages', icon: '💬' },
+    { href: '#/community', label: 'Communities', icon: '👥' },
+    { href: '#/creator-studio', label: 'Creator Studio', icon: '🎬' },
+    { href: '#/marketplace', label: 'Marketplace', icon: '🛍️' },
+  ];
+
+  sheet = document.createElement('div');
+  sheet.className = 'mobile-menu-sheet';
+  sheet.id = 'mobile-menu-sheet';
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-label', 'Menu');
+  sheet.innerHTML = `
+    <button class="mobile-menu-overlay" type="button" aria-label="Close menu"></button>
+    <nav class="mobile-menu-panel" aria-label="Mobile menu">
+      <header class="mobile-menu-header">
+        <strong>KomuniPH</strong>
+        <button class="mobile-menu-close" type="button" aria-label="Close menu">✕</button>
+      </header>
+      ${items.map(item => `<a class="mobile-menu-item" href="${item.href}"><span aria-hidden="true">${item.icon}</span> ${item.label}</a>`).join('')}
+    </nav>
+  `;
+  document.body.appendChild(sheet);
+
+  const close = () => sheet.classList.remove('open');
+  sheet.querySelector('.mobile-menu-close').addEventListener('click', close);
+  sheet.querySelector('.mobile-menu-overlay').addEventListener('click', close);
+  sheet.querySelectorAll('.mobile-menu-item').forEach(item => {
+    item.addEventListener('click', close);
+  });
+
+  requestAnimationFrame(() => sheet.classList.add('open'));
+}
+
+/**
+ * Bind the mobile bottom-bar Menu button (if present) to open the sheet.
+ */
+export function initMobileNav() {
+  const btn = document.getElementById('mobile-menu-btn');
+  if (btn) {
+    btn.addEventListener('click', openMobileMenu);
+  }
+}
+
+/**
  * Initialize sidebar common functionality (logout, profile, unread).
  */
 export function initSidebarCommon() {
@@ -788,12 +857,7 @@ export function initHomePage() {
   });
 
   // Mobile menu button
-  const mobileMenuBtn = document.getElementById('mobile-menu-btn');
-  if (mobileMenuBtn) {
-    mobileMenuBtn.addEventListener('click', () => {
-      showToast('More options coming soon');
-    });
-  }
+  initMobileNav();
 
   // Load sidebar profile
   // (handled by initSidebarCommon above)

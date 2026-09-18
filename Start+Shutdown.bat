@@ -152,77 +152,79 @@ for /f "tokens=*" %%a in ('powershell -NoProfile -ExecutionPolicy Bypass -File "
     set "EXISTING_PID=%%a"
 )
 
-if defined EXISTING_PID (
-    echo [INFO] KomuniPH is already running (PID %EXISTING_PID%).
-    echo [INFO] Reusing existing server.
-    set "SERVER_PID=%EXISTING_PID%"
-) else (
-    echo [DEBUG] No existing KomuniPH process found.
+if not defined EXISTING_PID goto NO_EXISTING
+
+echo [INFO] KomuniPH is already running (PID %EXISTING_PID%).
+echo [INFO] Reusing existing server.
+set "SERVER_PID=%EXISTING_PID%"
+goto VERIFY_HEALTH
+
+:NO_EXISTING
+echo [DEBUG] No existing KomuniPH process found.
+
+REM ==========================================================
+REM CHECK PORT 3000
+REM ==========================================================
+
+echo [CHECK] Verifying port 3000 availability...
+netstat -ano | findstr ":3000" >nul 2>&1
+if not errorlevel 1 (
+    echo [WARN] Port 3000 is already in use.
+    echo [INFO] Checking if it's a KomuniPH process...
     
-    REM ==========================================================
-    REM CHECK PORT 3000
-    REM ==========================================================
+    REM Get PID using port 3000
+    for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3000" ^| findstr "LISTENING"') do set "PORT_PID=%%a"
     
-    echo [CHECK] Verifying port 3000 availability...
-    netstat -ano | findstr ":3000" >nul 2>&1
-    if not errorlevel 1 (
-        echo [WARN] Port 3000 is already in use.
-        echo [INFO] Checking if it's a KomuniPH process...
+    if defined PORT_PID (
+        echo [INFO] Found process PID %PORT_PID% on port 3000.
         
-        REM Get PID using port 3000
-        for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3000" ^| findstr "LISTENING"') do set "PORT_PID=%%a"
+        REM Check if it's a node.exe running server\index.js
+        set "PORT_IS_KOMUNIPH="
+        for /f "tokens=*" %%p in ('powershell -NoProfile -ExecutionPolicy Bypass -File "%KOMUNIPH_DIR%\check_port_pid.ps1" %PORT_PID% 2^>nul') do set "PORT_IS_KOMUNIPH=%%p"
         
-        if defined PORT_PID (
-            echo [INFO] Found process PID %PORT_PID% on port 3000.
-            
-            REM Check if it's a node.exe running server\index.js
-            set "PORT_IS_KOMUNIPH="
-            for /f "tokens=*" %%p in ('powershell -NoProfile -ExecutionPolicy Bypass -File "%KOMUNIPH_DIR%\check_port_pid.ps1" %PORT_PID% 2^>nul') do set "PORT_IS_KOMUNIPH=%%p"
-            
-            if defined PORT_IS_KOMUNIPH (
-                echo [INFO] Existing KomuniPH process (PID %PORT_PID%) found on port 3000.
-                echo [ACTION] Stopping existing KomuniPH server (PID %PORT_PID%)...
-                taskkill /PID %PORT_PID% /F >nul 2>&1
-                timeout /t 1 /nobreak >nul
-                echo [OK] Previous server stopped.
-            ) else (
-                echo [ERROR] Port 3000 is occupied by another application (PID %PORT_PID%).
-                echo [ERROR] Cannot start KomuniPH. Please free port 3000 manually.
-                pause
-                exit /b 1
-            )
+        if defined PORT_IS_KOMUNIPH (
+            echo [INFO] Existing KomuniPH process (PID %PORT_PID%) found on port 3000.
+            echo [ACTION] Stopping existing KomuniPH server (PID %PORT_PID%)...
+            taskkill /PID %PORT_PID% /F >nul 2>&1
+            timeout /t 1 /nobreak >nul
+            echo [OK] Previous server stopped.
         ) else (
-            echo [ERROR] Port 3000 is in use but PID could not be determined.
+            echo [ERROR] Port 3000 is occupied by another application (PID %PORT_PID%).
+            echo [ERROR] Cannot start KomuniPH. Please free port 3000 manually.
             pause
             exit /b 1
         )
     ) else (
-        echo [OK] Port 3000 is free.
-    )
-    
-    REM ==========================================================
-    REM START SERVER WITH EXACT PID CAPTURE
-    REM ==========================================================
-    
-    echo.
-    echo Starting KomuniPH server...
-    echo.
-    
-    REM Use PowerShell helper to start the process and capture the exact PID
-    echo [DEBUG] Starting server via helper script...
-    for /f "tokens=*" %%a in ('powershell -NoProfile -ExecutionPolicy Bypass -File "%KOMUNIPH_DIR%\start_server.ps1" 2^>nul') do (
-        echo [DEBUG] Server started with PID: %%a
-        set "SERVER_PID=%%a"
-    )
-    
-    if not defined SERVER_PID (
-        echo [ERROR] Failed to start KomuniPH server.
+        echo [ERROR] Port 3000 is in use but PID could not be determined.
         pause
         exit /b 1
     )
-    
-    echo [INFO] KomuniPH server started with PID %SERVER_PID%.
+) else (
+    echo [OK] Port 3000 is free.
 )
+
+REM ==========================================================
+REM START SERVER WITH EXACT PID CAPTURE
+REM ==========================================================
+
+echo.
+echo Starting KomuniPH server...
+echo.
+
+REM Use PowerShell helper to start the process and capture the exact PID
+echo [DEBUG] Starting server via helper script...
+for /f "tokens=*" %%a in ('powershell -NoProfile -ExecutionPolicy Bypass -File "%KOMUNIPH_DIR%\start_server.ps1" 2^>nul') do (
+    echo [DEBUG] Server started with PID: %%a
+    set "SERVER_PID=%%a"
+)
+
+if not defined SERVER_PID (
+    echo [ERROR] Failed to start KomuniPH server.
+    pause
+    exit /b 1
+)
+
+echo [INFO] KomuniPH server started with PID %SERVER_PID%.
 
 REM ==========================================================
 REM VERIFY SERVER HEALTH

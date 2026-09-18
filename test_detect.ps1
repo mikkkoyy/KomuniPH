@@ -1,1 +1,0 @@
-Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -like '*server\index.js*' } | Select-Object -ExpandProperty ProcessId | ForEach-Object { Write-Output $_ }

@@ -152,13 +152,14 @@ for /f "tokens=*" %%a in ('powershell -NoProfile -ExecutionPolicy Bypass -File "
     set "EXISTING_PID=%%a"
 )
 
-if defined EXISTING_PID (
-    echo [INFO] KomuniPH is already running (PID %EXISTING_PID%).
-    echo [INFO] Reusing existing server.
-    set "SERVER_PID=%EXISTING_PID%"
-    goto :VERIFY_HEALTH
-)
+if not defined EXISTING_PID goto CHECK_PORT
 
+echo [INFO] KomuniPH is already running (PID %EXISTING_PID%).
+echo [INFO] Reusing existing server.
+set "SERVER_PID=%EXISTING_PID%"
+goto VERIFY_HEALTH
+
+:CHECK_PORT
 echo [DEBUG] No existing KomuniPH process found.
 
 REM ==========================================================

@@ -1578,10 +1578,10 @@ a:hover {
 }
 
 .profile-bio-box {
-  background: var(--theme-card-background, rgba(255, 247, 236, 0.9));
-  border: 1px solid var(--theme-card-border-color, var(--kp-border));
-  border-radius: var(--theme-card-radius, var(--kp-card-radius));
-  padding: 1rem;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0.5rem 0;
   color: var(--theme-text, var(--kp-ink));
   font-size: 0.9rem;
   line-height: 1.6;

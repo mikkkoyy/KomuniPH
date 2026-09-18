@@ -160,20 +160,21 @@ export function renderProfilePage(viewUsername = null, { preview = false } = {})
                   <div class="profile-header-row">
                     <div class="profile-header-photo-column">
                       <div class="profile-header-photo">
-                        <div id="profile-photo-section">${isPublicView ? '' : `
-                          <div class="profile-photo-wrapper" id="profile-photo-wrapper">
-                            <img class="profile-photo-large" id="profile-photo-large"
-                                 src="" alt="Profile photo"
-                                 style="display:none">
-                            <div class="profile-photo-large" id="profile-photo-initials"
-                                 style="display:none; background: var(--theme-accent, var(--kp-teal)); color: white;">
-                              ?
-                            </div>
-                            <button class="profile-photo-camera-btn" id="profile-photo-camera-btn" title="Change profile picture" aria-label="Change profile picture">
-                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="12" r="4"></circle></svg>
-                            </button>
-                          </div>
-                        `}${isPublicView ? `
+<div id="profile-photo-section">${isPublicView ? '' : `
+  <div class="profile-photo-wrapper" id="profile-photo-wrapper">
+    <img class="profile-photo-large" id="profile-photo-large"
+         src="" alt="Profile photo"
+         style="display:none">
+    <div class="profile-photo-large" id="profile-photo-initials"
+         style="display:none; background: var(--theme-accent, var(--kp-teal)); color: white;">
+      ?
+    </div>
+    <input type="file" id="profile-photo-input" accept="image/jpeg,image/png,image/webp" style="display:none">
+    <button class="profile-photo-camera-btn" id="profile-photo-camera-btn" title="Change profile picture" aria-label="Change profile picture">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="12" r="4"></circle></svg>
+    </button>
+  </div>
+`}${isPublicView ? `
                           <div class="profile-photo-display" id="profile-photo-display"></div>
 ` : ''}
                        </div>
@@ -686,6 +687,66 @@ export function renderProfileView(profile) {
   }
   if (sidebarName) sidebarName.textContent = nameDisplay;
   if (sidebarAlias) sidebarAlias.textContent = alias ? `@${alias}` : '';
+  initProfilePhotoUpload();
+}
+
+/**
+ * Initialize profile photo upload for own profile
+ */
+export function initProfilePhotoUpload() {
+  const cameraBtn = document.getElementById('profile-photo-camera-btn');
+  const fileInput = document.getElementById('profile-photo-input');
+  
+  if (!cameraBtn || !fileInput) return;
+
+  cameraBtn.addEventListener('click', () => {
+    fileInput.click();
+  });
+
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+
+    // Validate file
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      alert('Please choose a JPEG, PNG or WebP image.');
+      fileInput.value = '';
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Image must be 5MB or smaller.');
+      fileInput.value = '';
+      return;
+    }
+
+    // Show loading state
+    cameraBtn.style.opacity = '0.5';
+    cameraBtn.title = 'Uploading...';
+
+    try {
+      const result = await profileApi.uploadPhoto(file);
+      
+      // Update current profile data
+      if (currentProfile) {
+        currentProfile.profile_photo_url = result.profile_photo_url;
+      }
+      
+      // Refresh profile view to show new photo
+      renderProfileView(currentProfile);
+      
+      // Show success
+      cameraBtn.title = 'Profile photo updated successfully';
+      setTimeout(() => {
+        cameraBtn.title = 'Change profile picture';
+      }, 3000);
+    } catch (error) {
+      console.error('Profile photo upload failed:', error);
+      alert(error.message || 'Failed to upload profile photo. Please try again.');
+    } finally {
+      cameraBtn.style.opacity = '1';
+      fileInput.value = '';
+    }
+  });
 }
 
 /**

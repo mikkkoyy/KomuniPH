@@ -145,8 +145,12 @@ set "KOMUNIPH_DIR=%CD%"
 set "SERVER_PID="
 
 REM Function to find existing KomuniPH process by command line
+echo [DEBUG] Checking for existing KomuniPH process...
 set "EXISTING_PID="
-for /f "tokens=*" %%a in ('powershell -NoProfile -ExecutionPolicy Bypass -File "%KOMUNIPH_DIR%\find_komuniph.ps1" 2^>nul') do set "EXISTING_PID=%%a"
+for /f "tokens=*" %%a in ('powershell -NoProfile -ExecutionPolicy Bypass -File "%KOMUNIPH_DIR%\find_komuniph.ps1" 2^>nul') do (
+    echo [DEBUG] Found existing PID: %%a
+    set "EXISTING_PID=%%a"
+)
 
 if defined EXISTING_PID (
     echo [INFO] KomuniPH is already running (PID %EXISTING_PID%).
@@ -154,6 +158,8 @@ if defined EXISTING_PID (
     set "SERVER_PID=%EXISTING_PID%"
     goto VERIFY_HEALTH
 )
+
+echo [DEBUG] No existing KomuniPH process found.
 
 REM ==========================================================
 REM CHECK PORT 3000
@@ -205,7 +211,11 @@ echo Starting KomuniPH server...
 echo.
 
 REM Use PowerShell helper to start the process and capture the exact PID
-for /f "tokens=*" %%a in ('powershell -NoProfile -ExecutionPolicy Bypass -File "%KOMUNIPH_DIR%\start_server.ps1" 2^>nul') do set "SERVER_PID=%%a"
+echo [DEBUG] Starting server via helper script...
+for /f "tokens=*" %%a in ('powershell -NoProfile -ExecutionPolicy Bypass -File "%KOMUNIPH_DIR%\start_server.ps1" 2^>nul') do (
+    echo [DEBUG] Server started with PID: %%a
+    set "SERVER_PID=%%a"
+)
 
 if not defined SERVER_PID (
     echo [ERROR] Failed to start KomuniPH server.

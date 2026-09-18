@@ -146,7 +146,7 @@ set "SERVER_PID="
 
 REM Function to find existing KomuniPH process by command line
 set "EXISTING_PID="
-for /f "tokens=*" %%a in ('powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -like '*server\\index.js*' } | Select-Object -ExpandProperty ProcessId" 2^>nul') do set "EXISTING_PID=%%a"
+for /f "tokens=*" %%a in ('powershell -NoProfile -ExecutionPolicy Bypass -File "%KOMUNIPH_DIR%\find_komuniph.ps1" 2^>nul') do set "EXISTING_PID=%%a"
 
 if defined EXISTING_PID (
     echo [INFO] KomuniPH is already running (PID %EXISTING_PID%).
@@ -173,7 +173,7 @@ if not errorlevel 1 (
         
         REM Check if it's a node.exe running server\index.js
         set "PORT_IS_KOMUNIPH="
-        for /f "tokens=*" %%p in ('powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"ProcessId=%PORT_PID%\" | Where-Object { $_.CommandLine -like '*server\\index.js*' } | Select-Object -ExpandProperty ProcessId" 2^>nul') do set "PORT_IS_KOMUNIPH=%%p"
+        for /f "tokens=*" %%p in ('powershell -NoProfile -ExecutionPolicy Bypass -File "%KOMUNIPH_DIR%\check_port_pid.ps1" %PORT_PID% 2^>nul') do set "PORT_IS_KOMUNIPH=%%p"
         
         if defined PORT_IS_KOMUNIPH (
             echo [INFO] Existing KomuniPH process (PID %PORT_PID%) found on port 3000.
@@ -204,8 +204,8 @@ echo.
 echo Starting KomuniPH server...
 echo.
 
-REM Use PowerShell to start the process and capture the exact PID
-for /f "tokens=*" %%a in ('powershell -NoProfile -Command "cd \"%KOMUNIPH_DIR%\"; $proc = Start-Process -FilePath \"node\" -ArgumentList \"server\\index.js\" -WorkingDirectory \"%KOMUNIPH_DIR%\" -PassThru; Write-Output $proc.Id" 2^>nul') do set "SERVER_PID=%%a"
+REM Use PowerShell helper to start the process and capture the exact PID
+for /f "tokens=*" %%a in ('powershell -NoProfile -ExecutionPolicy Bypass -File "%KOMUNIPH_DIR%\start_server.ps1" 2^>nul') do set "SERVER_PID=%%a"
 
 if not defined SERVER_PID (
     echo [ERROR] Failed to start KomuniPH server.

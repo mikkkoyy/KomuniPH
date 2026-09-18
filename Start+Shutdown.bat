@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 title KomuniPH Lite
 
 cd /d "%~dp0"
@@ -13,32 +13,177 @@ echo GitHub:  https://github.com/mikkkoyy/KomuniPH
 echo.
 
 REM ==========================================================
-REM CHECK FOR EXISTING KOMUNIPH PROCESS ON PORT 3000
+REM CHECK GIT
+REM ==========================================================
+
+where git >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Git is not installed or not available in PATH.
+    echo.
+    pause
+    exit /b 1
+)
+
+REM ==========================================================
+REM INITIALIZE GIT REPOSITORY IF NEEDED
+REM ==========================================================
+
+if not exist ".git" (
+    echo [GIT] Initializing repository...
+    git init
+    if errorlevel 1 (
+        echo [ERROR] Failed to initialize Git.
+        pause
+        exit /b 1
+    )
+)
+
+REM ==========================================================
+REM CONFIGURE REMOTE
+REM ==========================================================
+
+git remote get-url origin >nul 2>&1
+if errorlevel 1 (
+    echo [GIT] Adding GitHub remote...
+    git remote add origin https://github.com/mikkkoyy/KomuniPH.git
+) else (
+    echo [GIT] GitHub remote already configured.
+)
+
+REM ==========================================================
+REM ENSURE MAIN BRANCH
+REM ==========================================================
+
+git branch -M main
+
+REM ==========================================================
+REM SHOW CURRENT STATUS
+REM ==========================================================
+
+echo.
+echo ==========================================
+echo          GITHUB SYNC
+echo ==========================================
+echo.
+
+git status --short
+
+echo.
+
+REM ==========================================================
+REM ADD FILES
+REM ==========================================================
+
+echo [GIT] Adding changed files...
+git add .
+if errorlevel 1 (
+    echo.
+    echo [ERROR] Git add failed.
+    pause
+    exit /b 1
+)
+
+REM ==========================================================
+REM COMMIT
+REM ==========================================================
+
+git diff --cached --quiet
+if errorlevel 1 (
+    echo [GIT] Changes detected.
+    echo [GIT] Creating backup commit...
+    git commit -m "Auto backup - %date% %time%"
+    if errorlevel 1 (
+        echo.
+        echo [ERROR] Git commit failed.
+        echo.
+        echo The server will NOT start until the Git problem is fixed.
+        pause
+        exit /b 1
+    )
+) else (
+    echo [GIT] No new changes to commit.
+)
+
+REM ==========================================================
+REM PUSH TO GITHUB
+REM ==========================================================
+
+echo.
+echo [GIT] Uploading KomuniPH to GitHub...
+echo.
+
+git push -u origin main
+if errorlevel 1 (
+    echo.
+    echo ==========================================
+    echo [WARNING] GitHub upload failed.
+    echo ==========================================
+    echo.
+    echo KomuniPH will NOT be uploaded to GitHub.
+    echo Check your GitHub authentication/credentials.
+    echo.
+    echo The local project is still intact.
+    echo.
+    pause
+    exit /b 1
+)
+
+echo.
+echo ==========================================
+echo       GITHUB BACKUP COMPLETE
+echo ==========================================
+echo.
+echo Repository:
+echo https://github.com/mikkkoyy/KomuniPH
+echo.
+
+REM ==========================================================
+REM DETERMINISTIC PID MANAGEMENT
+REM ==========================================================
+
+set "KOMUNIPH_CMD=node server\index.js"
+set "KOMUNIPH_DIR=%CD%"
+set "SERVER_PID="
+
+REM Function to find existing KomuniPH process by command line
+set "EXISTING_PID="
+for /f "tokens=2 delims=," %%a in ('powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -like '*server\\index.js*' } | Select-Object -ExpandProperty ProcessId | ForEach-Object { Write-Output $_ }" 2^>nul') do set "EXISTING_PID=%%a"
+
+if defined EXISTING_PID (
+    echo [INFO] KomuniPH is already running (PID %EXISTING_PID%).
+    echo [INFO] Reusing existing server.
+    set "SERVER_PID=%EXISTING_PID%"
+    goto VERIFY_HEALTH
+)
+
+REM ==========================================================
+REM CHECK PORT 3000
 REM ==========================================================
 
 echo [CHECK] Verifying port 3000 availability...
-
 netstat -ano | findstr ":3000" >nul 2>&1
 if not errorlevel 1 (
     echo [WARN] Port 3000 is already in use.
     echo [INFO] Checking if it's a KomuniPH process...
     
     REM Get PID using port 3000
-    for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3000" ^| findstr "LISTENING"') do set PORT_PID=%%a
+    for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3000" ^| findstr "LISTENING"') do set "PORT_PID=%%a"
     
     if defined PORT_PID (
         echo [INFO] Found process PID %PORT_PID% on port 3000.
         
-        REM Check if it's a node process
-        tasklist /FI "PID eq %PORT_PID%" /FI "IMAGENAME eq node.exe" | findstr "node.exe" >nul 2>&1
-        if not errorlevel 1 (
-            echo [INFO] Existing Node process (PID %PORT_PID%) appears to be KomuniPH.
-            echo [ACTION] Stopping existing KomuniPH server (PID %PORT_PID%)...
+        REM Check if it's a node.exe running server\index.js
+        set "PORT_IS_KOMUNIPH="
+        for /f "tokens=2 delims=," %%p in ('powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"ProcessId=%PORT_PID%\" | Where-Object { $_.CommandLine -like '*server\\index.js*' } | Select-Object -ExpandProperty ProcessId" 2^>nul') do set "PORT_IS_KOMUNIPH=%%p"
+        
+        if defined PORT_IS_KOMUNIPH (
+            echo [INFO] Existing KomuniPH process (PID %PORT_PID%) found on port 3000.
+            echo [ACTION] Stopping existing KomuniPH server (PID %PORT_PID%)....
             taskkill /PID %PORT_PID% /F >nul 2>&1
             timeout /t 1 /nobreak >nul
             echo [OK] Previous server stopped.
         ) else (
-            echo [ERROR] Port 3000 is occupied by a non-Node process (PID %PORT_PID%).
+            echo [ERROR] Port 3000 is occupied by another application (PID %PORT_PID%).
             echo [ERROR] Cannot start KomuniPH. Please free port 3000 manually.
             pause
             exit /b 1
@@ -53,37 +198,29 @@ if not errorlevel 1 (
 )
 
 REM ==========================================================
-REM START SERVER
+REM START SERVER WITH EXACT PID CAPTURE
 REM ==========================================================
 
 echo.
 echo Starting KomuniPH server...
 echo.
 
-REM Start server and capture its PID
-start "KomuniPH Server" /b node server\index.js
-
-REM Give the server a moment to start and get its PID
-timeout /t 2 /nobreak >nul
-
-REM Find the PID of the node process we just started
-for /f "tokens=2" %%a in ('tasklist /FI "IMAGENAME eq node.exe" /FI "WINDOWTITLE eq KomuniPH Server" /FO CSV /NH 2^>nul') do set SERVER_PID=%%~a
+REM Use PowerShell to start the process and capture the exact PID
+for /f "tokens=*" %%a in ('powershell -NoProfile -Command "cd '%KOMUNIPH_DIR%'; $proc = Start-Process -FilePath 'node' -ArgumentList 'server\index.js' -WorkingDirectory '%KOMUNIPH_DIR%' -PassThru; Write-Output $proc.Id" 2^>nul') do set "SERVER_PID=%%a"
 
 if not defined SERVER_PID (
-    REM Fallback: find newest node process
-    for /f "tokens=2" %%a in ('tasklist /FI "IMAGENAME eq node.exe" /FO CSV /NH 2^>nul ^| findstr /v "PID"') do set SERVER_PID=%%~a
+    echo [ERROR] Failed to start KomuniPH server.
+    pause
+    exit /b 1
 )
 
-if defined SERVER_PID (
-    echo [INFO] KomuniPH server started with PID %SERVER_PID%.
-) else (
-    echo [WARN] Could not determine server PID.
-)
+echo [INFO] KomuniPH server started with PID %SERVER_PID%.
 
 REM ==========================================================
-REM VERIFY SERVER IS ACTUALLY RUNNING
+REM VERIFY SERVER HEALTH
 REM ==========================================================
 
+:VERIFY_HEALTH
 echo [CHECK] Waiting for server to become responsive...
 
 set MAX_WAIT=15
@@ -108,13 +245,18 @@ if not errorlevel 1 (
 
 if %WAITED% geq %MAX_WAIT% (
     echo.
-    echo [ERROR] Server failed to start within %MAX_WAIT% seconds.
-    echo [ERROR] Check the console output above for errors.
+    echo ==========================================
+    echo [ERROR] KOMUNIPH FAILED TO START
+    echo ==========================================
+    echo.
+    echo The server did not become healthy within %MAX_WAIT% seconds.
     echo.
     echo Attempting to clean up...
     if defined SERVER_PID (
         taskkill /PID %SERVER_PID% /F >nul 2>&1
     )
+    echo No unrelated Node processes were terminated.
+    echo.
     pause
     exit /b 1
 )
@@ -136,7 +278,7 @@ echo Shutting down KomuniPH...
 echo.
 
 if defined SERVER_PID (
-    echo [ACTION] Stopping server (PID %SERVER_PID%)...
+    echo [ACTION] Stopping KomuniPH server (PID %SERVER_PID%)...
     taskkill /PID %SERVER_PID% /F >nul 2>&1
     timeout /t 1 /nobreak >nul
     
@@ -146,10 +288,15 @@ if defined SERVER_PID (
         echo [OK] Port 3000 released.
     ) else (
         echo [WARN] Port 3000 may still be in use.
+        echo [INFO] Checking what is using port 3000...
+        for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":3000" ^| findstr "LISTENING"') do set "REMAINING_PID=%%a"
+        if defined REMAINING_PID (
+            echo [INFO] Remaining process on port 3000: PID %REMAINING_PID%
+            echo [INFO] This is NOT the KomuniPH process we started. It will not be terminated.
+        )
     )
 ) else (
-    echo [WARN] No server PID recorded, attempting generic node cleanup...
-    taskkill /F /IM node.exe /FI "WINDOWTITLE eq KomuniPH Server" >nul 2>&1
+    echo [WARN] No server PID recorded.
 )
 
 echo.

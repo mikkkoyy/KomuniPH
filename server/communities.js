@@ -513,6 +513,41 @@ export function handleGetCommunityPosts(req, res, user, params) {
 }
 
 /**
+ * GET /api/profile/:username/communities
+ * Lists the communities a profile owner has actually joined (active
+ * community_members rows). Membership is never inferred from the owner's
+ * location — only real memberships are returned.
+ *
+ * This endpoint is public, matching GET /api/profile/:username, and exposes
+ * only the public community fields required to render the list. Eligibility,
+ * moderation data and internal membership ids are never included.
+ */
+export function handleGetProfileCommunities(req, res, params) {
+  try {
+    const user = queryOne('SELECT id FROM users WHERE username = ?', [params.username]);
+    if (!user) {
+      return errorResponse(res, 404, 'Profile not found');
+    }
+
+    const communities = queryAll(
+      `SELECT c.id, c.name, c.slug, c.type
+         FROM community_members cm
+         JOIN communities c ON cm.community_id = c.id
+        WHERE cm.user_id = ?
+        ORDER BY
+          CASE c.type WHEN 'nationwide' THEN 1 WHEN 'city' THEN 2 ELSE 3 END,
+          c.name ASC`,
+      [user.id]
+    );
+
+    jsonResponse(res, 200, { communities });
+  } catch (err) {
+    console.error('[COMMUNITIES] Get profile communities error:', err);
+    errorResponse(res, 500, 'Internal server error');
+  }
+}
+
+/**
  * Startup seed: Nationwide communities plus City/Barangay communities derived
  * from existing profile locations. All idempotent.
  */

@@ -4225,6 +4225,64 @@ select:focus {
   color: var(--kp-teal-dark);
 }
 
+/* --- PROFILE-COMMUNITY-01: joined communities card --- */
+.profile-communities {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.profile-communities-state {
+  margin: 0;
+  padding: 0.25rem 0;
+  font-size: 0.75rem;
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+}
+
+.profile-community-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.5rem 0.625rem;
+  border-radius: var(--kp-control-radius, 0.75rem);
+  border: 1px solid transparent;
+  background: rgba(121, 218, 199, 0.08);
+  color: var(--theme-text, var(--kp-ink));
+  text-decoration: none;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.profile-community-row:hover {
+  background: rgba(121, 218, 199, 0.18);
+  border-color: var(--theme-card-border-color, var(--kp-border));
+}
+
+.profile-community-icon {
+  flex: none;
+  font-size: 0.9375rem;
+  line-height: 1;
+}
+
+.profile-community-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.profile-community-type {
+  flex: none;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--theme-text-secondary, var(--kp-ink-soft));
+}
+
 /* --- Community responsive --- */
 @media (max-width: 640px) {
   .community-page-header h1 {
@@ -4274,5 +4332,9 @@ select:focus {
 
   .community-composer-hint {
     text-align: center;
+  }
+
+  .profile-community-type {
+    display: none;
   }
 }

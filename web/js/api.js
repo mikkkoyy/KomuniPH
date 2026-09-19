@@ -211,6 +211,10 @@ export const profileApi = {
     return apiRequest(`/profile/${username}`);
   },
 
+  async getProfileCommunities(username) {
+    return apiRequest(`/profile/${username}/communities`);
+  },
+
   async getLocations() {
     return apiRequest('/locations');
   },

@@ -33,6 +33,7 @@ import {
   handleLeaveCommunity,
   handleGetCommunityMembers,
   handleGetCommunityPosts,
+  handleGetProfileCommunities,
   initCommunities,
 } from './communities.js';
 import {
@@ -285,6 +286,14 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
     const photosWithAlbumMatch = matchRoute('/api/profiles/:username/photos', path);
     if (method === 'GET' && photosWithAlbumMatch) {
       return handleGetPhotosWithAlbum(req, res, photosWithAlbumMatch);
+    }
+
+    // Public profile communities (public, matches the public profile endpoint).
+    // Registered before the single-segment public profile route; matchRoute
+    // requires an exact segment count so the two cannot shadow each other.
+    const profileCommunitiesMatch = matchRoute('/api/profile/:username/communities', path);
+    if (method === 'GET' && profileCommunitiesMatch) {
+      return handleGetProfileCommunities(req, res, profileCommunitiesMatch);
     }
 
     // Public profile by username

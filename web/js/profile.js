@@ -401,19 +401,15 @@ export function renderProfilePage(viewUsername = null, { preview = false } = {})
             </div>
           </div>
 
-          <!-- Community module -->
+          <!-- Community module: PROFILE-COMMUNITY-01 lists the profile owner's
+               joined communities (filled by loadAndRenderProfileCommunities). -->
           <div class="sidebar-module" id="community-module">
             <div class="sidebar-module-header">
-              Community
+              Communities
             </div>
             <div class="sidebar-module-body" id="community-body">
-              <div class="community-module" id="community-content">
-                <div class="community-module-header">
-                  Community
-                </div>
-                <p class="coming-soon" style="font-size:0.75rem; color:var(--theme-text-secondary, var(--kp-ink-soft));">
-                  Coming soon.
-                </p>
+              <div class="profile-communities" id="profile-communities">
+                <p class="profile-communities-state" id="profile-communities-state">Loading communities…</p>
               </div>
             </div>
           </div>
@@ -520,6 +516,7 @@ window.loadProfile = async function() {
     renderProfileView(profile);
     await loadAndRenderTestimonials(profile.username, false);
     await loadAndRenderGallery(profile.username, true);
+    await loadAndRenderProfileCommunities(profile.username);
 
   } catch (err) {
     console.error('[PROFILE] Load profile error:', err);
@@ -577,6 +574,7 @@ window.loadPublicProfile = async function(username) {
     }
 
     await loadAndRenderGallery(profile.username, false);
+    await loadAndRenderProfileCommunities(profile.username);
 
   } catch (err) {
     console.error('[PROFILE] Load public profile error:', err);
@@ -601,6 +599,56 @@ async function loadAndRenderTestimonials(username, showForm) {
     console.error('[TESTIMONIALS] Failed to load testimonials:', err);
     renderTestimonials([]);
   }
+}
+
+/**
+ * PROFILE-COMMUNITY-01: small visual indicator for each community scope.
+ * Only the community type is used — no internal membership data.
+ */
+const PROFILE_COMMUNITY_TYPES = {
+  nationwide: { icon: '🇵🇭', label: 'Nationwide' },
+  city: { icon: '🏙️', label: 'City' },
+  barangay: { icon: '📍', label: 'Barangay' },
+};
+
+/**
+ * Load and render the profile owner's joined communities in the sidebar
+ * Community card. Failures never break the rest of the profile page and never
+ * surface raw API errors.
+ *
+ * @param {string} username profile owner (never the signed-in viewer)
+ */
+async function loadAndRenderProfileCommunities(username) {
+  const container = document.getElementById('profile-communities');
+  if (!container) return;
+
+  try {
+    const data = await profileApi.getProfileCommunities(username);
+    renderProfileCommunities(container, data.communities || []);
+  } catch (err) {
+    console.error('[PROFILE] Failed to load communities:', err);
+    container.innerHTML = '<p class="profile-communities-state">Communities aren\u2019t available right now.</p>';
+  }
+}
+
+/**
+ * Render joined communities as compact, clickable rows that open the existing
+ * community detail route (#/community/:id).
+ */
+function renderProfileCommunities(container, communities) {
+  if (!communities.length) {
+    container.innerHTML = '<p class="profile-communities-state">No communities yet.</p>';
+    return;
+  }
+
+  container.innerHTML = communities.map(community => {
+    const meta = PROFILE_COMMUNITY_TYPES[community.type] || { icon: '🏘️', label: '' };
+    return `<a class="profile-community-row" href="#/community/${escapeHtmlAttr(community.id)}">
+      <span class="profile-community-icon" aria-hidden="true">${meta.icon}</span>
+      <span class="profile-community-name">${escapeHtml(community.name)}</span>
+      ${meta.label ? `<span class="profile-community-type">${meta.label}</span>` : ''}
+    </a>`;
+  }).join('');
 }
 
 /**
@@ -1970,6 +2018,7 @@ export async function loadProfilePreviewContent(username) {
   renderGalleryPreviewMeta(photos.length);
   const grid = document.getElementById('profile-albums-grid');
   if (grid) grid.innerHTML = renderAlbumCardsHtml(albums.albums || [], username);
+  await loadAndRenderProfileCommunities(username);
 }
 
 export function setEditorProfile(profile) {

@@ -35,6 +35,7 @@ import {
   handleLeaveCommunity,
   handleGetCommunityMembers,
   handleGetCommunityPosts,
+  handleCreateCommunityPost,
   handleGetProfileCommunities,
   handleGetElection,
   handleNominateCommunity,
@@ -473,6 +474,12 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
   }
 
   const communityPostsMatch = matchRoute('/api/communities/:id/posts', path);
+  if (method === 'POST' && communityPostsMatch) {
+    // COMMUNITY-05: multipart post creation (optional photo/video media).
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleCreateCommunityPost(req, res, user, communityPostsMatch);
+  }
   if (method === 'GET' && communityPostsMatch) {
     const user = requireAuth(req, res);
     if (!user) return;

@@ -15,6 +15,25 @@
 import { queryOne, queryAll, execute } from './database.js';
 import { generateId, now, jsonResponse, errorResponse, parseQuery, parseBody } from './utils.js';
 import { getCountries } from './locations.js';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { resolve } from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+import Busboy from 'busboy';
+import sharp from 'sharp';
+import crypto from 'crypto';
+import config from './config.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// COMMUNITY-05: community post media upload directory. Reuses the existing
+// upload conventions (config.upload.maxFileSize, unique random filenames);
+// only the runtime directory is new, mirroring uploads/gallery.
+const communityMediaDir = resolve(__dirname, '..', 'uploads/community');
+if (!existsSync(communityMediaDir)) {
+  mkdirSync(communityMediaDir, { recursive: true });
+}
 
 /**
  * Build a URL-friendly slug from a community name.
@@ -659,6 +678,235 @@ export function handleGetCommunityMembers(req, res, user, params) {
  * comments; the response shape matches GET /api/feed so it can be rendered
  * with the existing feed UI. Only eligible members can view the feed.
  */
+/**
+ * COMMUNITY-05: POST /api/communities/:id/posts (multipart/form-data)
+ *
+ * Creates a community post with optional media (one photo or one video),
+ * reusing the existing KomuniPH media pipeline conventions:
+ *   - Busboy multipart parsing with config.upload.maxFileSize (same as
+ *     the profile/gallery uploaders)
+ *   - images validated with sharp (real bytes are authoritative) and
+ *     converted to WebP like every other KomuniPH upload
+ *   - videos accepted by strict MIME + extension allowlist, stored raw
+ *
+ * Membership, eligibility and community_id scoping reuse the exact same
+ * server-side rules as POST /api/feed/posts (no second membership system).
+ * Media is attached to the existing posts row (media_url / media_type).
+ */
+export function handleCreateCommunityPost(req, res, user, params) {
+  const contentType = req.headers['content-type'] || '';
+  if (!contentType.includes('multipart/form-data')) {
+    return errorResponse(res, 422, 'Content-Type must be multipart/form-data');
+  }
+
+  const community = getCommunity(params.id);
+  if (!community) {
+    return errorResponse(res, 404, 'Community not found');
+  }
+
+  // Same authorization as the text post flow: active membership required.
+  const member = queryOne(
+    'SELECT id FROM community_members WHERE community_id = ? AND user_id = ?',
+    [community.id, user.sub]
+  );
+  if (!member) {
+    return errorResponse(res, 403, 'You must be a member to post in this community');
+  }
+
+  // Same geographic eligibility rule: the stored profile location decides.
+  const profile = getProfileFor(user.sub);
+  if (!profile || !isEligible(community, profile)) {
+    return errorResponse(res, 403, 'You are no longer eligible for this community');
+  }
+
+  const busboy = Busboy({
+    headers: req.headers,
+    limits: {
+      files: 1,
+      fileSize: config.upload.maxFileSize,
+    },
+  });
+
+  let responseSent = false;
+  const sendError = (status, message) => {
+    if (!responseSent) {
+      responseSent = true;
+      errorResponse(res, status, message);
+    }
+  };
+  const sendSuccess = (data) => {
+    if (!responseSent) {
+      responseSent = true;
+      jsonResponse(res, 201, data);
+    }
+  };
+
+  let content = '';
+  let fileInfo = null;
+  let tooLarge = false;
+
+  busboy.on('field', (name, value) => {
+    if (name === 'content') content = value;
+  });
+
+  busboy.on('file', (fieldname, file, info) => {
+    if (fieldname !== 'media') {
+      file.resume();
+      sendError(422, 'File field name must be "media"');
+      return;
+    }
+
+    const { filename, mimeType } = info;
+    const ext = String(filename || '').toLowerCase().split('.').pop() || '';
+    const imageExts = ['jpeg', 'jpg', 'png', 'webp'];
+    const videoExts = ['mp4', 'webm'];
+    const imageMimes = ['image/jpeg', 'image/png', 'image/webp'];
+    const videoMimes = ['video/mp4', 'video/webm'];
+
+    const isImage = imageMimes.includes(mimeType) && imageExts.includes(ext);
+    const isVideo = videoMimes.includes(mimeType) && videoExts.includes(ext);
+    if (!isImage && !isVideo) {
+      file.resume();
+      sendError(422, 'Unsupported media type. Use a JPEG, PNG, WebP image or an MP4/WebM video.');
+      return;
+    }
+
+    const uniqueFilename = `${crypto.randomBytes(16).toString('hex')}.${isImage ? 'webp' : ext}`;
+    const filePath = resolve(communityMediaDir, uniqueFilename);
+
+    const chunks = [];
+    let fileSize = 0;
+
+    file.on('data', (chunk) => {
+      fileSize += chunk.length;
+      if (fileSize > config.upload.maxFileSize) {
+        tooLarge = true;
+        file.resume();
+        sendError(422, `File too large. Maximum size: ${config.upload.maxFileSize / 1024 / 1024}MB`);
+        return;
+      }
+      chunks.push(chunk);
+    });
+
+    file.on('end', () => {
+      if (tooLarge) return;
+      fileInfo = {
+        isImage,
+        mimeType,
+        uniqueFilename,
+        filePath,
+        data: Buffer.concat(chunks),
+      };
+    });
+
+    file.on('error', () => {
+      sendError(500, 'Upload processing failed');
+    });
+  });
+
+  busboy.on('error', () => {
+    sendError(500, 'Upload processing failed');
+  });
+
+  busboy.on('finish', async () => {
+    try {
+      if (!content || content.trim().length === 0) {
+        return sendError(422, 'Post content is required');
+      }
+      if (content.length > 5000) {
+        return sendError(422, 'Post content must be less than 5000 characters');
+      }
+
+      let mediaUrl = null;
+      let mediaType = null;
+
+      if (fileInfo) {
+        if (fileInfo.data.length === 0) {
+          return sendError(422, 'Uploaded file is empty');
+        }
+
+        if (fileInfo.isImage) {
+          // Validate the ACTUAL image contents with sharp (bytes are
+          // authoritative, the browser MIME type is only a hint), then
+          // convert to WebP like all other KomuniPH media.
+          let metadata;
+          try {
+            metadata = await sharp(fileInfo.data).metadata();
+          } catch (metaErr) {
+            return sendError(422, 'Failed to process image. Please upload a valid JPEG, PNG, or WebP image.');
+          }
+          const detectedFormat = String(metadata.format || '').toLowerCase();
+          if (!['jpeg', 'jpg', 'png', 'webp'].includes(detectedFormat)) {
+            return sendError(422, 'Failed to process image. Please upload a valid JPEG, PNG, or WebP image.');
+          }
+          let optimizedBuffer;
+          try {
+            optimizedBuffer = await sharp(fileInfo.data)
+              .webp({ quality: config.upload.webpQuality })
+              .toBuffer();
+          } catch (convertErr) {
+            return sendError(422, 'Failed to process image. Please upload a valid JPEG, PNG, or WebP image.');
+          }
+          try {
+            writeFileSync(fileInfo.filePath, optimizedBuffer);
+          } catch (writeErr) {
+            console.error('[COMMUNITIES] Failed to write post image:', writeErr.message);
+            return sendError(500, 'Failed to save uploaded media. Please try again.');
+          }
+        } else {
+          // Video: allowlisted MIME/extension, stored as-is (sharp cannot
+          // process video). Size was already enforced by the data handler.
+          try {
+            writeFileSync(fileInfo.filePath, fileInfo.data);
+          } catch (writeErr) {
+            console.error('[COMMUNITIES] Failed to write post video:', writeErr.message);
+            return sendError(500, 'Failed to save uploaded media. Please try again.');
+          }
+        }
+
+        mediaUrl = `/uploads/community/${fileInfo.uniqueFilename}`;
+        mediaType = fileInfo.isImage ? 'image' : 'video';
+      }
+
+      const postId = generateId();
+      const timestamp = now();
+      execute(
+        'INSERT INTO posts (id, author_id, content, community_id, media_url, media_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [postId, user.sub, content.trim(), community.id, mediaUrl, mediaType, timestamp, timestamp]
+      );
+
+      sendSuccess({
+        id: postId,
+        author: {
+          username: user.username,
+          display_name: profile.display_name,
+          bio: profile.bio,
+          profile_photo_url: profile.profile_photo_url,
+          cover_photo_url: profile.cover_photo_url,
+        },
+        content: content.trim(),
+        created_at: timestamp,
+        updated_at: timestamp,
+        like_count: 0,
+        liked_by_current_user: false,
+        comment_count: 0,
+        is_current_user_author: true,
+        edited_at: null,
+        community_id: community.id,
+        is_featured: false,
+        media_url: mediaUrl,
+        media_type: mediaType,
+        can_moderate: isCommunityModerator(community.id, user.sub),
+      });
+    } catch (err) {
+      console.error('[COMMUNITIES] Create community post error:', err);
+      sendError(500, 'Internal server error');
+    }
+  });
+
+  req.pipe(busboy);
+}
+
 export function handleGetCommunityPosts(req, res, user, params) {
   try {
     const profile = getProfileFor(user.sub);
@@ -692,6 +940,8 @@ export function handleGetCommunityPosts(req, res, user, params) {
          p.edited_at,
          p.community_id,
          p.is_featured,
+         p.media_url,
+         p.media_type,
          u.username,
          pr.display_name,
          pr.bio,
@@ -737,6 +987,8 @@ export function handleGetCommunityPosts(req, res, user, params) {
         edited_at: post.edited_at,
         community_id: post.community_id,
         is_featured: Boolean(post.is_featured),
+        media_url: post.media_url || null,
+        media_type: post.media_type || null,
         can_moderate: viewerCanModerate,
       })),
       limit,

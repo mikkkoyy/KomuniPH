@@ -293,6 +293,12 @@ export function renderPostCard(post) {
 
       <div id="post-content-${post.id}" class="post-content">${escapeHtml(post.content)}</div>
 
+      ${post.media_url ? (
+        post.media_type === 'video'
+          ? `<div class="post-media"><video class="post-media-video" src="${post.media_url}" controls preload="metadata"></video></div>`
+          : `<div class="post-media"><img class="post-media-image" src="${post.media_url}" alt="Post media" loading="lazy"></div>`
+      ) : ''}
+
       ${post.edited_at ? '<p class="post-edited">Edited</p>' : ''}
 
       <footer class="post-footer">

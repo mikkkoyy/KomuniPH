@@ -50,6 +50,25 @@ export function initDatabase() {
   } catch (err) {
     // Column already exists — safe no-op.
   }
+  // COMMUNITY-05: post media. Media is attached directly to the posts row
+  // (no separate media table): media_url is the public file URL and
+  // media_type is 'image' | 'video'. Existing rows keep NULL for both.
+  try {
+    const postsExists = database.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='posts'"
+    ).get();
+    if (postsExists) {
+      const cols = database.prepare("PRAGMA table_info(posts)").all().map(c => c.name);
+      if (!cols.includes('media_url')) {
+        database.exec('ALTER TABLE posts ADD COLUMN media_url TEXT');
+      }
+      if (!cols.includes('media_type')) {
+        database.exec("ALTER TABLE posts ADD COLUMN media_type TEXT CHECK (media_type IN ('image','video'))");
+      }
+    }
+  } catch (err) {
+    // Columns already exist — safe no-op.
+  }
 
   database.exec(`
     -- Users table

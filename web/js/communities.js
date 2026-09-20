@@ -533,6 +533,16 @@ function switchCommunityTab(tab) {
       ${community.membership === 'member' ? `
         <div class="composer community-composer">
           <textarea id="community-post-content" placeholder="Share something with ${escapeHtml(community.name)}..." rows="3"></textarea>
+          <div class="community-composer-media">
+            <button id="community-media-photo" class="community-media-btn" type="button" title="Attach a photo">
+              <span aria-hidden="true">📷</span> Photo
+            </button>
+            <button id="community-media-video" class="community-media-btn" type="button" title="Attach a video">
+              <span aria-hidden="true">🎬</span> Video
+            </button>
+            <input id="community-media-input" type="file" style="display:none" aria-hidden="true">
+          </div>
+          <div id="community-media-preview" class="community-media-preview" style="display:none"></div>
           <div id="community-composer-error" class="error-banner" style="display:none"></div>
           <div class="community-composer-actions">
             <span class="community-composer-hint">Only members can post.</span>
@@ -953,11 +963,91 @@ window.loadMoreFeaturedCommunityPosts = async function () {
   }
 };
 
+// COMMUNITY-05: client-side media hints. The server remains authoritative
+// for type/size validation — these only prevent obvious mistakes early.
+const COMMUNITY_MEDIA_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
+const COMMUNITY_MEDIA_VIDEO_MIMES = ['video/mp4', 'video/webm'];
+
 function bindCommunityComposer(community) {
   const submit = document.getElementById('community-post-submit');
   const textarea = document.getElementById('community-post-content');
   const errorEl = document.getElementById('community-composer-error');
+  const photoBtn = document.getElementById('community-media-photo');
+  const videoBtn = document.getElementById('community-media-video');
+  const fileInput = document.getElementById('community-media-input');
+  const previewEl = document.getElementById('community-media-preview');
   if (!submit) return;
+
+  let mediaFile = null;
+  let mediaPreviewUrl = null;
+
+  const clearMedia = () => {
+    if (mediaPreviewUrl) {
+      URL.revokeObjectURL(mediaPreviewUrl);
+      mediaPreviewUrl = null;
+    }
+    mediaFile = null;
+    if (fileInput) fileInput.value = '';
+    if (previewEl) {
+      previewEl.style.display = 'none';
+      previewEl.innerHTML = '';
+    }
+  };
+
+  const showMediaError = (message) => {
+    clearMedia();
+    errorEl.textContent = message;
+    errorEl.style.display = 'block';
+  };
+
+  const renderMediaPreview = () => {
+    if (!previewEl || !mediaFile) return;
+    if (mediaPreviewUrl) URL.revokeObjectURL(mediaPreviewUrl);
+    mediaPreviewUrl = URL.createObjectURL(mediaFile);
+    const isVideo = COMMUNITY_MEDIA_VIDEO_MIMES.includes(mediaFile.type);
+    previewEl.innerHTML = `
+      <div class="community-media-thumb">
+        ${isVideo
+          ? `<video src="${mediaPreviewUrl}" muted></video><span class="community-media-thumb-badge">VIDEO</span>`
+          : `<img src="${mediaPreviewUrl}" alt="Selected media preview">`}
+        <button id="community-media-remove" class="community-media-remove" type="button" title="Remove media" aria-label="Remove selected media">✕</button>
+      </div>
+    `;
+    previewEl.style.display = 'block';
+    const removeBtn = document.getElementById('community-media-remove');
+    if (removeBtn) removeBtn.addEventListener('click', clearMedia);
+  };
+
+  const pickFile = (kind) => {
+    if (!fileInput) return;
+    fileInput.accept = kind === 'video'
+      ? 'video/mp4,video/webm'
+      : 'image/jpeg,image/png,image/webp';
+    fileInput.value = '';
+    fileInput.click();
+  };
+
+  if (photoBtn) photoBtn.addEventListener('click', () => pickFile('image'));
+  if (videoBtn) videoBtn.addEventListener('click', () => pickFile('video'));
+
+  if (fileInput) {
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) return;
+      const maxBytes = 5 * 1024 * 1024; // mirrors config.upload.maxFileSize
+      if (!COMMUNITY_MEDIA_IMAGE_MIMES.includes(file.type) && !COMMUNITY_MEDIA_VIDEO_MIMES.includes(file.type)) {
+        showMediaError('Unsupported media type. Use a JPEG, PNG, WebP image or an MP4/WebM video.');
+        return;
+      }
+      if (file.size > maxBytes) {
+        showMediaError('File too large. Maximum size: 5MB.');
+        return;
+      }
+      mediaFile = file;
+      errorEl.style.display = 'none';
+      renderMediaPreview();
+    });
+  }
 
   submit.addEventListener('click', async () => {
     const content = textarea.value.trim();
@@ -975,11 +1065,14 @@ function bindCommunityComposer(community) {
     submit.textContent = 'Posting...';
     errorEl.style.display = 'none';
     try {
-      const newPost = await feedApi.createPost(content, community.id);
+      const newPost = mediaFile
+        ? await feedApi.createCommunityPost(community.id, content, mediaFile)
+        : await feedApi.createPost(content, community.id);
       communityFeed.posts.unshift(newPost);
       communityFeed.has_more = false;
       setFeedData(communityFeed);
       textarea.value = '';
+      clearMedia();
       renderCommunityFeedPosts();
     } catch (err) {
       errorEl.textContent = err.message || 'Failed to create post';

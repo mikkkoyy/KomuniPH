@@ -26,6 +26,8 @@ SELECT
           p.edited_at,
           p.community_id,
           p.is_featured,
+          p.media_url,
+          p.media_type,
           c.name as community_name,
           u.username,
           pr.display_name,
@@ -68,6 +70,8 @@ const transformedPosts = posts.map(post => ({
       community_id: post.community_id,
       community_name: post.community_name,
       is_featured: Boolean(post.is_featured),
+      media_url: post.media_url || null,
+      media_type: post.media_type || null,
       can_moderate: post.community_id ? isCommunityModerator(post.community_id, user.sub) : false,
     }));
 

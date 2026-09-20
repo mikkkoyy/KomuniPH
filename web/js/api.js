@@ -346,6 +346,41 @@ export const feedApi = {
     });
   },
 
+  // COMMUNITY-05: create a community post with optional media (photo/video)
+  // via the multipart community endpoint. Text-only posts keep using
+  // createPost; this is only called when the composer has media attached.
+  async createCommunityPost(communityId, content, file) {
+    const formData = new FormData();
+    formData.append('content', content);
+    if (file) {
+      formData.append('media', file, file.name);
+    }
+
+    const headers = {};
+    if (accessToken) {
+      headers['Authorization'] = `Bearer ${accessToken}`;
+    }
+
+    const response = await fetch(`${API_BASE}/communities/${communityId}/posts`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    const contentType = response.headers.get('content-type') || '';
+    const hasJsonBody = contentType.includes('application/json');
+    const parsedBody = hasJsonBody ? await response.json().catch(() => null) : null;
+
+    if (!response.ok) {
+      const error = new Error(parsedBody?.error?.message || `Post failed with status ${response.status}`);
+      error.status = response.status;
+      error.body = parsedBody;
+      throw error;
+    }
+
+    return parsedBody;
+  },
+
   async updatePost(postId, content) {
     return apiRequest(`/feed/posts/${postId}`, {
       method: 'PATCH',

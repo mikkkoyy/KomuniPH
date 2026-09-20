@@ -13,6 +13,7 @@ KomuniPH is a community-first social networking platform for the Philippines, bu
 - **Profiles** — identity, bio, photos, privacy controls (`real_name_visible`)
 - **Feed** — posts, comments, reactions
 - **Messaging** — direct conversations
+- **Community discovery** — search, type/location/joined filters, and Recommended Communities on `GET /api/communities/discover` and `GET /api/communities/recommended`; eligibility-aware cards with public activity counts (members, posts, last activity) and in-place join from discovery
 - **Communities** — location-scoped groups (nationwide / city / barangay) with server-side eligibility derived from the stored profile location
 - **Community membership** — join/leave, member list, first member becomes owner
 - **Elections** — monthly moderator elections with nominations, voting, runoffs, and history
@@ -39,5 +40,11 @@ Targeted community suite (requires the server running on port 3000):
 
 ```bash
 node tests/test_community.mjs
+```
+
+Focused discovery suite (COMMUNITY-04):
+
+```bash
+node tests/test_community_discovery.mjs
 ```
 

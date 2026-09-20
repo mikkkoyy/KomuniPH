@@ -61,6 +61,8 @@ function membershipButton(community) {
 
 /**
  * Render the community directory (list) page.
+ * COMMUNITY-04: tabs for Discover / Joined / Recommended, debounced search,
+ * simple type filter, discovery cards with activity, in-place join.
  */
 export function renderCommunityPage() {
   if (!isAuthenticated()) {
@@ -76,8 +78,25 @@ export function renderCommunityPage() {
         <div class="community-page">
           <header class="community-page-header">
             <h1>Communities</h1>
-            <p class="community-page-subtitle">Find and join location-based communities near you.</p>
+            <p class="community-page-subtitle">Discover location-based communities near you.</p>
           </header>
+
+          <div class="community-tabs" role="tablist" aria-label="Community views">
+            <button class="community-tab is-active" data-view="discover" role="tab" type="button">Discover</button>
+            <button class="community-tab" data-view="joined" role="tab" type="button">Joined</button>
+            <button class="community-tab" data-view="recommended" role="tab" type="button">Recommended</button>
+          </div>
+
+          <div class="community-toolbar">
+            <input id="community-search" class="community-search" type="search"
+              placeholder="Search communities by name or place..." autocomplete="off" aria-label="Search communities" />
+            <select id="community-type-filter" class="community-filter" aria-label="Filter by type">
+              <option value="">All types</option>
+              <option value="nationwide">Nationwide</option>
+              <option value="city">City</option>
+              <option value="barangay">Barangay</option>
+            </select>
+          </div>
 
           <div id="community-loading" class="loading">
             <div class="spinner"></div>
@@ -87,8 +106,7 @@ export function renderCommunityPage() {
           <div id="community-directory" style="display:none"></div>
 
           <div id="community-empty" class="empty-state" style="display:none">
-            <p class="empty-text">No communities are available for your location yet. Set your Country, City, and Barangay on your profile to discover them.</p>
-            <a class="btn btn-primary" href="#/profile/edit">Update Profile Location</a>
+            <p class="empty-text">No communities found. Try a different search or filter.</p>
           </div>
 
           <div id="community-error" class="error-state" style="display:none">
@@ -149,8 +167,27 @@ function renderDirectorySections(communities) {
   }).join('');
 }
 
+function formatActivityDate(value) {
+  if (!value) return 'No posts yet';
+  const t = new Date(value).getTime();
+  if (Number.isNaN(t)) return 'No posts yet';
+  const diff = Date.now() - t;
+  if (diff < 0) return 'Active now';
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return 'Active now';
+  if (min < 60) return `Active ${min}m ago`;
+  const hours = Math.floor(min / 60);
+  if (hours < 24) return `Active ${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `Active ${days}d ago`;
+  return `Active ${new Date(t).toLocaleDateString()}`;
+}
+
 function renderCommunityCard(community) {
   const meta = TYPE_META[community.type] || { label: community.type, icon: '🏘' };
+  const joined = community.joined === true || community.membership === 'member';
+  const eligible = community.eligible !== undefined ? community.eligible : community.eligibility;
+  const shortDesc = (community.description || '').slice(0, 140);
   return `
     <article class="community-card" data-community-id="${community.id}">
       <div class="community-card-head">
@@ -160,22 +197,30 @@ function renderCommunityCard(community) {
           <p class="community-card-scope">${meta.label}${community.country ? ' · ' + escapeHtml(scopeLabel(community)) : ''}</p>
         </div>
       </div>
-      ${community.description ? `<p class="community-card-desc">${escapeHtml(community.description)}</p>` : ''}
+      ${shortDesc ? `<p class="community-card-desc">${escapeHtml(shortDesc)}</p>` : ''}
+      <div class="community-card-meta">
+        <span class="community-card-members">👥 ${formatNumber(community.member_count)} members</span>
+        <span class="community-card-posts">📝 ${formatNumber(community.post_count || 0)} posts</span>
+        <span class="community-card-activity">🕒 ${escapeHtml(formatActivityDate(community.last_post_at))}</span>
+      </div>
       <div class="community-card-foot">
-        <span class="community-card-members">${formatNumber(community.member_count)} members</span>
-        <span class="community-card-status-status">${community.membership === 'member' ? '✓ Joined' : 'Not joined'}</span>
+        <span class="community-card-status">${joined ? '✓ Joined' : (eligible ? 'Not joined' : 'Not eligible')}</span>
         <span class="community-card-actions">
           <a class="btn btn-secondary" href="#/community/${community.id}">Open</a>
-          ${membershipButton(community)}
+          ${membershipButton({ ...community, membership: joined ? 'member' : 'non-member', eligibility: eligible })}
         </span>
       </div>
+      ${!eligible && community.join_reason ? `<p class="community-card-reason">${escapeHtml(community.join_reason)}</p>` : ''}
     </article>
   `;
 }
 
 /**
  * Load the community directory (bound to init and retry).
+ * COMMUNITY-04: Discover / Joined / Recommended views share one renderer.
  */
+const communityDiscoveryState = { view: 'discover', q: '', type: '', timer: null };
+
 window.loadCommunityDirectory = async function () {
   const loading = document.getElementById('community-loading');
   const directory = document.getElementById('community-directory');
@@ -188,8 +233,26 @@ window.loadCommunityDirectory = async function () {
   error.style.display = 'none';
 
   try {
-    const data = await communityApi.getCommunities();
-    const communities = data.communities || [];
+    let communities = [];
+    if (communityDiscoveryState.view === 'recommended') {
+      const data = await communityApi.getRecommendedCommunities(10);
+      communities = data.communities || [];
+    } else if (communityDiscoveryState.view === 'joined') {
+      const data = await communityApi.discoverCommunities({
+        q: communityDiscoveryState.q,
+        type: communityDiscoveryState.type,
+        joined: 'true',
+        limit: 50,
+      });
+      communities = data.communities || [];
+    } else {
+      const data = await communityApi.discoverCommunities({
+        q: communityDiscoveryState.q,
+        type: communityDiscoveryState.type,
+        limit: 20,
+      });
+      communities = data.communities || [];
+    }
 
     loading.style.display = 'none';
 
@@ -198,7 +261,14 @@ window.loadCommunityDirectory = async function () {
       return;
     }
 
-    directory.innerHTML = renderDirectorySections(communities);
+    const title = communityDiscoveryState.view === 'recommended'
+      ? 'Recommended Communities'
+      : communityDiscoveryState.view === 'joined' ? 'Joined' : 'Discover';
+    directory.innerHTML = `
+      <section class="community-section">
+        <h2 class="community-section-title">${title}</h2>
+        <div class="community-grid">${communities.map(renderCommunityCard).join('')}</div>
+      </section>`;
     directory.style.display = 'block';
     bindDirectoryActions();
   } catch (err) {
@@ -210,18 +280,34 @@ window.loadCommunityDirectory = async function () {
 
 function bindDirectoryActions() {
   document.querySelectorAll('#community-directory [data-action]').forEach(btn => {
+    if (btn.dataset.bound === '1') return; // avoid duplicate listeners on rebind
+    btn.dataset.bound = '1';
     btn.addEventListener('click', async () => {
       const { id, action } = btn.dataset;
+      const card = btn.closest('.community-card');
       btn.disabled = true;
       const original = btn.textContent;
       btn.textContent = action === 'join' ? 'Joining...' : 'Leaving...';
       try {
+        let result = null;
         if (action === 'join') {
-          await communityApi.join(id);
+          result = await communityApi.join(id);
         } else {
           await communityApi.leave(id);
         }
-        await window.loadCommunityDirectory();
+        // COMMUNITY-04: update in place, no full reload.
+        if (card && action === 'join') {
+          const status = card.querySelector('.community-card-status');
+          if (status) status.textContent = '✓ Joined';
+          const count = card.querySelector('.community-card-members');
+          if (count && result && result.member_count !== undefined) {
+            count.textContent = `👥 ${formatNumber(result.member_count)} members`;
+          }
+          btn.outerHTML = `<button class="btn btn-secondary community-leave-btn" data-action="leave" data-id="${id}" type="button">Leave</button>`;
+          bindDirectoryActions();
+        } else {
+          await window.loadCommunityDirectory();
+        }
       } catch (err) {
         btn.disabled = false;
         btn.textContent = original;
@@ -237,6 +323,31 @@ function bindDirectoryActions() {
 export function initCommunityPage() {
   initSidebarCommon();
   initMobileNav();
+  document.querySelectorAll('.community-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.community-tab').forEach(t => t.classList.remove('is-active'));
+      tab.classList.add('is-active');
+      communityDiscoveryState.view = tab.dataset.view;
+      window.loadCommunityDirectory();
+    });
+  });
+  const search = document.getElementById('community-search');
+  if (search) {
+    search.addEventListener('input', () => {
+      if (communityDiscoveryState.timer) clearTimeout(communityDiscoveryState.timer);
+      communityDiscoveryState.timer = setTimeout(() => {
+        communityDiscoveryState.q = search.value.trim();
+        window.loadCommunityDirectory();
+      }, 300);
+    });
+  }
+  const filter = document.getElementById('community-type-filter');
+  if (filter) {
+    filter.addEventListener('change', () => {
+      communityDiscoveryState.type = filter.value;
+      window.loadCommunityDirectory();
+    });
+  }
   window.loadCommunityDirectory();
 }
 

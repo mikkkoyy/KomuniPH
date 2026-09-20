@@ -551,6 +551,23 @@ export const communityApi = {
     return apiRequest('/communities');
   },
 
+  async discoverCommunities(filters = {}) {
+    const params = new URLSearchParams();
+    if (filters.q) params.set('q', filters.q);
+    if (filters.type) params.set('type', filters.type);
+    if (filters.city) params.set('city', filters.city);
+    if (filters.barangay) params.set('barangay', filters.barangay);
+    if (filters.joined) params.set('joined', filters.joined);
+    if (filters.limit) params.set('limit', String(filters.limit));
+    if (filters.offset) params.set('offset', String(filters.offset));
+    const qs = params.toString();
+    return apiRequest(`/communities/discover${qs ? '?' + qs : ''}`);
+  },
+
+  async getRecommendedCommunities(limit = 10) {
+    return apiRequest(`/communities/recommended?limit=${limit}`);
+  },
+
   async getCommunity(communityId) {
     return apiRequest(`/communities/${communityId}`);
   },

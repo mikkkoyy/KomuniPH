@@ -274,6 +274,190 @@ export function handleListCommunities(req, res, user) {
 }
 
 /**
+ * COMMUNITY-04: lightweight public activity counters for discovery cards.
+ * Uses cheap COUNT subqueries on existing tables only.
+ */
+function getCommunityActivity(communityId) {
+  const postStats = queryOne(
+    'SELECT COUNT(*) AS post_count, MAX(created_at) AS last_post_at FROM posts WHERE community_id = ?',
+    [communityId]
+  );
+  return {
+    post_count: postStats ? postStats.post_count : 0,
+    last_post_at: (postStats && postStats.last_post_at) || null,
+  };
+}
+
+/**
+ * COMMUNITY-04: discovery card shape. Eligibility is always computed
+ * server-side from the stored profile; the client never decides it.
+ */
+function discoveryView(community, profile, memberIds) {
+  const activity = getCommunityActivity(community.id);
+  const joined = memberIds.has(community.id);
+  const eligible = isEligible(community, profile);
+  return {
+    id: community.id,
+    name: community.name,
+    slug: community.slug,
+    type: community.type,
+    description: community.description || '',
+    country: community.country || null,
+    city: community.city || null,
+    barangay: community.barangay || null,
+    member_count: getMemberCount(community.id),
+    post_count: activity.post_count,
+    last_post_at: activity.last_post_at,
+    membership: joined ? 'member' : 'non-member',
+    joined,
+    eligible,
+    eligibility: eligible,
+    join_reason: eligible ? null : 'This community does not match your profile location.',
+  };
+}
+
+function getJoinedCommunityIds(userId) {
+  const rows = queryAll('SELECT community_id FROM community_members WHERE user_id = ?', [userId]);
+  return new Set(rows.map(r => r.community_id));
+}
+
+/**
+ * GET /api/communities/discover (COMMUNITY-04)
+ * Eligible-only discovery with search plus type/city/barangay/joined filters.
+ * All values are parameterized; eligibility stays server-side.
+ */
+export function handleDiscoverCommunities(req, res, user) {
+  try {
+    const profile = getProfileFor(user.sub);
+    if (!profile) {
+      return errorResponse(res, 404, 'Profile not found');
+    }
+
+    ensureCommunityForProfile(profile.country, profile.city, profile.barangay);
+    autoJoinNationwide(user.sub, profile);
+
+    const { params: queryParams } = parseQuery(req.url);
+    const q = (queryParams.q || '').trim();
+    const type = (queryParams.type || '').trim().toLowerCase();
+    const city = (queryParams.city || '').trim();
+    const barangay = (queryParams.barangay || '').trim();
+    const joinedParam = (queryParams.joined || '').trim().toLowerCase();
+    const limit = Math.min(Math.max(parseInt(queryParams.limit || '20', 10) || 20, 1), 50);
+    const offset = Math.max(parseInt(queryParams.offset || '0', 10) || 0, 0);
+
+    if (type && !['nationwide', 'city', 'barangay'].includes(type)) {
+      return errorResponse(res, 422, 'Invalid type filter');
+    }
+    if (joinedParam && !['true', 'false', '1', '0'].includes(joinedParam)) {
+      return errorResponse(res, 422, 'Invalid joined filter');
+    }
+
+    const conditions = [];
+    const values = [];
+    if (type) {
+      conditions.push('c.type = ?');
+      values.push(type);
+    }
+    if (city) {
+      conditions.push('c.city = ?');
+      values.push(city);
+    }
+    if (barangay) {
+      conditions.push('c.barangay = ?');
+      values.push(barangay);
+    }
+    if (q) {
+      const like = '%' + q.replace(/[\\%_]/g, (m) => '\\' + m) + '%';
+      conditions.push("(c.name LIKE ? ESCAPE '\\' OR c.slug LIKE ? ESCAPE '\\'"
+        + " OR COALESCE(c.description, '') LIKE ? ESCAPE '\\'"
+        + " OR COALESCE(c.country, '') LIKE ? ESCAPE '\\'"
+        + " OR COALESCE(c.city, '') LIKE ? ESCAPE '\\'"
+        + " OR COALESCE(c.barangay, '') LIKE ? ESCAPE '\\')");
+      values.push(like, like, like, like, like, like);
+    }
+    if (joinedParam === 'true' || joinedParam === '1') {
+      conditions.push('EXISTS (SELECT 1 FROM community_members cm WHERE cm.community_id = c.id AND cm.user_id = ?)');
+      values.push(user.sub);
+    } else if (joinedParam === 'false' || joinedParam === '0') {
+      conditions.push('NOT EXISTS (SELECT 1 FROM community_members cm WHERE cm.community_id = c.id AND cm.user_id = ?)');
+      values.push(user.sub);
+    }
+
+    const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
+    const rows = queryAll(
+      'SELECT c.* FROM communities c ' + where
+      + " ORDER BY CASE c.type WHEN 'nationwide' THEN 1 WHEN 'city' THEN 2 ELSE 3 END, c.name ASC"
+      + ' LIMIT ? OFFSET ?',
+      [...values, limit + 1, offset]
+    );
+
+    const memberIds = getJoinedCommunityIds(user.sub);
+    const eligibleOnly = rows.filter((row) => isEligible(row, profile));
+    const hasMore = rows.length > limit;
+    const page = eligibleOnly.slice(0, limit).map((row) => discoveryView(row, profile, memberIds));
+
+    jsonResponse(res, 200, { communities: page, limit, offset, has_more: hasMore });
+  } catch (err) {
+    console.error('[COMMUNITIES] Discover communities error:', err);
+    errorResponse(res, 500, 'Internal server error');
+  }
+}
+
+/**
+ * GET /api/communities/recommended (COMMUNITY-04)
+ * Deterministic location + public-activity order. No AI, no politics.
+ */
+export function handleRecommendedCommunities(req, res, user) {
+  try {
+    const profile = getProfileFor(user.sub);
+    if (!profile) {
+      return errorResponse(res, 404, 'Profile not found');
+    }
+
+    ensureCommunityForProfile(profile.country, profile.city, profile.barangay);
+    autoJoinNationwide(user.sub, profile);
+
+    const { params: queryParams } = parseQuery(req.url);
+    const limit = Math.min(Math.max(parseInt(queryParams.limit || '10', 10) || 10, 1), 50);
+
+    const rows = queryAll('SELECT * FROM communities');
+    const country = (profile.country || '').trim();
+    const city = (profile.city || '').trim();
+    const barangay = (profile.barangay || '').trim();
+
+    const tierOf = (community) => {
+      if (community.type === 'barangay' && barangay
+        && community.barangay === barangay && community.city === city && community.country === country) return 0;
+      if (community.type === 'city' && city
+        && community.city === city && community.country === country) return 1;
+      if (community.type === 'nationwide' && country && community.country === country) return 2;
+      return 3;
+    };
+
+    const memberIds = getJoinedCommunityIds(user.sub);
+    const eligible = rows.filter((row) => isEligible(row, profile));
+    eligible.sort((a, b) => {
+      const tier = tierOf(a) - tierOf(b);
+      if (tier !== 0) return tier;
+      const am = getMemberCount(a.id);
+      const bm = getMemberCount(b.id);
+      if (bm !== am) return bm - am;
+      const ap = getCommunityActivity(a.id).post_count;
+      const bp = getCommunityActivity(b.id).post_count;
+      if (bp !== ap) return bp - ap;
+      return String(a.name).localeCompare(String(b.name));
+    });
+
+    jsonResponse(res, 200, {
+      communities: eligible.slice(0, limit).map((row) => discoveryView(row, profile, memberIds)),
+    });
+  } catch (err) {
+    console.error('[COMMUNITIES] Recommended communities error:', err);
+    errorResponse(res, 500, 'Internal server error');
+  }
+}
+
+/**
  * GET /api/communities/:id
  * Returns community details for an eligible user.
  */

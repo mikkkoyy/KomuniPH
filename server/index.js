@@ -28,6 +28,8 @@ import {
 } from './albums.js';
 import {
   handleListCommunities,
+  handleDiscoverCommunities,
+  handleRecommendedCommunities,
   handleGetCommunity,
   handleJoinCommunity,
   handleLeaveCommunity,
@@ -423,6 +425,19 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
   }
 
   // Community routes (auth required)
+  // COMMUNITY-04: discovery routes must be registered before the generic
+  // /api/communities/:id route so "discover"/"recommended" are not treated
+  // as community ids.
+  if (method === 'GET' && path === '/api/communities/discover') {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleDiscoverCommunities(req, res, user);
+  }
+  if (method === 'GET' && path === '/api/communities/recommended') {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleRecommendedCommunities(req, res, user);
+  }
   if (method === 'GET' && path === '/api/communities') {
     const user = requireAuth(req, res);
     if (!user) return;

@@ -7,7 +7,7 @@
  * an addition to the existing product rather than a separate design.
  */
 
-import { communityApi, feedApi, isAuthenticated } from './api.js';
+import { communityApi, feedApi, getCurrentUserProfile, isAuthenticated } from './api.js';
 import { navigate } from './app.js';
 import { getSidebarHtml, initSidebarCommon, renderPostCard, setFeedData, initMobileNav } from './feed.js';
 
@@ -327,6 +327,9 @@ function renderCommunityHeader(community) {
   const meta = TYPE_META[community.type] || { label: community.type, icon: '🏘' };
   const isMember = community.membership === 'member';
   const canJoin = community.eligibility && !isMember;
+  const roleBadge = community.role
+    ? `<span class="community-role-badge role-${community.role}">${community.role.charAt(0).toUpperCase() + community.role.slice(1)}</span>`
+    : '';
 
   const el = document.getElementById('community-detail-content');
   el.innerHTML = `
@@ -342,7 +345,12 @@ function renderCommunityHeader(community) {
       <div class="community-header-stats">
         <span class="community-header-stat"><strong>${formatNumber(community.member_count)}</strong> members</span>
         <span class="community-header-stat"><strong>${isMember ? '✓' : ''}</strong> ${isMember ? 'Joined' : 'Not joined'}</span>
+        ${roleBadge ? `<span class="community-header-stat">${roleBadge}</span>` : ''}
+        ${community.moderator && community.moderator.username ? `
+          <span class="community-header-stat community-header-moderator">🛡 Moderator: @${escapeHtml(community.moderator.username)}</span>
+        ` : ''}
       </div>
+      <div id="community-election-chip" class="community-election-chip" style="display:none"></div>
       <div class="community-header-actions">
         ${community.type === 'nationwide'
           ? `<span class="community-badge badge-joined"><span class="community-badge-dot"></span> Auto-joined</span>`
@@ -357,16 +365,40 @@ function renderCommunityHeader(community) {
     </header>
 
     <nav class="community-tabs" aria-label="Community sections">
-      <button class="community-tab active" data-tab="feed" type="button">Feed</button>
+      <button class="community-tab active" data-tab="discussion" type="button">Discussion</button>
+      <button class="community-tab" data-tab="featured" type="button">Featured</button>
       <button class="community-tab" data-tab="members" type="button">Members</button>
+      <button class="community-tab" data-tab="events" type="button">Events</button>
+      <button class="community-tab" data-tab="media" type="button">Media</button>
+      <button class="community-tab" data-tab="election" type="button">Election</button>
       <button class="community-tab" data-tab="about" type="button">About</button>
+      ${community.can_moderate ? `<button class="community-tab" data-tab="moderation" type="button">Moderation</button><button class="community-tab" data-tab="settings" type="button">Settings</button>` : ''}
     </nav>
 
     <div id="community-tab-content"></div>
   `;
 
   bindTabs();
+  loadElectionChip(community);
   window.scrollTo(0, 0);
+}
+
+async function loadElectionChip(community) {
+  const chip = document.getElementById('community-election-chip');
+  if (!chip) return;
+  try {
+    const data = await communityApi.getElection(community.id);
+    const e = data && data.election;
+    if (!e) return;
+    chip.innerHTML = `
+      <span class="election-phase-badge phase-${escapeHtml(e.status)}">🗳 ${escapeHtml(e.phase)}</span>
+      <span class="election-chip-round">Round ${e.round}</span>
+      ${e.winner ? `<span class="election-chip-winner">Winner: ${escapeHtml(e.winner.display_name || e.winner.username)}</span>` : ''}
+    `;
+    chip.style.display = 'block';
+  } catch (err) {
+    chip.style.display = 'none';
+  }
 }
 
 function bindTabs() {
@@ -385,7 +417,7 @@ function switchCommunityTab(tab) {
 
   if (!container || !community) return;
 
-  if (tab === 'feed') {
+  if (tab === 'discussion' || tab === 'feed') {
     container.innerHTML = `
       ${community.membership === 'member' ? `
         <div class="composer community-composer">
@@ -401,10 +433,15 @@ function switchCommunityTab(tab) {
           <p class="empty-text">Join this community to share posts in its feed.</p>
         </div>
       `}
-      <section class="community-feed" aria-label="Community feed">
+      <div id="community-pinned-section" style="display:none">
+        <h3 class="community-section-title">Pinned Announcements</h3>
+        <div id="community-pinned-content"></div>
+      </div>
+      <section class="community-feed" aria-label="Community discussion">
+        <h3 class="community-section-title">Discussion</h3>
         <div id="community-feed-loading" class="loading">
           <div class="spinner"></div>
-          <p class="loading-text">Loading feed...</p>
+          <p class="loading-text">Loading posts...</p>
         </div>
         <div id="community-feed-content" style="display:none"></div>
         <div id="community-feed-empty" class="empty-state" style="display:none">
@@ -421,6 +458,106 @@ function switchCommunityTab(tab) {
     `;
     bindCommunityComposer(community);
     window.loadCommunityFeedPosts();
+    window.loadPinnedCommunityPosts();
+  } else if (tab === 'rules') {
+    container.innerHTML = `
+      <section class="community-rules-section" aria-label="Community rules">
+        <div id="community-rules-loading" class="loading">
+          <div class="spinner"></div>
+          <p class="loading-text">Loading rules...</p>
+        </div>
+        <div id="community-rules-content" style="display:none"></div>
+        <div id="community-rules-empty" class="empty-state" style="display:none">
+          <p class="empty-text">No rules yet.</p>
+        </div>
+        <div id="community-rules-error" class="error-state" style="display:none">
+          <p class="error-message"></p>
+          <button class="btn btn-secondary" onclick="window.loadCommunityRules()">Retry</button>
+        </div>
+        ${community.can_moderate ? `
+          <div class="community-rules-admin">
+            <h3 class="community-section-title">Manage Rules</h3>
+            <div class="community-rule-form">
+              <input type="text" id="rule-title" placeholder="Rule title" maxlength="200">
+              <textarea id="rule-description" placeholder="Rule description (optional)" rows="2" maxlength="2000"></textarea>
+              <div id="rule-error" class="error-banner" style="display:none"></div>
+              <button id="rule-add" class="btn btn-primary">Add Rule</button>
+            </div>
+          </div>
+        ` : ''}
+      </section>
+    `;
+    window.loadCommunityRules();
+    bindRuleCreator();
+  } else if (tab === 'moderation') {
+    if (!community.can_moderate) {
+      container.innerHTML = `<div class="empty-state"><p class="empty-text">Only moderators can access this area.</p></div>`;
+      return;
+    }
+    container.innerHTML = `
+      <section class="community-moderation-section" aria-label="Moderation">
+        <div class="community-moderation-tabs">
+          <button class="community-tab active" data-mod-tab="open" type="button">Open Reports</button>
+          <button class="community-tab" data-mod-tab="resolved" type="button">Resolved</button>
+          <button class="community-tab" data-mod-tab="dismissed" type="button">Dismissed</button>
+        </div>
+        <div id="community-reports-loading" class="loading">
+          <div class="spinner"></div>
+          <p class="loading-text">Loading reports...</p>
+        </div>
+        <div id="community-reports-content" style="display:none"></div>
+        <div id="community-reports-empty" class="empty-state" style="display:none">
+          <p class="empty-text">No reports here.</p>
+        </div>
+        <div id="community-reports-error" class="error-state" style="display:none">
+          <p class="error-message"></p>
+          <button class="btn btn-secondary" onclick="window.loadCommunityReports()">Retry</button>
+        </div>
+      </section>
+    `;
+    bindModerationTabs();
+    window.loadCommunityReports('open');
+  } else if (tab === 'settings') {
+    if (!community.can_moderate) {
+      container.innerHTML = `<div class="empty-state"><p class="empty-text">Only moderators can access this area.</p></div>`;
+      return;
+    }
+    container.innerHTML = `
+      <section class="community-settings-section" aria-label="Settings">
+        <div id="community-settings-loading" class="loading">
+          <div class="spinner"></div>
+          <p class="loading-text">Loading settings...</p>
+        </div>
+        <div id="community-settings-content" style="display:none"></div>
+        <div id="community-settings-error" class="error-state" style="display:none">
+          <p class="error-message"></p>
+          <button class="btn btn-secondary" onclick="window.loadCommunitySettings()">Retry</button>
+        </div>
+      </section>
+    `;
+    window.loadCommunitySettings();
+  } else if (tab === 'about') {
+    container.innerHTML = `
+      <p class="community-section-note">Featured posts are community highlights selected by this community's moderators.</p>
+      <section class="community-feed" aria-label="Featured posts">
+        <div id="community-feed-loading" class="loading">
+          <div class="spinner"></div>
+          <p class="loading-text">Loading featured posts...</p>
+        </div>
+        <div id="community-feed-content" style="display:none"></div>
+        <div id="community-feed-empty" class="empty-state" style="display:none">
+          <p class="empty-text">No featured posts yet. Moderators can feature posts from the Discussion tab.</p>
+        </div>
+        <div id="community-feed-error" class="error-state" style="display:none">
+          <p class="error-message"></p>
+          <button class="btn btn-secondary" onclick="window.loadFeaturedCommunityPosts()">Retry</button>
+        </div>
+        <div id="community-feed-more" style="display:none;text-align:center;margin-top:1.5rem">
+          <button class="btn btn-secondary" onclick="window.loadMoreFeaturedCommunityPosts()">Load More</button>
+        </div>
+      </section>
+    `;
+    window.loadFeaturedCommunityPosts();
   } else if (tab === 'members') {
     container.innerHTML = `
       <section class="community-members-section" aria-label="Community members">
@@ -442,6 +579,75 @@ function switchCommunityTab(tab) {
       </section>
     `;
     window.loadCommunityMembers();
+  } else if (tab === 'events') {
+    container.innerHTML = `
+      <section class="community-events-section" aria-label="Community events">
+        ${community.membership === 'member' ? `
+          <div class="community-event-creator">
+            <h3>Create an event</h3>
+            <div class="community-event-form">
+              <input type="text" id="community-event-title" placeholder="Event title" maxlength="120">
+              <input type="datetime-local" id="community-event-date">
+              <input type="text" id="community-event-location" placeholder="Location (optional)">
+              <textarea id="community-event-description" placeholder="Describe the event (optional)" rows="2"></textarea>
+              <div id="community-event-error" class="error-banner" style="display:none"></div>
+              <button id="community-event-submit" class="btn btn-primary">Create Event</button>
+            </div>
+          </div>
+        ` : ''}
+        <div id="community-events-loading" class="loading">
+          <div class="spinner"></div>
+          <p class="loading-text">Loading events...</p>
+        </div>
+        <div id="community-events-content" style="display:none"></div>
+        <div id="community-events-empty" class="empty-state" style="display:none">
+          <p class="empty-text">No upcoming events scheduled for this community.</p>
+        </div>
+        <div id="community-events-error" class="error-state" style="display:none">
+          <p class="error-message"></p>
+          <button class="btn btn-secondary" onclick="window.loadCommunityEvents()">Retry</button>
+        </div>
+      </section>
+    `;
+    bindEventCreator();
+    window.loadCommunityEvents();
+  } else if (tab === 'media') {
+    container.innerHTML = `
+      <section class="community-media-section" aria-label="Community media">
+        <p class="community-section-note">Photos shared in community posts appear here.</p>
+        <div id="community-media-loading" class="loading">
+          <div class="spinner"></div>
+          <p class="loading-text">Loading media...</p>
+        </div>
+        <div id="community-media-content" style="display:none"></div>
+        <div id="community-media-empty" class="empty-state" style="display:none">
+          <p class="empty-text">No media yet. Share a photo link in a post to see it here.</p>
+        </div>
+        <div id="community-media-error" class="error-state" style="display:none">
+          <p class="error-message"></p>
+          <button class="btn btn-secondary" onclick="window.loadCommunityMedia()">Retry</button>
+        </div>
+      </section>
+    `;
+    window.loadCommunityMedia();
+  } else if (tab === 'election') {
+    container.innerHTML = `
+      <section class="community-election-section" aria-label="Moderator election">
+        <div id="community-election-loading" class="loading">
+          <div class="spinner"></div>
+          <p class="loading-text">Loading election...</p>
+        </div>
+        <div id="community-election-content" style="display:none"></div>
+        <div id="community-election-empty" class="empty-state" style="display:none">
+          <p class="empty-text">No election information available yet.</p>
+        </div>
+        <div id="community-election-error" class="error-state" style="display:none">
+          <p class="error-message"></p>
+          <button class="btn btn-secondary" onclick="window.loadCommunityElection()">Retry</button>
+        </div>
+      </section>
+    `;
+    window.loadCommunityElection();
   } else if (tab === 'about') {
     container.innerHTML = `
       <section class="community-about" aria-label="About">
@@ -455,10 +661,26 @@ function switchCommunityTab(tab) {
             <li><strong>City:</strong> ${escapeHtml(community.city || '—')}</li>
             <li><strong>Barangay:</strong> ${escapeHtml(community.barangay || '—')}</li>
           </ul>
+          <h3>Community roles</h3>
+          <ul class="community-about-list">
+            <li><strong>Owner:</strong> The first member who founded this community.</li>
+            <li><strong>Moderator:</strong> Elected monthly by active members. Features posts and keeps the feed clean.</li>
+            <li><strong>Member:</strong> Anyone who has joined this community.</li>
+          </ul>
+          ${community.moderator && community.moderator.username ? `
+            <h3>Current Moderator</h3>
+            <p class="community-about-moderator">🛡 <a href="#/profile/${encodeURIComponent(community.moderator.username)}">@${escapeHtml(community.moderator.display_name || community.moderator.username)}</a> · Term ends ${prettyDate(community.moderator.term_end)}</p>
+          ` : ''}
+          <h3>Rules</h3>
+          <div id="about-rules-list"><p class="empty-text">Loading rules...</p></div>
+          <h3>Settings</h3>
+          <div id="about-settings-list"><p class="empty-text">Loading settings...</p></div>
           <p class="community-about-note">Community access is based on the location saved on your profile.</p>
         </div>
       </section>
     `;
+    window.loadAboutRules();
+    window.loadAboutSettings();
   }
 }
 
@@ -526,11 +748,99 @@ function renderCommunityFeedPosts() {
     return;
   }
   const content = document.getElementById('community-feed-content');
+  if (!content) return;
   content.innerHTML = communityFeed.posts.map(renderPostCard).join('');
   showFeedState('posts');
   const more = document.getElementById('community-feed-more');
-  more.style.display = communityFeed.has_more ? 'block' : 'none';
+  if (more) more.style.display = communityFeed.has_more ? 'block' : 'none';
+  document.querySelectorAll('.post-card').forEach(card => {
+    const postId = card.dataset.postId;
+    if (!postId) return;
+    const actions = card.querySelector('.post-actions');
+    if (!actions) return;
+    const reportBtn = document.createElement('button');
+    reportBtn.className = 'btn btn-secondary community-report-btn';
+    reportBtn.dataset.postId = postId;
+    reportBtn.type = 'button';
+    reportBtn.textContent = 'Report';
+    actions.appendChild(reportBtn);
+  });
+  bindReportButtons();
 }
+window.renderCommunityFeedPosts = renderCommunityFeedPosts;
+
+function bindReportButtons() {
+  document.querySelectorAll('.community-report-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const community = communityDetailState && communityDetailState.community;
+      const reason = prompt('Report reason:\n- Spam\n- Harassment\n- Hate/abusive content\n- Sexual content\n- Scam/fraud\n- False/misleading content\n- Other');
+      if (!reason) return;
+      const trimmed = reason.trim();
+      if (!trimmed) return;
+      btn.disabled = true;
+      try {
+        await communityApi.createReport(community.id, {
+          target_type: 'post',
+          target_id: btn.dataset.postId,
+          reason: trimmed,
+          details: '',
+        });
+        showPageMessage('Report submitted');
+      } catch (err) {
+        btn.disabled = false;
+        showPageMessage(err.message || 'Failed to submit report', true);
+      }
+    });
+  });
+}
+
+/**
+ * Featured tab loaders (COMMUNITY-02). Reuse the shared community feed state
+ * and containers so moderators can unfeature from the Featured tab too.
+ */
+window.loadFeaturedCommunityPosts = async function () {
+  const community = communityDetailState && communityDetailState.community;
+  if (!community) return;
+
+  showFeedState('loading');
+
+  try {
+    const data = await communityApi.getPosts(community.id, 20, 0, true);
+    communityFeed = data;
+    setFeedData(data);
+    renderCommunityFeedPosts();
+  } catch (err) {
+    const loading = document.getElementById('community-feed-loading');
+    if (loading) loading.style.display = 'none';
+    const error = document.getElementById('community-feed-error');
+    if (error) {
+      error.querySelector('.error-message').textContent = err.message || 'Failed to load featured posts';
+      error.style.display = 'block';
+    }
+  }
+};
+
+window.loadMoreFeaturedCommunityPosts = async function () {
+  const btn = document.querySelector('#community-feed-more button');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = 'Loading...';
+  try {
+    const community = communityDetailState && communityDetailState.community;
+    const offset = communityFeed.offset + communityFeed.limit;
+    const more = await communityApi.getPosts(community.id, communityFeed.limit, offset, true);
+    communityFeed.posts = [...communityFeed.posts, ...more.posts];
+    communityFeed.offset = offset;
+    communityFeed.has_more = more.has_more;
+    setFeedData(communityFeed);
+    renderCommunityFeedPosts();
+  } catch (err) {
+    console.error('Failed to load more featured posts:', err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Load More';
+  }
+};
 
 function bindCommunityComposer(community) {
   const submit = document.getElementById('community-post-submit');
@@ -648,13 +958,16 @@ function renderMemberRow(member) {
   const avatar = member.profile_photo_url
     ? `<img src="${member.profile_photo_url}" alt="${escapeHtml(displayName)}" class="avatar" style="width:2.5rem;height:2.5rem">`
     : `<div class="avatar" style="width:2.5rem;height:2.5rem">${escapeHtml(displayName.charAt(0).toUpperCase())}</div>`;
+  const roleBadge = member.role
+    ? `<span class="community-role-badge role-${member.role}">${member.role.charAt(0).toUpperCase() + member.role.slice(1)}</span>`
+    : '';
 
   return `
     <li class="community-member-row">
       <a class="community-member-main" href="#/profile/${encodeURIComponent(member.username)}">
         ${avatar}
         <span class="community-member-info">
-          <span class="community-member-name">${escapeHtml(displayName)}</span>
+          <span class="community-member-name">${escapeHtml(displayName)}${roleBadge}</span>
           ${member.real_name ? `<span class="community-member-real">${escapeHtml(member.real_name)}</span>` : ''}
         </span>
       </a>
@@ -715,6 +1028,846 @@ function showPageMessage(message, isError = false) {
   clearTimeout(toast._timeout);
   toast._timeout = setTimeout(() => toast.classList.remove('show'), 2500);
 }
+
+/* ===========================================================================
+ * COMMUNITY-02: Events, Media, and the monthly moderator election.
+ */
+
+let communityElection = null;
+
+window.loadCommunityElection = async function () {
+  const community = communityDetailState && communityDetailState.community;
+  if (!community) return;
+
+  const loading = document.getElementById('community-election-loading');
+  const content = document.getElementById('community-election-content');
+  const empty = document.getElementById('community-election-empty');
+  const error = document.getElementById('community-election-error');
+  if (!loading || !content) return;
+
+  loading.style.display = 'block';
+  content.style.display = 'none';
+  empty.style.display = 'none';
+  error.style.display = 'none';
+
+  try {
+    const data = await communityApi.getElection(community.id);
+    communityElection = (data && data.election) || null;
+
+    if (!communityElection || !communityElection.candidates || communityElection.candidates.length === 0) {
+      if (communityElection) {
+        content.innerHTML = renderElectionCard(communityElection);
+        content.style.display = 'block';
+      } else {
+        empty.style.display = 'block';
+      }
+    } else {
+      content.innerHTML = renderElectionCard(communityElection);
+      content.style.display = 'block';
+    }
+
+    bindElectionActions();
+    loading.style.display = 'none';
+  } catch (err) {
+    loading.style.display = 'none';
+    error.querySelector('.error-message').textContent = err.message || 'Failed to load election';
+    error.style.display = 'block';
+  }
+};
+
+function renderElectionCard(e) {
+  const years = [];
+  for (let i = -2; i <= 2; i++) {
+    const d = new Date();
+    const y = new Date(Date.UTC(d.getUTCFullYear() + i, 0, 1)).getUTCFullYear();
+    if (!years.includes(y)) years.push(y);
+  }
+  const winnerName = (c) => c ? escapeHtml(c.display_name || c.username) : '';
+  const votedFor = e.viewer && e.viewer.voted_for_user_id
+    ? (e.candidates.find(c => c.user_id === e.viewer.voted_for_user_id) || null)
+    : null;
+
+  const scheduleRows = [
+    { label: 'Nominations', value: `${prettyDate(e.nomination_start)} – ${prettyDate(e.nomination_end)}` },
+    { label: 'Voting', value: `${prettyDate(e.voting_start)} – ${prettyDate(e.voting_end)}` },
+    e.runoff ? { label: 'Runoff', value: `Up to ${prettyDate(e.runoff_end)}` } : null,
+    { label: 'Moderator term', value: `${prettyDate(e.term_start)} – ${prettyDate(e.term_end)}` },
+  ].filter(Boolean);
+
+  return `
+    <div class="community-election-card">
+      <header class="community-election-head">
+        <div>
+          <h3>Monthly Moderator Election</h3>
+          <p class="community-election-period">${e.month}/${e.year} · Round ${e.round}</p>
+        </div>
+        <span class="election-phase-badge phase-${escapeHtml(e.status)}">${escapeHtml(e.phase)}</span>
+      </header>
+
+      <div class="election-schedule">
+        ${scheduleRows.map(row => `
+          <div class="election-schedule-row">
+            <span class="election-schedule-label">${row.label}</span>
+            <span class="election-schedule-value">${row.value}</span>
+          </div>
+        `).join('')}
+      </div>
+
+      ${e.moderator && e.moderator.username ? `
+        <div class="election-current-moderator">
+          🛡 Current moderator: <strong>@${escapeHtml(e.moderator.username)}</strong>
+          ${e.moderator.display_name ? `(${escapeHtml(e.moderator.display_name)})` : ''}
+          <span class="election-term">Term ends ${prettyDate(e.moderator.term_end)}</span>
+        </div>
+      ` : ''}
+
+      <h4 class="election-candidates-title">Candidates</h4>
+      ${e.candidates && e.candidates.length > 0 ? `
+        <ul class="election-candidate-list">
+          ${e.candidates.map(c => renderCandidateRow(c, e)).join('')}
+        </ul>
+      ` : '<p class="empty-text">No candidates have entered this election yet.</p>'}
+
+      <div class="election-actions">
+        ${e.viewer && e.viewer.is_candidate ? `
+          <span class="election-status-line">You are a candidate in this election.</span>
+        ` : ''}
+        ${e.viewer && e.viewer.has_voted ? `
+          <span class="election-status-line">✓ You voted${votedFor ? ` for <strong>${winnerName(votedFor)}</strong>` : ''} in round ${e.round}.</span>
+        ` : ''}
+        ${e.viewer && e.viewer.can_vote ? `
+          <span class="election-status-line">Cast your vote below (round ${e.round}).</span>
+        ` : ''}
+        ${e.viewer && e.viewer.can_nominate ? `
+          <button class="btn btn-primary" id="election-nominate-btn" type="button">Run for Moderator</button>
+        ` : ''}
+      </div>
+
+      ${e.winner ? `
+        <div class="election-winner">
+          <span class="election-winner-label">🏆 Winner (${e.month}/${e.year})</span>
+          <strong>${winnerName(e.winner)}</strong>
+          <span class="election-winner-votes">${e.winner.votes} ${e.winner.votes === 1 ? 'vote' : 'votes'}</span>
+        </div>
+      ` : ''}
+    </div>
+
+    ${renderElectionHistoryPlaceholder()}
+  `;
+}
+
+function renderCandidateRow(c, e) {
+  const displayName = c.display_name || c.username || 'Candidate';
+  const avatar = c.profile_photo_url
+    ? `<img src="${c.profile_photo_url}" alt="${escapeHtml(displayName)}" class="avatar" style="width:2.5rem;height:2.5rem">`
+    : `<div class="avatar" style="width:2.5rem;height:2.5rem">${escapeHtml(displayName.charAt(0).toUpperCase())}</div>`;
+
+  const isCandidateViewer = c.is_current_user;
+  const canVote = !!(e.viewer && e.viewer.can_vote);
+
+  return `
+    <li class="election-candidate-row" data-candidate-user-id="${c.user_id}">
+      <a class="election-candidate-main" href="#/profile/${encodeURIComponent(c.username)}">
+        ${avatar}
+        <span class="election-candidate-info">
+          <span class="election-candidate-name">${escapeHtml(displayName)}${isCandidateViewer ? ' <span class="election-self-tag">You</span>' : ''}</span>
+          <span class="election-candidate-user">@${escapeHtml(c.username)}</span>
+        </span>
+      </a>
+      ${typeof c.votes === 'number' ? `
+        <span class="election-candidate-votes">${c.votes} ${c.votes === 1 ? 'vote' : 'votes'}</span>
+      ` : ''}
+      ${canVote ? `
+        <button class="btn btn-primary election-vote-btn" data-candidate-user-id="${c.user_id}" type="button">Vote</button>
+      ` : ''}
+    </li>
+  `;
+}
+
+function renderElectionHistoryPlaceholder() {
+  return `
+    <div class="election-history">
+      <h4>Election History</h4>
+      <div id="community-election-history-loading" class="loading">
+        <div class="spinner"></div>
+        <p class="loading-text">Loading history...</p>
+      </div>
+      <div id="community-election-history" style="display:none"></div>
+      <div id="community-election-history-empty" class="empty-text" style="display:none">No past elections to show yet.</div>
+      <div id="community-election-history-error" class="error-message" style="display:none"></div>
+    </div>
+  `;
+}
+
+window.loadCommunityElectionHistory = async function () {
+  const community = communityDetailState && communityDetailState.community;
+  if (!community) return;
+
+  const loading = document.getElementById('community-election-history-loading');
+  const container = document.getElementById('community-election-history');
+  const empty = document.getElementById('community-election-history-empty');
+  const error = document.getElementById('community-election-history-error');
+  if (!loading || !container) return;
+
+  loading.style.display = 'block';
+  container.style.display = 'none';
+  empty.style.display = 'none';
+  error.style.display = 'none';
+
+  try {
+    const data = await communityApi.getElectionHistory(community.id);
+    const elections = (data && data.elections) || [];
+
+    loading.style.display = 'none';
+
+    if (elections.length === 0) {
+      empty.style.display = 'block';
+      return;
+    }
+
+    container.innerHTML = `
+      <ul class="election-history-list">
+        ${elections.map(e => `
+          <li class="election-history-row">
+            <span class="election-history-period">${e.month}/${e.year}${e.runoff ? ' · runoff' : ''}</span>
+            ${e.winner
+              ? `<span class="election-history-winner">🏆 ${escapeHtml(e.winner.display_name || e.winner.username)} <span class="election-winner-votes">${e.winner.votes}</span></span>`
+              : '<span class="election-history-winner election-history-nv">No winner</span>'}
+          </li>
+        `).join('')}
+      </ul>
+    `;
+    container.style.display = 'block';
+  } catch (err) {
+    loading.style.display = 'none';
+    error.textContent = err.message || 'Failed to load election history';
+    error.style.display = 'block';
+  }
+};
+
+function bindElectionActions() {
+  const nominateBtn = document.getElementById('election-nominate-btn');
+  if (nominateBtn) {
+    nominateBtn.addEventListener('click', async () => {
+      if (!window.confirm('Enter the moderator election for this month?')) return;
+      nominateBtn.disabled = true;
+      nominateBtn.textContent = 'Nominating...';
+      try {
+        await communityApi.nominate(communityDetailState.community.id);
+        await window.loadCommunityElection();
+      } catch (err) {
+        nominateBtn.disabled = false;
+        nominateBtn.textContent = 'Run for Moderator';
+        showPageMessage(err.message || 'Failed to nominate', true);
+      }
+    });
+  }
+
+  document.querySelectorAll('.election-vote-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!window.confirm('Confirm your vote? It cannot be changed this round.')) return;
+      const candidateUserId = btn.dataset.candidateUserId;
+      btn.disabled = true;
+      btn.textContent = 'Voting...';
+      try {
+        await communityApi.vote(communityDetailState.community.id, candidateUserId);
+        await window.loadCommunityElection();
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = 'Vote';
+        showPageMessage(err.message || 'Failed to vote', true);
+      }
+    });
+  });
+
+  window.loadCommunityElectionHistory();
+}
+
+window.communityNominate = async function () {
+  const btn = document.getElementById('election-nominate-btn');
+  if (btn) btn.click();
+};
+
+window.communityVote = async function (candidateUserId) {
+  const btn = document.querySelector(`.election-vote-btn[data-candidate-user-id="${candidateUserId}"]`);
+  if (btn) btn.click();
+};
+
+/**
+ * Events tab
+ */
+window.loadCommunityEvents = async function () {
+  const community = communityDetailState && communityDetailState.community;
+  if (!community) return;
+
+  const loading = document.getElementById('community-events-loading');
+  const content = document.getElementById('community-events-content');
+  const empty = document.getElementById('community-events-empty');
+  const error = document.getElementById('community-events-error');
+  if (!loading || !content) return;
+
+  loading.style.display = 'block';
+  content.style.display = 'none';
+  empty.style.display = 'none';
+  error.style.display = 'none';
+
+  try {
+    const data = await communityApi.getEvents(community.id);
+    const events = (data && data.events) || [];
+
+    loading.style.display = 'none';
+
+    if (events.length === 0) {
+      empty.style.display = 'block';
+      return;
+    }
+
+    content.innerHTML = `
+      <ul class="community-event-list">
+        ${events.map(renderEventCard).join('')}
+      </ul>
+    `;
+    content.style.display = 'block';
+    bindEventDelete();
+  } catch (err) {
+    loading.style.display = 'none';
+    error.querySelector('.error-message').textContent = err.message || 'Failed to load events';
+    error.style.display = 'block';
+  }
+};
+
+function renderEventCard(event) {
+  const displayName = event.display_name || event.username || 'Member';
+  const viewer = getCurrentUser();
+  const isMyEvent = viewer && event.username === viewer.username;
+  const canDelete = isMyEvent || !!(communityDetailState.community && communityDetailState.community.can_moderate);
+
+  return `
+    <li class="community-event-card" data-event-id="${event.id}">
+      <div class="community-event-info">
+        <h4 class="community-event-title">${escapeHtml(event.title)}</h4>
+        <p class="community-event-meta">
+          <span>📅 ${prettyDate(event.event_date)}</span>
+          ${event.location ? `<span>📍 ${escapeHtml(event.location)}</span>` : ''}
+          ${event.username ? `<span>by <a href="#/profile/${encodeURIComponent(event.username)}">@${escapeHtml(event.username)}</a></span>` : ''}
+        </p>
+        ${event.description ? `<p class="community-event-desc">${escapeHtml(event.description)}</p>` : ''}
+      </div>
+      ${canDelete ? `
+        <button class="btn btn-secondary community-event-delete" data-event-id="${event.id}" type="button">Delete</button>
+      ` : ''}
+    </li>
+  `;
+}
+
+function bindEventDelete() {
+  document.querySelectorAll('.community-event-delete').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!window.confirm('Delete this event?')) return;
+      const community = communityDetailState && communityDetailState.community;
+      btn.disabled = true;
+      try {
+        await communityApi.deleteEvent(community.id, btn.dataset.eventId);
+        await window.loadCommunityEvents();
+      } catch (err) {
+        btn.disabled = false;
+        showPageMessage(err.message || 'Failed to delete event', true);
+      }
+    });
+  });
+}
+
+function bindEventCreator() {
+  const submit = document.getElementById('community-event-submit');
+  if (!submit) return;
+
+  submit.addEventListener('click', async () => {
+    const community = communityDetailState && communityDetailState.community;
+    const title = document.getElementById('community-event-title').value.trim();
+    const dateValue = document.getElementById('community-event-date').value;
+    const location = document.getElementById('community-event-location').value.trim();
+    const description = document.getElementById('community-event-description').value.trim();
+    const errorEl = document.getElementById('community-event-error');
+
+    if (!title) {
+      errorEl.textContent = 'Event title is required';
+      errorEl.style.display = 'block';
+      return;
+    }
+    if (!dateValue) {
+      errorEl.textContent = 'A valid event date is required';
+      errorEl.style.display = 'block';
+      return;
+    }
+
+    submit.disabled = true;
+    submit.textContent = 'Creating...';
+    errorEl.style.display = 'none';
+
+    try {
+      await communityApi.createEvent(community.id, {
+        title,
+        event_date: new Date(dateValue).toISOString(),
+        location: location || null,
+        description: description || null,
+      });
+      document.getElementById('community-event-title').value = '';
+      document.getElementById('community-event-date').value = '';
+      document.getElementById('community-event-location').value = '';
+      document.getElementById('community-event-description').value = '';
+      await window.loadCommunityEvents();
+    } catch (err) {
+      errorEl.textContent = err.message || 'Failed to create event';
+      errorEl.style.display = 'block';
+    } finally {
+      submit.disabled = false;
+      submit.textContent = 'Create Event';
+    }
+  });
+}
+
+/**
+ * Media tab
+ */
+window.loadCommunityMedia = async function () {
+  const community = communityDetailState && communityDetailState.community;
+  if (!community) return;
+
+  const loading = document.getElementById('community-media-loading');
+  const content = document.getElementById('community-media-content');
+  const empty = document.getElementById('community-media-empty');
+  const error = document.getElementById('community-media-error');
+  if (!loading || !content) return;
+
+  loading.style.display = 'block';
+  content.style.display = 'none';
+  empty.style.display = 'none';
+  error.style.display = 'none';
+
+  try {
+    const data = await communityApi.getMedia(community.id);
+    const media = (data && data.media) || [];
+
+    loading.style.display = 'none';
+
+    if (media.length === 0) {
+      empty.style.display = 'block';
+      return;
+    }
+
+    content.innerHTML = `
+      <div class="community-media-grid">
+        ${media.map(item => `
+          <figure class="community-media-item">
+            <img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.caption || 'Community photo')}" loading="lazy">
+            <figcaption class="community-media-caption">
+              ${escapeHtml((item.caption || '').slice(0, 120))}
+              ${item.author && item.author.username
+                ? `<a class="community-media-author" href="#/profile/${encodeURIComponent(item.author.username)}">@${escapeHtml(item.author.username)}</a>`
+                : ''}
+            </figcaption>
+          </figure>
+        `).join('')}
+      </div>
+    `;
+    content.style.display = 'block';
+  } catch (err) {
+    loading.style.display = 'none';
+    error.querySelector('.error-message').textContent = err.message || 'Failed to load media';
+    error.style.display = 'block';
+  }
+};
+
+function prettyDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function getCurrentUser() {
+  try {
+    return getCurrentUserProfile() || null;
+  } catch (err) {
+    return null;
+  }
+}
+
+function renderReportButton(postId) {
+  return `<button class="btn btn-secondary community-report-btn" data-post-id="${postId}" type="button">Report</button>`;
+}
+
+window.loadPinnedCommunityPosts = async function () {
+  const community = communityDetailState && communityDetailState.community;
+  if (!community) return;
+  try {
+    const data = await communityApi.getPosts(community.id, 5, 0, false);
+    const pinned = (data && data.posts || []).filter(p => p.is_pinned);
+    const section = document.getElementById('community-pinned-section');
+    const content = document.getElementById('community-pinned-content');
+    if (!section || !content) return;
+    if (pinned.length === 0) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = 'block';
+    content.innerHTML = pinned.map(post => `
+      <article class="post-card community-pinned-post">
+        <header class="post-head">
+          <a class="post-author" href="#/profile/${encodeURIComponent(post.author.username)}">
+            <span class="post-author-name">${escapeHtml(post.author.display_name || post.author.username)}</span>
+            <span class="post-meta">@${escapeHtml(post.author.username)} · ${prettyDate(post.created_at)}</span>
+          </a>
+          <span class="post-pinned-badge">Pinned</span>
+        </header>
+        <p class="post-body">${escapeHtml(post.content)}</p>
+        <div class="post-actions">
+          <span class="post-stat">${post.like_count || 0} likes</span>
+          ${community.can_moderate ? `
+            <button class="btn btn-secondary community-unpin-btn" data-post-id="${post.id}" type="button">Unpin</button>
+          ` : ''}
+        </div>
+      </article>
+    `).join('');
+    bindUnpinButtons();
+  } catch (err) {
+    const section = document.getElementById('community-pinned-section');
+    if (section) section.style.display = 'none';
+  }
+};
+
+function bindUnpinButtons() {
+  document.querySelectorAll('.community-unpin-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const community = communityDetailState && communityDetailState.community;
+      btn.disabled = true;
+      try {
+        await communityApi.unpinPost(community.id, btn.dataset.postId);
+        await window.loadPinnedCommunityPosts();
+        await window.loadCommunityFeedPosts();
+        await loadCommunityDetail(community.id);
+      } catch (err) {
+        btn.disabled = false;
+        showPageMessage(err.message || 'Failed to unpin', true);
+      }
+    });
+  });
+}
+
+window.loadCommunityRules = async function () {
+  const community = communityDetailState && communityDetailState.community;
+  if (!community) return;
+  const loading = document.getElementById('community-rules-loading');
+  const content = document.getElementById('community-rules-content');
+  const empty = document.getElementById('community-rules-empty');
+  const error = document.getElementById('community-rules-error');
+  if (!loading || !content) return;
+  loading.style.display = 'block';
+  content.style.display = 'none';
+  empty.style.display = 'none';
+  error.style.display = 'none';
+  try {
+    const data = await communityApi.getRules(community.id);
+    const rules = (data && data.rules) || [];
+    if (rules.length === 0) {
+      empty.style.display = 'block';
+    } else {
+      content.innerHTML = `
+        <ol class="community-rules-list">
+          ${rules.filter(r => r.enabled).map(rule => `
+            <li class="community-rule-item" data-rule-id="${rule.id}">
+              <div class="community-rule-main">
+                <strong>${escapeHtml(rule.title)}</strong>
+                ${rule.description ? `<p>${escapeHtml(rule.description)}</p>` : ''}
+              </div>
+              ${community.can_moderate ? `
+                <div class="community-rule-actions">
+                  <button class="btn btn-secondary community-rule-edit" data-rule-id="${rule.id}" type="button">Edit</button>
+                  <button class="btn btn-danger community-rule-delete" data-rule-id="${rule.id}" type="button">Delete</button>
+                </div>
+              ` : ''}
+            </li>
+          `).join('')}
+        </ol>
+      `;
+      content.style.display = 'block';
+      bindRuleActions();
+    }
+  } catch (err) {
+    loading.style.display = 'none';
+    error.querySelector('.error-message').textContent = err.message || 'Failed to load rules';
+    error.style.display = 'block';
+  }
+};
+
+function bindRuleCreator() {
+  const addBtn = document.getElementById('rule-add');
+  if (!addBtn) return;
+  addBtn.addEventListener('click', async () => {
+    const community = communityDetailState && communityDetailState.community;
+    const title = (document.getElementById('rule-title').value || '').trim();
+    const description = (document.getElementById('rule-description').value || '').trim();
+    const errorEl = document.getElementById('rule-error');
+    if (!title) {
+      errorEl.textContent = 'Rule title is required';
+      errorEl.style.display = 'block';
+      return;
+    }
+    addBtn.disabled = true;
+    errorEl.style.display = 'none';
+    try {
+      await communityApi.createRule(community.id, { title, description });
+      document.getElementById('rule-title').value = '';
+      document.getElementById('rule-description').value = '';
+      await window.loadCommunityRules();
+    } catch (err) {
+      errorEl.textContent = err.message || 'Failed to create rule';
+      errorEl.style.display = 'block';
+    } finally {
+      addBtn.disabled = false;
+    }
+  });
+}
+
+function bindRuleActions() {
+  document.querySelectorAll('.community-rule-delete').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const community = communityDetailState && communityDetailState.community;
+      if (!window.confirm('Delete this rule?')) return;
+      btn.disabled = true;
+      try {
+        await communityApi.deleteRule(community.id, btn.dataset.ruleId);
+        await window.loadCommunityRules();
+      } catch (err) {
+        btn.disabled = false;
+        showPageMessage(err.message || 'Failed to delete rule', true);
+      }
+    });
+  });
+  document.querySelectorAll('.community-rule-edit').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const community = communityDetailState && communityDetailState.community;
+      const item = document.querySelector(`.community-rule-item[data-rule-id="${btn.dataset.ruleId}"]`);
+      const titleEl = item.querySelector('.community-rule-main strong');
+      const descEl = item.querySelector('.community-rule-main p');
+      const currentTitle = titleEl.textContent || '';
+      const currentDesc = descEl ? descEl.textContent || '' : '';
+      const newTitle = prompt('Rule title:', currentTitle);
+      if (newTitle === null) return;
+      const trimmedTitle = (newTitle || '').trim();
+      if (!trimmedTitle) {
+        showPageMessage('Rule title is required', true);
+        return;
+      }
+      const newDesc = prompt('Rule description:', currentDesc);
+      try {
+        await communityApi.updateRule(community.id, btn.dataset.ruleId, { title: trimmedTitle, description: newDesc || '' });
+        await window.loadCommunityRules();
+      } catch (err) {
+        showPageMessage(err.message || 'Failed to update rule', true);
+      }
+    });
+  });
+}
+
+window.loadCommunityReports = async function (statusFilter) {
+  const community = communityDetailState && communityDetailState.community;
+  if (!community) return;
+  const loading = document.getElementById('community-reports-loading');
+  const content = document.getElementById('community-reports-content');
+  const empty = document.getElementById('community-reports-empty');
+  const error = document.getElementById('community-reports-error');
+  if (!loading || !content) return;
+  loading.style.display = 'block';
+  content.style.display = 'none';
+  empty.style.display = 'none';
+  error.style.display = 'none';
+  try {
+    const data = await communityApi.getReports(community.id, { status: statusFilter });
+    const reports = (data && data.reports) || [];
+    if (reports.length === 0) {
+      empty.style.display = 'block';
+    } else {
+      content.innerHTML = `
+        <ul class="community-reports-list">
+          ${reports.map(report => `
+            <li class="community-report-item" data-report-id="${report.id}">
+              <div class="community-report-main">
+                <strong>${escapeHtml(report.reason)}</strong>
+                <span class="community-report-meta">${report.target_type} · ${escapeHtml(report.target_id)} · ${prettyDate(report.created_at)}</span>
+                ${report.details ? `<p>${escapeHtml(report.details)}</p>` : ''}
+              </div>
+              <span class="community-report-status status-${escapeHtml(report.status)}">${report.status}</span>
+              <div class="community-report-actions">
+                ${report.status === 'open' ? `
+                  <button class="btn btn-primary community-report-resolve" data-report-id="${report.id}" type="button">Resolve</button>
+                  <button class="btn btn-secondary community-report-dismiss" data-report-id="${report.id}" type="button">Dismiss</button>
+                ` : ''}
+              </div>
+            </li>
+          `).join('')}
+        </ul>
+      `;
+      content.style.display = 'block';
+      bindModerationActions();
+    }
+  } catch (err) {
+    loading.style.display = 'none';
+    error.querySelector('.error-message').textContent = err.message || 'Failed to load reports';
+    error.style.display = 'block';
+  }
+};
+
+function bindModerationTabs() {
+  document.querySelectorAll('.community-moderation-tabs .community-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.community-moderation-tabs .community-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      window.loadCommunityReports(tab.dataset.modTab);
+    });
+  });
+}
+
+function bindModerationActions() {
+  document.querySelectorAll('.community-report-resolve').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const community = communityDetailState && communityDetailState.community;
+      btn.disabled = true;
+      try {
+        await communityApi.resolveReport(community.id, btn.dataset.reportId);
+        const item = document.querySelector(`.community-report-item[data-report-id="${btn.dataset.reportId}"]`);
+        const statusEl = item.querySelector('.community-report-status');
+        statusEl.textContent = 'resolved';
+        statusEl.className = 'community-report-status status-resolved';
+        item.querySelector('.community-report-actions').innerHTML = '';
+      } catch (err) {
+        btn.disabled = false;
+        showPageMessage(err.message || 'Failed to resolve', true);
+      }
+    });
+  });
+  document.querySelectorAll('.community-report-dismiss').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const community = communityDetailState && communityDetailState.community;
+      btn.disabled = true;
+      try {
+        await communityApi.dismissReport(community.id, btn.dataset.reportId);
+        const item = document.querySelector(`.community-report-item[data-report-id="${btn.dataset.reportId}"]`);
+        const statusEl = item.querySelector('.community-report-status');
+        statusEl.textContent = 'dismissed';
+        statusEl.className = 'community-report-status status-dismissed';
+        item.querySelector('.community-report-actions').innerHTML = '';
+      } catch (err) {
+        btn.disabled = false;
+        showPageMessage(err.message || 'Failed to dismiss', true);
+      }
+    });
+  });
+}
+
+window.loadCommunitySettings = async function () {
+  const community = communityDetailState && communityDetailState.community;
+  if (!community) return;
+  const loading = document.getElementById('community-settings-loading');
+  const content = document.getElementById('community-settings-content');
+  const error = document.getElementById('community-settings-error');
+  if (!loading || !content) return;
+  loading.style.display = 'block';
+  content.style.display = 'none';
+  error.style.display = 'none';
+  try {
+    const data = await communityApi.getSettings(community.id);
+    const settings = (data && data.settings) || {};
+    content.innerHTML = `
+      <form id="community-settings-form" class="community-settings-form">
+        <label class="editor-toggle" for="setting-allow-member-posts"><span>Allow member posts</span><input id="setting-allow-member-posts" type="checkbox" role="switch" ${settings.allow_member_posts ? 'checked' : ''}></label>
+        <label class="editor-toggle" for="setting-allow-member-comments"><span>Allow member comments</span><input id="setting-allow-member-comments" type="checkbox" role="switch" ${settings.allow_member_comments ? 'checked' : ''}></label>
+        <label class="editor-toggle" for="setting-allow-events"><span>Allow events</span><input id="setting-allow-events" type="checkbox" role="switch" ${settings.allow_events ? 'checked' : ''}></label>
+        <label class="editor-toggle" for="setting-allow-media"><span>Allow media links</span><input id="setting-allow-media" type="checkbox" role="switch" ${settings.allow_media ? 'checked' : ''}></label>
+        <label class="editor-toggle" for="setting-moderation-enabled"><span>Enable moderation/reporting</span><input id="setting-moderation-enabled" type="checkbox" role="switch" ${settings.moderation_enabled ? 'checked' : ''}></label>
+        <div id="settings-error" class="error-banner" style="display:none"></div>
+        <button id="settings-save" class="btn btn-primary">Save Settings</button>
+      </form>
+    `;
+    content.style.display = 'block';
+    document.getElementById('settings-save').addEventListener('click', async () => {
+      const saveBtn = document.getElementById('settings-save');
+      const errorEl = document.getElementById('settings-error');
+      saveBtn.disabled = true;
+      errorEl.style.display = 'none';
+      try {
+        await communityApi.updateSettings(community.id, {
+          allow_member_posts: document.getElementById('setting-allow-member-posts').checked,
+          allow_member_comments: document.getElementById('setting-allow-member-comments').checked,
+          allow_events: document.getElementById('setting-allow-events').checked,
+          allow_media: document.getElementById('setting-allow-media').checked,
+          moderation_enabled: document.getElementById('setting-moderation-enabled').checked,
+        });
+        showPageMessage('Settings saved');
+      } catch (err) {
+        errorEl.textContent = err.message || 'Failed to save settings';
+        errorEl.style.display = 'block';
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+  } catch (err) {
+    loading.style.display = 'none';
+    error.querySelector('.error-message').textContent = err.message || 'Failed to load settings';
+    error.style.display = 'block';
+  }
+};
+
+window.loadAboutRules = async function () {
+  const community = communityDetailState && communityDetailState.community;
+  if (!community) return;
+  const container = document.getElementById('about-rules-list');
+  if (!container) return;
+  try {
+    const data = await communityApi.getRules(community.id);
+    const rules = (data && data.rules) || [];
+    if (rules.length === 0) {
+      container.innerHTML = '<p class="empty-text">No rules yet.</p>';
+      return;
+    }
+    container.innerHTML = `
+      <ol class="community-rules-list">
+        ${rules.filter(r => r.enabled).map(rule => `
+          <li class="community-rule-item">
+            <div class="community-rule-main">
+              <strong>${escapeHtml(rule.title)}</strong>
+              ${rule.description ? `<p>${escapeHtml(rule.description)}</p>` : ''}
+            </div>
+          </li>
+        `).join('')}
+      </ol>
+    `;
+  } catch (err) {
+    container.innerHTML = '<p class="empty-text">Failed to load rules.</p>';
+  }
+};
+
+window.loadAboutSettings = async function () {
+  const community = communityDetailState && communityDetailState.community;
+  if (!community) return;
+  const container = document.getElementById('about-settings-list');
+  if (!container) return;
+  try {
+    const data = await communityApi.getSettings(community.id);
+    const settings = (data && data.settings) || {};
+    container.innerHTML = `
+      <ul class="community-about-list">
+        <li><strong>Member posts:</strong> ${settings.allow_member_posts ? 'Allowed' : 'Disabled'}</li>
+        <li><strong>Member comments:</strong> ${settings.allow_member_comments ? 'Allowed' : 'Disabled'}</li>
+        <li><strong>Events:</strong> ${settings.allow_events ? 'Allowed' : 'Disabled'}</li>
+        <li><strong>Media:</strong> ${settings.allow_media ? 'Allowed' : 'Disabled'}</li>
+        <li><strong>Moderation:</strong> ${settings.moderation_enabled ? 'Enabled' : 'Disabled'}</li>
+      </ul>
+    `;
+  } catch (err) {
+    container.innerHTML = '<p class="empty-text">Failed to load settings.</p>';
+  }
+};
 
 /**
  * Init the community detail page.

@@ -571,7 +571,138 @@ export const communityApi = {
     return apiRequest(`/communities/${communityId}/members?limit=${limit}&offset=${offset}`);
   },
 
-  async getPosts(communityId, limit = 20, offset = 0) {
-    return apiRequest(`/communities/${communityId}/posts?limit=${limit}&offset=${offset}`);
+  async getPosts(communityId, limit = 20, offset = 0, featured = false) {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (featured) params.set('featured', 'true');
+    return apiRequest(`/communities/${communityId}/posts?${params.toString()}`);
+  },
+
+  async getMedia(communityId) {
+    return apiRequest(`/communities/${communityId}/media`);
+  },
+
+  async getEvents(communityId) {
+    return apiRequest(`/communities/${communityId}/events`);
+  },
+
+  async createEvent(communityId, eventData) {
+    return apiRequest(`/communities/${communityId}/events`, {
+      method: 'POST',
+      body: eventData,
+    });
+  },
+
+  async deleteEvent(communityId, eventId) {
+    return apiRequest(`/communities/${communityId}/events/${eventId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async getElection(communityId) {
+    return apiRequest(`/communities/${communityId}/election`);
+  },
+
+  async getElectionHistory(communityId) {
+    return apiRequest(`/communities/${communityId}/election/history`);
+  },
+
+  async nominate(communityId) {
+    return apiRequest(`/communities/${communityId}/election/nominate`, {
+      method: 'POST',
+    });
+  },
+
+  async vote(communityId, candidateUserId) {
+    return apiRequest(`/communities/${communityId}/election/vote`, {
+      method: 'POST',
+      body: { candidate_user_id: candidateUserId },
+    });
+  },
+
+  async featurePost(communityId, postId) {
+    return apiRequest(`/communities/${communityId}/posts/${postId}/feature`, {
+      method: 'POST',
+    });
+  },
+
+  async unfeaturePost(communityId, postId) {
+    return apiRequest(`/communities/${communityId}/posts/${postId}/feature`, {
+      method: 'DELETE',
+    });
+  },
+
+  async getRules(communityId) {
+    return apiRequest(`/communities/${communityId}/rules`);
+  },
+
+  async createRule(communityId, data) {
+    return apiRequest(`/communities/${communityId}/rules`, {
+      method: 'POST',
+      body: data,
+    });
+  },
+
+  async updateRule(communityId, ruleId, data) {
+    return apiRequest(`/communities/${communityId}/rules/${ruleId}`, {
+      method: 'PUT',
+      body: data,
+    });
+  },
+
+  async deleteRule(communityId, ruleId) {
+    return apiRequest(`/communities/${communityId}/rules/${ruleId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async pinPost(communityId, postId) {
+    return apiRequest(`/communities/${communityId}/posts/${postId}/pin`, {
+      method: 'POST',
+    });
+  },
+
+  async unpinPost(communityId, postId) {
+    return apiRequest(`/communities/${communityId}/posts/${postId}/unpin`, {
+      method: 'POST',
+    });
+  },
+
+  async createReport(communityId, data) {
+    return apiRequest(`/communities/${communityId}/reports`, {
+      method: 'POST',
+      body: data,
+    });
+  },
+
+  async getReports(communityId, filters = {}) {
+    const params = new URLSearchParams();
+    if (filters.status) params.set('status', filters.status);
+    if (filters.limit) params.set('limit', String(filters.limit));
+    if (filters.offset) params.set('offset', String(filters.offset));
+    const qs = params.toString();
+    return apiRequest(`/communities/${communityId}/reports${qs ? '?' + qs : ''}`);
+  },
+
+  async resolveReport(communityId, reportId) {
+    return apiRequest(`/communities/${communityId}/reports/${reportId}/resolve`, {
+      method: 'POST',
+    });
+  },
+
+  async dismissReport(communityId, reportId) {
+    return apiRequest(`/communities/${communityId}/reports/${reportId}/dismiss`, {
+      method: 'POST',
+    });
+  },
+
+  async getSettings(communityId) {
+    return apiRequest(`/communities/${communityId}/settings`);
+  },
+
+  async updateSettings(communityId, data) {
+    return apiRequest(`/communities/${communityId}/settings`, {
+      method: 'PUT',
+      body: data,
+    });
   },
 };

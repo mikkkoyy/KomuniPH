@@ -34,6 +34,28 @@ import {
   handleGetCommunityMembers,
   handleGetCommunityPosts,
   handleGetProfileCommunities,
+  handleGetElection,
+  handleNominateCommunity,
+  handleVoteCommunity,
+  handleGetElectionHistory,
+  handleFeaturePost,
+  handleUnfeaturePost,
+  handleGetCommunityEvents,
+  handleCreateCommunityEvent,
+  handleDeleteCommunityEvent,
+  handleGetCommunityMedia,
+  handleGetCommunityRules,
+  handleCreateCommunityRule,
+  handleUpdateCommunityRule,
+  handleDeleteCommunityRule,
+  handlePinPost,
+  handleUnpinPost,
+  handleCreateReport,
+  handleGetReports,
+  handleResolveReport,
+  handleDismissReport,
+  handleGetCommunitySettings,
+  handleUpdateCommunitySettings,
   initCommunities,
 } from './communities.js';
 import {
@@ -440,6 +462,147 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
     const user = requireAuth(req, res);
     if (!user) return;
     return handleGetCommunityPosts(req, res, user, communityPostsMatch);
+  }
+
+  const communityMediaMatch = matchRoute('/api/communities/:id/media', path);
+  if (method === 'GET' && communityMediaMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleGetCommunityMedia(req, res, user, communityMediaMatch);
+  }
+
+  // Community events
+  const communityEventsMatch = matchRoute('/api/communities/:id/events', path);
+  if (method === 'GET' && communityEventsMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleGetCommunityEvents(req, res, user, communityEventsMatch);
+  }
+  if (method === 'POST' && communityEventsMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleCreateCommunityEvent(req, res, user, communityEventsMatch);
+  }
+  const communityEventDeleteMatch = matchRoute('/api/communities/:id/events/:eventId', path);
+  if (method === 'DELETE' && communityEventDeleteMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleDeleteCommunityEvent(req, res, user, communityEventDeleteMatch);
+  }
+
+  // Monthly moderator election
+  const electionHistoryMatch = matchRoute('/api/communities/:id/election/history', path);
+  if (method === 'GET' && electionHistoryMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleGetElectionHistory(req, res, user, electionHistoryMatch);
+  }
+  const electionMatch = matchRoute('/api/communities/:id/election', path);
+  if (method === 'GET' && electionMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleGetElection(req, res, user, electionMatch);
+  }
+  const electionNominateMatch = matchRoute('/api/communities/:id/election/nominate', path);
+  if (method === 'POST' && electionNominateMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleNominateCommunity(req, res, user, electionNominateMatch);
+  }
+  const electionVoteMatch = matchRoute('/api/communities/:id/election/vote', path);
+  if (method === 'POST' && electionVoteMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleVoteCommunity(req, res, user, electionVoteMatch);
+  }
+
+  // Featured posts moderation
+  const featureMatch = matchRoute('/api/communities/:id/posts/:postId/feature', path);
+  if (method === 'POST' && featureMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleFeaturePost(req, res, user, featureMatch);
+  }
+  if (method === 'DELETE' && featureMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleUnfeaturePost(req, res, user, featureMatch);
+  }
+
+  // Community rules
+  const rulesMatch = matchRoute('/api/communities/:id/rules', path);
+  if (method === 'GET' && rulesMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleGetCommunityRules(req, res, user, rulesMatch);
+  }
+  if (method === 'POST' && rulesMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleCreateCommunityRule(req, res, user, rulesMatch);
+  }
+  const ruleMatch = matchRoute('/api/communities/:id/rules/:ruleId', path);
+  if (method === 'PUT' && ruleMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleUpdateCommunityRule(req, res, user, ruleMatch);
+  }
+  if (method === 'DELETE' && ruleMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleDeleteCommunityRule(req, res, user, ruleMatch);
+  }
+
+  // Pinned posts
+  const pinMatch = matchRoute('/api/communities/:id/posts/:postId/pin', path);
+  if (method === 'POST' && pinMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handlePinPost(req, res, user, pinMatch);
+  }
+  const unpinMatch = matchRoute('/api/communities/:id/posts/:postId/unpin', path);
+  if (method === 'POST' && unpinMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleUnpinPost(req, res, user, unpinMatch);
+  }
+
+  // Reports
+  const reportsMatch = matchRoute('/api/communities/:id/reports', path);
+  if (method === 'GET' && reportsMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleGetReports(req, res, user, reportsMatch);
+  }
+  if (method === 'POST' && reportsMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleCreateReport(req, res, user, reportsMatch);
+  }
+  const reportResolveMatch = matchRoute('/api/communities/:id/reports/:reportId/resolve', path);
+  if (method === 'POST' && reportResolveMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleResolveReport(req, res, user, reportResolveMatch);
+  }
+  const reportDismissMatch = matchRoute('/api/communities/:id/reports/:reportId/dismiss', path);
+  if (method === 'POST' && reportDismissMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleDismissReport(req, res, user, reportDismissMatch);
+  }
+
+  // Settings
+  const settingsMatch = matchRoute('/api/communities/:id/settings', path);
+  if (method === 'GET' && settingsMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleGetCommunitySettings(req, res, user, settingsMatch);
+  }
+  if (method === 'PUT' && settingsMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleUpdateCommunitySettings(req, res, user, settingsMatch);
   }
 
   // 404 for unknown API routes

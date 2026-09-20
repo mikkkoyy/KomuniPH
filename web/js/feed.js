@@ -3,7 +3,7 @@
  * Posts, comments, and reactions
  */
 
-import { feedApi, authApi, profileApi, isAuthenticated, getCurrentUserProfile } from './api.js';
+import { feedApi, authApi, profileApi, communityApi, isAuthenticated, getCurrentUserProfile } from './api.js';
 import { navigate } from './app.js';
 import { refreshUnreadCount } from './messages.js';
 
@@ -277,6 +277,7 @@ export function renderHomePage() {
 export function renderPostCard(post) {
   const authorName = post.author.display_name || post.author.username;
   const authorAlias = post.author.alias_enabled && post.author.alias ? post.author.alias : null;
+  const canModerate = !!post.can_moderate && !!post.community_id;
 
   return `
     <article class="post-card" data-post-id="${post.id}">
@@ -287,6 +288,7 @@ export function renderPostCard(post) {
           ${authorAlias ? `<p class="post-author-alias">@${authorAlias}</p>` : ''}
           <p class="post-timestamp">${formatTimestamp(post.created_at)}</p>
         </div>
+        ${post.is_featured ? '<span class="post-featured-badge">⭐ Featured</span>' : ''}
       </header>
 
       <div id="post-content-${post.id}" class="post-content">${escapeHtml(post.content)}</div>
@@ -307,6 +309,12 @@ export function renderPostCard(post) {
         <button class="btn-icon" onclick="window.toggleComments('${post.id}')">
           💬 ${post.comment_count} ${post.comment_count === 1 ? 'comment' : 'comments'}
         </button>
+        ${canModerate ? `
+          <button class="btn-icon" onclick="window.toggleFeaturePost('${post.id}')">${post.is_featured ? 'Unfeature' : 'Feature'}</button>
+        ` : ''}
+        ${post.is_current_user_author || canModerate ? `
+          <button class="btn-icon post-delete-btn" onclick="window.deletePost('${post.id}')">Delete</button>
+        ` : ''}
       </footer>
 
       <div id="comments-${post.id}" style="display:none"></div>
@@ -394,6 +402,62 @@ function updateLoadMoreButton() {
   const loadMore = document.getElementById('load-more');
   loadMore.style.display = feedData.has_more ? 'block' : 'none';
 }
+
+/**
+ * Re-render whichever feed is currently shown after a post is mutated.
+ */
+function reRenderFeed() {
+  const communityContent = document.getElementById('community-feed-content');
+  if (communityContent) {
+    if (typeof window.renderCommunityFeedPosts === 'function') {
+      window.renderCommunityFeedPosts();
+    } else {
+      communityContent.innerHTML = feedData.posts.map(renderPostCard).join('');
+    }
+    return;
+  }
+  const content = document.getElementById('feed-content');
+  if (content) {
+    const empty = document.getElementById('feed-empty');
+    content.innerHTML = feedData.posts.map(renderPostCard).join('');
+    content.style.display = feedData.posts.length === 0 ? 'none' : 'block';
+    if (empty) empty.style.display = feedData.posts.length === 0 ? 'block' : 'none';
+  }
+}
+
+/**
+ * Delete a post (author, or owner/moderator of the post's community).
+ */
+window.deletePost = async function(postId) {
+  if (!window.confirm('Delete this post?')) return;
+  try {
+    await feedApi.deletePost(postId);
+    feedData.posts = feedData.posts.filter(p => p.id !== postId);
+    reRenderFeed();
+  } catch (err) {
+    showToast(err.message || 'Failed to delete post');
+  }
+};
+
+/**
+ * COMMUNITY-02: Feature/unfeature a community post (owner/moderator only).
+ */
+window.toggleFeaturePost = async function(postId) {
+  const post = feedData.posts.find(p => p.id === postId);
+  if (!post || !post.community_id) return;
+  const next = !post.is_featured;
+  try {
+    if (next) {
+      await communityApi.featurePost(post.community_id, postId);
+    } else {
+      await communityApi.unfeaturePost(post.community_id, postId);
+    }
+    post.is_featured = next;
+    reRenderFeed();
+  } catch (err) {
+    showToast(err.message || 'Failed to update featured status');
+  }
+};
 
 /**
  * Toggle like on a post

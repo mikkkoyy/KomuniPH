@@ -107,6 +107,8 @@ export function initDatabase() {
       id TEXT PRIMARY KEY,
       author_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       content TEXT NOT NULL,
+      community_id TEXT REFERENCES communities(id) ON DELETE SET NULL,
+      is_featured INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       edited_at TEXT
@@ -275,16 +277,108 @@ export function initDatabase() {
 
     -- COMMUNITY-01: Community memberships.
     -- community_id + user_id is unique so duplicate memberships are impossible.
+    -- COMMUNITY-02: role tracks owner/moderator/member for the group features
+    -- and monthly moderator election. The earliest member of a community is
+    -- assigned owner during init.
     CREATE TABLE IF NOT EXISTS community_members (
       id TEXT PRIMARY KEY,
       community_id TEXT NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       joined_at TEXT NOT NULL DEFAULT (datetime('now')),
+      role TEXT NOT NULL DEFAULT 'member',
       UNIQUE(community_id, user_id)
     );
 
     CREATE INDEX IF NOT EXISTS idx_community_members_community_id ON community_members(community_id);
     CREATE INDEX IF NOT EXISTS idx_community_members_user_id ON community_members(user_id);
+
+    -- COMMUNITY-02: Monthly moderator elections. One election per community
+    -- per month. Phase dates are generated in UTC from the schedule template:
+    --   nominations 1st-5th, voting 6th-25th, result 26th, term 26th ->
+    --   25th of the following month. A runoff among tied front-runners, when
+    --   needed, runs from the 26th to the 26th of the following month.
+    CREATE TABLE IF NOT EXISTS community_elections (
+      id TEXT PRIMARY KEY,
+      community_id TEXT NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
+      year INTEGER NOT NULL,
+      month INTEGER NOT NULL,
+      nomination_start TEXT NOT NULL,
+      nomination_end TEXT NOT NULL,
+      voting_start TEXT NOT NULL,
+      voting_end TEXT NOT NULL,
+      runoff_end TEXT,
+      term_start TEXT,
+      term_end TEXT,
+      winner_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(community_id, year, month)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_community_elections_community ON community_elections(community_id);
+    CREATE INDEX IF NOT EXISTS idx_community_elections_winner ON community_elections(winner_id);
+
+    -- COMMUNITY-02: Election candidates. Self-nomination during the
+    -- nomination phase; a user can appear at most once per election.
+    CREATE TABLE IF NOT EXISTS community_election_candidates (
+      id TEXT PRIMARY KEY,
+      election_id TEXT NOT NULL REFERENCES community_elections(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      nominated_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(election_id, user_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_community_election_candidates_election ON community_election_candidates(election_id);
+
+    -- COMMUNITY-02: Election votes. UNIQUE(election_id, voter_user_id, round)
+    -- enforces one vote per voter per round. Round 1 is the initial vote;
+    -- round 2 is the runoff among tied front-runners (never resolved
+    -- randomly). Voter identity is never exposed in the API.
+    CREATE TABLE IF NOT EXISTS community_election_votes (
+      id TEXT PRIMARY KEY,
+      election_id TEXT NOT NULL REFERENCES community_elections(id) ON DELETE CASCADE,
+      candidate_id TEXT NOT NULL REFERENCES community_election_candidates(id) ON DELETE CASCADE,
+      voter_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      round INTEGER NOT NULL DEFAULT 1 CHECK (round IN (1, 2)),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(election_id, voter_user_id, round)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_community_election_votes_election ON community_election_votes(election_id);
+    CREATE INDEX IF NOT EXISTS idx_community_election_votes_candidate ON community_election_votes(candidate_id);
+
+    -- COMMUNITY-02: Moderator terms. One row per winner-term; the winner's
+    -- membership role is set to 'moderator' for the duration of the term.
+    CREATE TABLE IF NOT EXISTS moderator_terms (
+      id TEXT PRIMARY KEY,
+      community_id TEXT NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role TEXT NOT NULL DEFAULT 'moderator',
+      term_start TEXT NOT NULL,
+      term_end TEXT NOT NULL,
+      election_id TEXT REFERENCES community_elections(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(community_id, user_id, term_start)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_moderator_terms_community ON moderator_terms(community_id);
+    CREATE INDEX IF NOT EXISTS idx_moderator_terms_user ON moderator_terms(user_id);
+
+    -- COMMUNITY-02: Community events (Events section on the community page).
+    CREATE TABLE IF NOT EXISTS community_events (
+      id TEXT PRIMARY KEY,
+      community_id TEXT NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      description TEXT,
+      location TEXT,
+      event_date TEXT NOT NULL,
+      created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_community_events_community ON community_events(community_id);
+    CREATE INDEX IF NOT EXISTS idx_community_events_date ON community_events(community_id, event_date);
   `);
 
   // MESSAGE-02: Add last_read_at column to existing conversation_participants tables.
@@ -308,6 +402,139 @@ export function initDatabase() {
     database.exec('CREATE INDEX IF NOT EXISTS idx_posts_community_id ON posts(community_id)');
   } catch (err) {
     // Index already exists — safe no-op.
+  }
+
+  // COMMUNITY-02: Add role column to existing community_members tables.
+  try {
+    database.exec("ALTER TABLE community_members ADD COLUMN role TEXT NOT NULL DEFAULT 'member'");
+  } catch (err) {
+    // Column already exists or table does not exist yet — both are safe no-ops.
+  }
+
+  // COMMUNITY-02: Add is_featured column to existing posts tables.
+  try {
+    const postColumns = database.prepare('PRAGMA table_info(posts)').all();
+    if (!postColumns.some(column => column.name === 'is_featured')) {
+      database.exec('ALTER TABLE posts ADD COLUMN is_featured INTEGER NOT NULL DEFAULT 0');
+    }
+  } catch (err) {
+    // Column already exists or table does not exist yet — both are safe no-ops.
+  }
+  try {
+    database.exec('CREATE INDEX IF NOT EXISTS idx_posts_community_id_featured ON posts(community_id, is_featured)');
+  } catch (err) {
+    // Index already exists — safe no-op.
+  }
+
+  // COMMUNITY-03: Add is_pinned column to posts for pinned announcements.
+  try {
+    const postColumns = database.prepare('PRAGMA table_info(posts)').all();
+    if (!postColumns.some(column => column.name === 'is_pinned')) {
+      database.exec('ALTER TABLE posts ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0');
+    }
+  } catch (err) {
+    // Column already exists or table does not exist yet — both are safe no-ops.
+  }
+  try {
+    database.exec('CREATE INDEX IF NOT EXISTS idx_posts_community_id_pinned ON posts(community_id, is_pinned, created_at DESC)');
+  } catch (err) {
+    // Index already exists — safe no-op.
+  }
+
+  // COMMUNITY-03: Community rules table.
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS community_rules (
+        id TEXT PRIMARY KEY,
+        community_id TEXT NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        description TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+        created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+  } catch (err) { /* safe no-op */ }
+  try {
+    database.exec('CREATE INDEX IF NOT EXISTS idx_community_rules_community ON community_rules(community_id)');
+  } catch (err) { /* safe no-op */ }
+
+  // COMMUNITY-03: Community settings table.
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS community_settings (
+        id TEXT PRIMARY KEY,
+        community_id TEXT NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
+        allow_member_posts INTEGER NOT NULL DEFAULT 1 CHECK (allow_member_posts IN (0, 1)),
+        allow_member_comments INTEGER NOT NULL DEFAULT 1 CHECK (allow_member_comments IN (0, 1)),
+        allow_events INTEGER NOT NULL DEFAULT 1 CHECK (allow_events IN (0, 1)),
+        allow_media INTEGER NOT NULL DEFAULT 1 CHECK (allow_media IN (0, 1)),
+        moderation_enabled INTEGER NOT NULL DEFAULT 1 CHECK (moderation_enabled IN (0, 1)),
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+  } catch (err) { /* safe no-op */ }
+  try {
+    database.exec('CREATE INDEX IF NOT EXISTS idx_community_settings_community ON community_settings(community_id)');
+  } catch (err) { /* safe no-op */ }
+
+  // COMMUNITY-03: Community reports table.
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS community_reports (
+        id TEXT PRIMARY KEY,
+        community_id TEXT NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
+        reporter_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        target_type TEXT NOT NULL CHECK (target_type IN ('post', 'comment')),
+        target_id TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        details TEXT,
+        status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved', 'dismissed')),
+        resolved_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+        resolved_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(community_id, reporter_user_id, target_type, target_id)
+      )
+    `);
+  } catch (err) { /* safe no-op */ }
+  try {
+    database.exec('CREATE INDEX IF NOT EXISTS idx_community_reports_community ON community_reports(community_id, status)');
+  } catch (err) { /* safe no-op */ }
+  try {
+    database.exec('CREATE INDEX IF NOT EXISTS idx_community_reports_target ON community_reports(target_type, target_id)');
+  } catch (err) { /* safe no-op */ }
+
+  // COMMUNITY-02: Assign the earliest member of each community as its owner if
+  // no owner exists yet (owner = the founding member). Idempotent; safe on
+  // every startup.
+  try {
+    const ownerless = database.prepare(
+      `SELECT community_id FROM community_members cm
+        WHERE NOT EXISTS (
+          SELECT 1 FROM community_members o
+          WHERE o.community_id = cm.community_id AND o.role = 'owner'
+        )
+        GROUP BY community_id`
+    ).all();
+    for (const row of ownerless) {
+      const earliest = database.prepare(
+        `SELECT user_id FROM community_members
+          WHERE community_id = ? ORDER BY joined_at ASC, id ASC LIMIT 1`
+      ).get(row.community_id);
+      if (earliest) {
+        database.prepare(
+          "UPDATE community_members SET role = 'owner' WHERE community_id = ? AND user_id = ?"
+        ).run(row.community_id, earliest.user_id);
+      }
+    }
+    if (ownerless.length > 0) {
+      console.log(`[COMMUNITY-02] Assigned owner to ${ownerless.length} community(ies)`);
+    }
+  } catch (err) {
+    console.log('[COMMUNITY-02] Owner backfill skipped:', err.message);
   }
 
   // PROFILE-02: Add theme_id column to existing profiles tables.

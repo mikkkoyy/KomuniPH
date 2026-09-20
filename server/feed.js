@@ -5,7 +5,7 @@
 
 import { queryOne, queryAll, execute, transaction } from './database.js';
 import { generateId, now, jsonResponse, errorResponse, parseBody, parseQuery } from './utils.js';
-import { isEligible } from './communities.js';
+import { isEligible, isCommunityModerator } from './communities.js';
 
 /**
  * Handle GET /api/feed
@@ -24,6 +24,9 @@ SELECT
           p.created_at,
           p.updated_at,
           p.edited_at,
+          p.community_id,
+          p.is_featured,
+          c.name as community_name,
           u.username,
           pr.display_name,
           pr.bio,
@@ -36,6 +39,7 @@ SELECT
         FROM posts p
           JOIN users u ON p.author_id = u.id
           LEFT JOIN profiles pr ON p.author_id = pr.user_id
+          LEFT JOIN communities c ON p.community_id = c.id
         ORDER BY p.created_at DESC
         LIMIT ? OFFSET ?
     `, [user.sub, user.sub, limit, offset]);
@@ -61,6 +65,10 @@ const transformedPosts = posts.map(post => ({
       comment_count: post.comment_count,
       is_current_user_author: Boolean(post.is_current_user_author),
       edited_at: post.edited_at,
+      community_id: post.community_id,
+      community_name: post.community_name,
+      is_featured: Boolean(post.is_featured),
+      can_moderate: post.community_id ? isCommunityModerator(post.community_id, user.sub) : false,
     }));
 
     jsonResponse(res, 200, {
@@ -165,6 +173,9 @@ export async function handleCreatePost(req, res, user) {
       comment_count: 0,
       is_current_user_author: true,
       edited_at: post.edited_at,
+      community_id: communityId,
+      is_featured: false,
+      can_moderate: communityId ? isCommunityModerator(communityId, user.sub) : false,
     });
   } catch (err) {
     console.error('[FEED] Create post error:', err);
@@ -212,6 +223,8 @@ export async function handleUpdatePost(req, res, user, params) {
         p.created_at,
         p.updated_at,
         p.edited_at,
+        p.community_id,
+        p.is_featured,
         u.username,
         pr.display_name,
         pr.alias,
@@ -247,6 +260,8 @@ export async function handleUpdatePost(req, res, user, params) {
       comment_count: updatedPost.comment_count,
       is_current_user_author: true,
       edited_at: updatedPost.edited_at,
+      is_featured: Boolean(updatedPost.is_featured),
+      can_moderate: updatedPost.community_id ? isCommunityModerator(updatedPost.community_id, user.sub) : false,
     });
   } catch (err) {
     console.error('[FEED] Update post error:', err);
@@ -256,7 +271,7 @@ export async function handleUpdatePost(req, res, user, params) {
 
 /**
  * Handle DELETE /api/feed/posts/:id
- * Deletes a post (owner only)
+ * Deletes a post (author, or the owner/moderator of the post's community).
  */
 export function handleDeletePost(req, res, user, params) {
   try {
@@ -265,7 +280,9 @@ export function handleDeletePost(req, res, user, params) {
       return errorResponse(res, 404, 'Post not found');
     }
 
-    if (post.author_id !== user.sub) {
+    const isAuthor = post.author_id === user.sub;
+    const isModerator = post.community_id && isCommunityModerator(post.community_id, user.sub);
+    if (!isAuthor && !isModerator) {
       return errorResponse(res, 403, 'Not authorized to delete this post');
     }
 
@@ -491,7 +508,7 @@ export async function handleCreateComment(req, res, user, params) {
 
 /**
  * Handle DELETE /api/feed/comments/:id
- * Deletes a comment (owner only)
+ * Deletes a comment (author, or the owner/moderator of the post's community).
  */
 export function handleDeleteComment(req, res, user, params) {
   try {
@@ -500,7 +517,10 @@ export function handleDeleteComment(req, res, user, params) {
       return errorResponse(res, 404, 'Comment not found');
     }
 
-    if (comment.author_id !== user.sub) {
+    const post = queryOne('SELECT id, community_id FROM posts WHERE id = ?', [comment.post_id]);
+    const isAuthor = comment.author_id === user.sub;
+    const isModerator = post && post.community_id && isCommunityModerator(post.community_id, user.sub);
+    if (!isAuthor && !isModerator) {
       return errorResponse(res, 403, 'Not authorized to delete this comment');
     }
 

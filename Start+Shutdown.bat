@@ -251,6 +251,9 @@ if not errorlevel 1 (
     echo.
     echo KomuniPH launched automatically.
     echo.
+    echo [ACTION] Opening http://localhost:3000 in your default browser...
+    start "" "http://localhost:3000"
+    echo.
     goto RUNNING
 )
 

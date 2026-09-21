@@ -4094,6 +4094,32 @@ select:focus {
   margin-bottom: 1.25rem;
 }
 
+/* COMMUNITY-05: composer textbox visibility. The shared .composer textarea is
+   white-on-white inside the light composer card, so the type area disappears.
+   The community composer uses the same dark/translucent control language as
+   the tag/location/feeling panels: contrasting interior, 1px boundary, soft
+   shadow, rounded corners, and a clear non-white focus state. */
+.community-composer textarea {
+  background: rgba(15, 21, 31, 0.85);
+  border: 1px solid rgba(15, 23, 42, 0.35);
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.22);
+  color: var(--text-primary, #e8edf4);
+  caret-color: rgba(74, 144, 217, 0.9);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.community-composer textarea::placeholder {
+  color: rgba(232, 237, 244, 0.5);
+}
+
+.community-composer textarea:focus {
+  outline: none;
+  border-color: rgba(74, 144, 217, 0.7);
+  box-shadow: 0 0 0 3px rgba(74, 144, 217, 0.18), 0 1px 3px rgba(0, 0, 0, 0.22);
+}
+
+
 .community-composer-actions {
   display: flex;
   align-items: center;

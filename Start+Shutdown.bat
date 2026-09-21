@@ -229,7 +229,7 @@ REM ==========================================================
 echo.
 echo [CHECK] Waiting for KomuniPH to become responsive...
 
-set "MAX_WAIT=15"
+set "MAX_WAIT=60"
 set "WAITED=0"
 
 :WAIT_LOOP

@@ -65,6 +65,24 @@ export function initDatabase() {
       if (!cols.includes('media_type')) {
         database.exec("ALTER TABLE posts ADD COLUMN media_type TEXT CHECK (media_type IN ('image','video'))");
       }
+      // COMMUNITY-05: composer extras — feeling/activity, optional location
+      // (reuses the existing Country -> City -> Barangay model), and mentions
+      // stored in the post_mentions table.
+      if (!cols.includes('feeling_type')) {
+        database.exec("ALTER TABLE posts ADD COLUMN feeling_type TEXT CHECK (feeling_type IN ('feeling','watching','listening','playing','celebrating','traveling'))");
+      }
+      if (!cols.includes('feeling_value')) {
+        database.exec('ALTER TABLE posts ADD COLUMN feeling_value TEXT');
+      }
+      if (!cols.includes('location_country')) {
+        database.exec('ALTER TABLE posts ADD COLUMN location_country TEXT');
+      }
+      if (!cols.includes('location_city')) {
+        database.exec('ALTER TABLE posts ADD COLUMN location_city TEXT');
+      }
+      if (!cols.includes('location_barangay')) {
+        database.exec('ALTER TABLE posts ADD COLUMN location_barangay TEXT');
+      }
     }
   } catch (err) {
     // Columns already exist — safe no-op.
@@ -128,9 +146,26 @@ export function initDatabase() {
       content TEXT NOT NULL,
       community_id TEXT REFERENCES communities(id) ON DELETE SET NULL,
       is_featured INTEGER NOT NULL DEFAULT 0,
+      media_url TEXT,
+      media_type TEXT CHECK (media_type IN ('image','video')),
+      feeling_type TEXT CHECK (feeling_type IN ('feeling','watching','listening','playing','celebrating','traveling')),
+      feeling_value TEXT,
+      location_country TEXT,
+      location_city TEXT,
+      location_barangay TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       edited_at TEXT
+    );
+
+    -- COMMUNITY-05: post mentions. Tags reference real KomuniPH users only;
+    -- resolved server-side from @username tokens in the post content.
+    CREATE TABLE IF NOT EXISTS post_mentions (
+      id TEXT PRIMARY KEY,
+      post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      username TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     -- Comments table

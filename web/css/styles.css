@@ -5149,3 +5149,64 @@ select:focus {
     display: none;
   }
 }
+
+/* COMMUNITY-05: composer tag/location/feeling controls */
+.community-media-btn.active {
+  background: rgba(74, 144, 217, 0.22);
+  border-color: rgba(74, 144, 217, 0.55);
+  color: #9cc3e8;
+}
+
+.community-composer-panel {
+  display: none;
+  gap: 0.5rem;
+  padding: 0.65rem 0.75rem;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 10px;
+  margin-top: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.community-composer-input,
+.community-composer-select {
+  flex: 1 1 140px;
+  min-width: 0;
+  padding: 0.5rem 0.65rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: var(--text-primary, #e8edf4);
+  font-size: 0.875rem;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.community-composer-input:focus,
+.community-composer-select:focus {
+  border-color: rgba(74, 144, 217, 0.55);
+}
+
+.community-composer-select:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.community-composer-select option {
+  background: #1b2230;
+  color: #e8edf4;
+}
+
+.community-composer-panel-hint {
+  font-size: 0.75rem;
+  color: rgba(232, 237, 244, 0.55);
+}
+
+@media (max-width: 640px) {
+  .community-composer-input,
+  .community-composer-select {
+    flex-basis: 100%;
+  }
+}

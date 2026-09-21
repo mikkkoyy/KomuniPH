@@ -540,7 +540,37 @@ function switchCommunityTab(tab) {
             <button id="community-media-video" class="community-media-btn" type="button" title="Attach a video">
               <span aria-hidden="true">🎬</span> Video
             </button>
+            <button id="community-tag-toggle" class="community-media-btn" type="button" title="Tag people">
+              <span aria-hidden="true">👥</span> Tag People
+            </button>
+            <button id="community-location-toggle" class="community-media-btn" type="button" title="Add a location">
+              <span aria-hidden="true">📍</span> Location
+            </button>
+            <button id="community-feeling-toggle" class="community-media-btn" type="button" title="Add a feeling or activity">
+              <span aria-hidden="true">😊</span> Feeling
+            </button>
             <input id="community-media-input" type="file" style="display:none" aria-hidden="true">
+          </div>
+          <div id="community-tag-panel" class="community-composer-panel" style="display:none">
+            <input id="community-tag-input" class="community-composer-input" type="text" placeholder="Usernames to tag, e.g. @juan @maria" maxlength="500" autocomplete="off">
+            <span class="community-composer-panel-hint">Only real KomuniPH accounts are tagged.</span>
+          </div>
+          <div id="community-location-panel" class="community-composer-panel" style="display:none">
+            <select id="community-location-country" class="community-composer-select"><option value="">Country (optional)</option></select>
+            <select id="community-location-city" class="community-composer-select" disabled><option value="">City (optional)</option></select>
+            <select id="community-location-barangay" class="community-composer-select" disabled><option value="">Barangay (optional)</option></select>
+          </div>
+          <div id="community-feeling-panel" class="community-composer-panel" style="display:none">
+            <select id="community-feeling-type" class="community-composer-select">
+              <option value="">Type…</option>
+              <option value="feeling">Feeling</option>
+              <option value="watching">Watching</option>
+              <option value="listening">Listening</option>
+              <option value="playing">Playing</option>
+              <option value="celebrating">Celebrating</option>
+              <option value="traveling">Traveling</option>
+            </select>
+            <input id="community-feeling-value" class="community-composer-input" type="text" placeholder="e.g. happy (optional)" maxlength="100" autocomplete="off">
           </div>
           <div id="community-media-preview" class="community-media-preview" style="display:none"></div>
           <div id="community-composer-error" class="error-banner" style="display:none"></div>
@@ -1030,6 +1060,93 @@ function bindCommunityComposer(community) {
   if (photoBtn) photoBtn.addEventListener('click', () => pickFile('image'));
   if (videoBtn) videoBtn.addEventListener('click', () => pickFile('video'));
 
+  // COMMUNITY-05: tag / location / feeling panels.
+  const tagToggle = document.getElementById('community-tag-toggle');
+  const tagPanel = document.getElementById('community-tag-panel');
+  const tagInput = document.getElementById('community-tag-input');
+  const locationToggle = document.getElementById('community-location-toggle');
+  const locationPanel = document.getElementById('community-location-panel');
+  const countrySelect = document.getElementById('community-location-country');
+  const citySelect = document.getElementById('community-location-city');
+  const barangaySelect = document.getElementById('community-location-barangay');
+  const feelingToggle = document.getElementById('community-feeling-toggle');
+  const feelingPanel = document.getElementById('community-feeling-panel');
+  const feelingTypeSelect = document.getElementById('community-feeling-type');
+  const feelingValueInput = document.getElementById('community-feeling-value');
+
+  let locationsCache = null;
+
+  function togglePanel(panel, toggle) {
+    if (!panel || !toggle) return;
+    const willOpen = panel.style.display === 'none';
+    panel.style.display = willOpen ? 'block' : 'none';
+    toggle.classList.toggle('active', willOpen);
+  }
+
+  function fillSelect(select, values, placeholder) {
+    if (!select) return;
+    select.innerHTML = `<option value="">${escapeHtml(placeholder)}</option>`;
+    for (const value of values) {
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = value;
+      select.appendChild(opt);
+    }
+  }
+
+  async function populateLocations() {
+    if (locationsCache || !countrySelect) return;
+    try {
+      const data = await profileApi.getLocations();
+      locationsCache = data;
+      fillSelect(countrySelect, data.countries || [], 'Country (optional)');
+    } catch (err) {
+      console.error('Failed to load locations:', err);
+    }
+  }
+
+  if (tagToggle) tagToggle.addEventListener('click', () => togglePanel(tagPanel, tagToggle));
+  if (locationToggle) locationToggle.addEventListener('click', () => {
+    togglePanel(locationPanel, locationToggle);
+    if (locationPanel && locationPanel.style.display !== 'none') populateLocations();
+  });
+  if (feelingToggle) feelingToggle.addEventListener('click', () => togglePanel(feelingPanel, feelingToggle));
+
+  if (countrySelect) countrySelect.addEventListener('change', () => {
+    const country = countrySelect.value;
+    if (!locationsCache) return;
+    if (citySelect) {
+      fillSelect(citySelect, (locationsCache.cities && locationsCache.cities[country]) || [], 'City (optional)');
+      citySelect.disabled = !country;
+    }
+    if (barangaySelect) {
+      fillSelect(barangaySelect, [], 'Barangay (optional)');
+      barangaySelect.disabled = true;
+    }
+  });
+
+  if (citySelect) citySelect.addEventListener('change', () => {
+    const country = countrySelect ? countrySelect.value : '';
+    const city = citySelect.value;
+    if (!locationsCache) return;
+    const list = (locationsCache.barangays && locationsCache.barangays[country] && locationsCache.barangays[country][city]) || [];
+    if (barangaySelect) {
+      fillSelect(barangaySelect, list, 'Barangay (optional)');
+      barangaySelect.disabled = !city;
+    }
+  });
+
+  function resetComposerExtras() {
+    if (tagInput) tagInput.value = '';
+    if (feelingValueInput) feelingValueInput.value = '';
+    if (feelingTypeSelect) feelingTypeSelect.value = '';
+    if (countrySelect) countrySelect.value = '';
+    if (citySelect) { fillSelect(citySelect, [], 'City (optional)'); citySelect.disabled = true; }
+    if (barangaySelect) { fillSelect(barangaySelect, [], 'Barangay (optional)'); barangaySelect.disabled = true; }
+    [tagPanel, locationPanel, feelingPanel].forEach(p => { if (p) p.style.display = 'none'; });
+    [tagToggle, locationToggle, feelingToggle].forEach(b => { if (b) b.classList.remove('active'); });
+  }
+
   if (fileInput) {
     fileInput.addEventListener('change', () => {
       const file = fileInput.files && fileInput.files[0];
@@ -1065,14 +1182,34 @@ function bindCommunityComposer(community) {
     submit.textContent = 'Posting...';
     errorEl.style.display = 'none';
     try {
-      const newPost = mediaFile
-        ? await feedApi.createCommunityPost(community.id, content, mediaFile)
-        : await feedApi.createPost(content, community.id);
+      // COMMUNITY-05: typed tag tokens are appended to the content so the
+      // server-side @mention resolution sees them (only real accounts are
+      // stored); feeling and location travel as structured form fields.
+      let finalContent = content;
+      if (tagInput && tagInput.value.trim()) {
+        const tokens = tagInput.value.match(/[A-Za-z0-9_]{2,30}/g) || [];
+        const tags = [...new Set(tokens)].map(t => '@' + t).join(' ');
+        if (tags) finalContent = `${finalContent}\n\n${tags}`;
+      }
+      const extras = {};
+      if (feelingTypeSelect && feelingTypeSelect.value) extras.feeling_type = feelingTypeSelect.value;
+      if (feelingValueInput && feelingValueInput.value.trim()) extras.feeling_value = feelingValueInput.value.trim();
+      if (countrySelect && countrySelect.value) extras.location_country = countrySelect.value;
+      if (citySelect && citySelect.value) extras.location_city = citySelect.value;
+      if (barangaySelect && barangaySelect.value) extras.location_barangay = barangaySelect.value;
+
+      const newPost = await feedApi.createCommunityPost(
+        community.id,
+        finalContent,
+        mediaFile,
+        Object.keys(extras).length ? extras : null
+      );
       communityFeed.posts.unshift(newPost);
       communityFeed.has_more = false;
       setFeedData(communityFeed);
       textarea.value = '';
       clearMedia();
+      resetComposerExtras();
       renderCommunityFeedPosts();
     } catch (err) {
       errorEl.textContent = err.message || 'Failed to create post';

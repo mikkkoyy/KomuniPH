@@ -349,11 +349,20 @@ export const feedApi = {
   // COMMUNITY-05: create a community post with optional media (photo/video)
   // via the multipart community endpoint. Text-only posts keep using
   // createPost; this is only called when the composer has media attached.
-  async createCommunityPost(communityId, content, file) {
+  async createCommunityPost(communityId, content, file, extras = null) {
     const formData = new FormData();
     formData.append('content', content);
     if (file) {
       formData.append('media', file, file.name);
+    }
+    // COMMUNITY-05: optional composer extras (feeling/activity, location).
+    // The server validates everything; these are only passed through.
+    if (extras) {
+      if (extras.feeling_type) formData.append('feeling_type', extras.feeling_type);
+      if (extras.feeling_value) formData.append('feeling_value', extras.feeling_value);
+      if (extras.location_country) formData.append('location_country', extras.location_country);
+      if (extras.location_city) formData.append('location_city', extras.location_city);
+      if (extras.location_barangay) formData.append('location_barangay', extras.location_barangay);
     }
 
     const headers = {};

@@ -14,7 +14,7 @@
 
 import { queryOne, queryAll, execute } from './database.js';
 import { generateId, now, jsonResponse, errorResponse, parseQuery, parseBody } from './utils.js';
-import { getCountries } from './locations.js';
+import { getCountries, getCities, getBarangays } from './locations.js';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
 import { fileURLToPath } from 'url';
@@ -693,6 +693,78 @@ export function handleGetCommunityMembers(req, res, user, params) {
  * server-side rules as POST /api/feed/posts (no second membership system).
  * Media is attached to the existing posts row (media_url / media_type).
  */
+// COMMUNITY-05: composer extras. Feelings are structured (whitelisted type +
+// optional value), locations reuse the shared Country -> City -> Barangay
+// model, and mentions resolve only against real KomuniPH accounts.
+const FEELING_TYPES = ['feeling', 'watching', 'listening', 'playing', 'celebrating', 'traveling'];
+const MENTION_PATTERN = /@([A-Za-z0-9_]{2,30})/g;
+const MAX_MENTIONS_PER_POST = 20;
+
+/**
+ * Extract unique @username tokens from post content. Only the token is
+ * returned here; validation against real accounts happens in resolveMentions.
+ */
+function parseMentionUsernames(content) {
+  const found = new Set();
+  let match;
+  MENTION_PATTERN.lastIndex = 0;
+  while ((match = MENTION_PATTERN.exec(content)) !== null) {
+    found.add(match[1].toLowerCase());
+    if (found.size >= MAX_MENTIONS_PER_POST) break;
+  }
+  return [...found];
+}
+
+/**
+ * Resolve @username tokens against real KomuniPH accounts. Arbitrary text is
+ * never treated as a valid user, and only public profile fields are returned.
+ */
+function resolveMentions(usernames) {
+  if (!usernames.length) return [];
+  const placeholders = usernames.map(() => '?').join(',');
+  return queryAll(
+    `SELECT u.id as user_id, u.username, pr.display_name, pr.profile_photo_url
+     FROM users u
+     LEFT JOIN profiles pr ON pr.user_id = u.id
+     WHERE LOWER(u.username) IN (${placeholders})`,
+    usernames
+  );
+}
+
+/**
+ * Persist resolved mentions for a post.
+ */
+function storePostMentions(postId, mentions, timestamp) {
+  for (const m of mentions) {
+    execute(
+      'INSERT INTO post_mentions (id, post_id, user_id, username, created_at) VALUES (?, ?, ?, ?, ?)',
+      [generateId(), postId, m.user_id, m.username, timestamp]
+    );
+  }
+}
+
+/**
+ * Validate an optional post location against the existing shared location
+ * model (server/locations.json). Partial values are allowed as long as they
+ * form a consistent prefix: country, country+city, or all three.
+ * Returns { location } or { error }.
+ */
+function validatePostLocation({ country, city, barangay }) {
+  if (!country && !city && !barangay) return { location: null };
+  if (city && !country) return { error: 'City requires a country' };
+  if (barangay && !city) return { error: 'Barangay requires a city' };
+  if (country && !getCountries().includes(country)) {
+    return { error: 'Unknown country' };
+  }
+  if (city && !getCities(country).includes(city)) {
+    return { error: 'Unknown city for the selected country' };
+  }
+  if (barangay && !getBarangays(country, city).includes(barangay)) {
+    return { error: 'Unknown barangay for the selected city' };
+  }
+  return { location: { country: country || null, city: city || null, barangay: barangay || null } };
+}
+
 export function handleCreateCommunityPost(req, res, user, params) {
   const contentType = req.headers['content-type'] || '';
   if (!contentType.includes('multipart/form-data')) {
@@ -742,11 +814,21 @@ export function handleCreateCommunityPost(req, res, user, params) {
   };
 
   let content = '';
+  let feelingType = '';
+  let feelingValue = '';
+  let locationCountry = '';
+  let locationCity = '';
+  let locationBarangay = '';
   let fileInfo = null;
   let tooLarge = false;
 
   busboy.on('field', (name, value) => {
     if (name === 'content') content = value;
+    else if (name === 'feeling_type') feelingType = value;
+    else if (name === 'feeling_value') feelingValue = value;
+    else if (name === 'location_country') locationCountry = value;
+    else if (name === 'location_city') locationCity = value;
+    else if (name === 'location_barangay') locationBarangay = value;
   });
 
   busboy.on('file', (fieldname, file, info) => {
@@ -817,6 +899,40 @@ export function handleCreateCommunityPost(req, res, user, params) {
         return sendError(422, 'Post content must be less than 5000 characters');
       }
 
+      // COMMUNITY-05: feeling/activity. Structured, not arbitrary fields:
+      // whitelisted type plus an optional free-form value. A type without a
+      // value is allowed ("Traveling"); a value without a type is rejected.
+      let feelingTypeStored = null;
+      let feelingValueStored = null;
+      if (feelingType || feelingValue) {
+        const t = feelingType.trim().toLowerCase();
+        const v = feelingValue.trim();
+        if (!FEELING_TYPES.includes(t)) {
+          return sendError(422, 'Invalid feeling type. Use one of: ' + FEELING_TYPES.join(', '));
+        }
+        if (v.length > 100) {
+          return sendError(422, 'Feeling value must be 100 characters or less');
+        }
+        feelingTypeStored = t;
+        feelingValueStored = v || null;
+      }
+
+      // COMMUNITY-05: optional location validated against the shared
+      // Country -> City -> Barangay model (no second location system).
+      const locationResult = validatePostLocation({
+        country: locationCountry.trim(),
+        city: locationCity.trim(),
+        barangay: locationBarangay.trim(),
+      });
+      if (locationResult.error) {
+        return sendError(422, locationResult.error);
+      }
+      const postLocation = locationResult.location;
+
+      // COMMUNITY-05: tags/mentions. Only tokens matching a real KomuniPH
+      // account are stored; arbitrary text is ignored.
+      const mentions = resolveMentions(parseMentionUsernames(content));
+
       let mediaUrl = null;
       let mediaType = null;
 
@@ -854,8 +970,16 @@ export function handleCreateCommunityPost(req, res, user, params) {
             return sendError(500, 'Failed to save uploaded media. Please try again.');
           }
         } else {
-          // Video: allowlisted MIME/extension, stored as-is (sharp cannot
-          // process video). Size was already enforced by the data handler.
+          // Video: allowlisted MIME/extension plus a byte-level sanity check
+          // (sharp cannot process video, so bytes are checked directly).
+          // MP4 boxes start with a 4-byte size followed by 'ftyp'; WebM starts
+          // with the EBML magic 0x1A45DFA3. Anything else is not a real video.
+          const bytes = fileInfo.data;
+          const isMp4 = bytes.length > 11 && bytes.slice(4, 8).toString('latin1') === 'ftyp';
+          const isWebm = bytes.length > 3 && bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3;
+          if (!isMp4 && !isWebm) {
+            return sendError(422, 'Invalid video file. Please upload a real MP4 or WebM video.');
+          }
           try {
             writeFileSync(fileInfo.filePath, fileInfo.data);
           } catch (writeErr) {
@@ -871,9 +995,25 @@ export function handleCreateCommunityPost(req, res, user, params) {
       const postId = generateId();
       const timestamp = now();
       execute(
-        'INSERT INTO posts (id, author_id, content, community_id, media_url, media_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [postId, user.sub, content.trim(), community.id, mediaUrl, mediaType, timestamp, timestamp]
+        'INSERT INTO posts (id, author_id, content, community_id, media_url, media_type, feeling_type, feeling_value, location_country, location_city, location_barangay, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          postId,
+          user.sub,
+          content.trim(),
+          community.id,
+          mediaUrl,
+          mediaType,
+          feelingTypeStored,
+          feelingValueStored,
+          postLocation ? postLocation.country : null,
+          postLocation ? postLocation.city : null,
+          postLocation ? postLocation.barangay : null,
+          timestamp,
+          timestamp,
+        ]
       );
+
+      storePostMentions(postId, mentions, timestamp);
 
       sendSuccess({
         id: postId,
@@ -896,6 +1036,14 @@ export function handleCreateCommunityPost(req, res, user, params) {
         is_featured: false,
         media_url: mediaUrl,
         media_type: mediaType,
+        feeling_type: feelingTypeStored,
+        feeling_value: feelingValueStored,
+        location: postLocation,
+        mentions: mentions.map(m => ({
+          username: m.username,
+          display_name: m.display_name || m.username,
+          profile_photo_url: m.profile_photo_url || null,
+        })),
         can_moderate: isCommunityModerator(community.id, user.sub),
       });
     } catch (err) {
@@ -942,6 +1090,11 @@ export function handleGetCommunityPosts(req, res, user, params) {
          p.is_featured,
          p.media_url,
          p.media_type,
+         p.feeling_type,
+         p.feeling_value,
+         p.location_country,
+         p.location_city,
+         p.location_barangay,
          u.username,
          pr.display_name,
          pr.bio,
@@ -967,6 +1120,31 @@ export function handleGetCommunityPosts(req, res, user, params) {
     );
     const hasMore = offset + limit < totalCount.count;
 
+    // COMMUNITY-05: batched mentions lookup for this page of posts (one
+    // query, no per-post N+1). Only public profile fields are exposed.
+    const postIds = posts.map(p => p.id);
+    const mentionsByPost = {};
+    if (postIds.length) {
+      const placeholders = postIds.map(() => '?').join(',');
+      const mentionRows = queryAll(
+        `SELECT pm.post_id, pm.username, pr.display_name, pr.profile_photo_url
+         FROM post_mentions pm
+         JOIN users u ON pm.user_id = u.id
+         LEFT JOIN profiles pr ON pr.user_id = pm.user_id
+         WHERE pm.post_id IN (${placeholders})
+         ORDER BY pm.created_at ASC`,
+        postIds
+      );
+      for (const row of mentionRows) {
+        if (!mentionsByPost[row.post_id]) mentionsByPost[row.post_id] = [];
+        mentionsByPost[row.post_id].push({
+          username: row.username,
+          display_name: row.display_name || row.username,
+          profile_photo_url: row.profile_photo_url || null,
+        });
+      }
+    }
+
     jsonResponse(res, 200, {
       posts: posts.map(post => ({
         id: post.id,
@@ -989,6 +1167,14 @@ export function handleGetCommunityPosts(req, res, user, params) {
         is_featured: Boolean(post.is_featured),
         media_url: post.media_url || null,
         media_type: post.media_type || null,
+        feeling_type: post.feeling_type || null,
+        feeling_value: post.feeling_value || null,
+        location: (post.location_country || post.location_city || post.location_barangay) ? {
+          country: post.location_country || null,
+          city: post.location_city || null,
+          barangay: post.location_barangay || null,
+        } : null,
+        mentions: mentionsByPost[post.id] || [],
         can_moderate: viewerCanModerate,
       })),
       limit,

@@ -169,17 +169,16 @@ if defined PORT_PID (
     )
 
     if defined PORT_IS_KOMUNIPH (
-        echo [INFO] Existing KomuniPH process detected.
-        echo [ACTION] Stopping old server...
-
-        taskkill /PID %PORT_PID% /F >nul 2>&1
-        timeout /t 1 /nobreak >nul
-
-        echo [OK] Previous KomuniPH server stopped.
+        echo [INFO] Existing KomuniPH server detected on port 3000.
+        echo [INFO] Reusing existing server PID %PORT_PID%.
+        set "SERVER_PID=%PORT_PID%"
+        goto VERIFY_HEALTH
     ) else (
         echo.
         echo [ERROR] Port 3000 is occupied by another application.
         echo [ERROR] PID: %PORT_PID%
+        powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter 'ProcessId=%PORT_PID%' | Select-Object ProcessId,Name,CommandLine | Format-List"
+        echo [INFO] No unrelated process will be terminated.
         echo.
         pause
         exit /b 1

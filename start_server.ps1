@@ -7,5 +7,5 @@ param(
 # itself on the command line (find_komuniph.ps1 / check_port_pid.ps1
 # recognize KomuniPH by its server\index.js command line).
 $scriptFull = Join-Path $WorkingDirectory $ScriptPath
-$proc = Start-Process -FilePath "node" -ArgumentList $scriptFull -WorkingDirectory $WorkingDirectory -PassThru
+$proc = Start-Process -FilePath "node" -ArgumentList $scriptFull -WorkingDirectory $WorkingDirectory -WindowStyle Hidden -PassThru
 Write-Output $proc.Id

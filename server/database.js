@@ -885,6 +885,16 @@ export function initDatabase() {
     database.exec('CREATE INDEX IF NOT EXISTS idx_coin_topups_status ON coin_topups(status)');
   } catch (err) { /* safe no-op */ }
 
+  // COINS-02: Add paymongo_source_id column to coin_topups for redirect-based payments.
+  try {
+    database.exec("ALTER TABLE coin_topups ADD COLUMN paymongo_source_id TEXT");
+  } catch (err) { /* column already exists or table missing — safe no-op */ }
+
+  // COINS-02: Make reference_number nullable for PayMongo-sourced topups.
+  try {
+    database.exec("ALTER TABLE coin_topups ALTER COLUMN reference_number DROP NOT NULL");
+  } catch (err) { /* SQLite < 3.35 or already nullable — safe no-op */ }
+
   // COINS-01: Create wallets for existing users who don't have one yet.
   try {
     const usersWithoutWallet = database.prepare(`

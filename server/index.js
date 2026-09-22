@@ -84,8 +84,11 @@ import {
   handleGetWallet,
   handleGetTransactions,
   handleGetExchangeRate,
+  handleGetPaymentAccounts,
   handleCreateTopup,
   handleGetTopups,
+  handleGetTopupStatus,
+  handlePaymongoWebhook,
   handleCreateWithdrawal,
   handleGetWithdrawals,
   handleAdminListTopups,
@@ -658,6 +661,13 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
   if (method === 'GET' && path === '/api/coins/exchange-rate') {
     return handleGetExchangeRate(req, res);
   }
+  if (method === 'GET' && path === '/api/coins/payment-accounts') {
+    return handleGetPaymentAccounts(req, res);
+  }
+  // PayMongo webhook — no auth required; verified by signature
+  if (method === 'POST' && path === '/api/coins/paymongo/webhook') {
+    return handlePaymongoWebhook(req, res);
+  }
   if (method === 'POST' && path === '/api/coins/topup') {
     const user = requireAuth(req, res);
     if (!user) return;
@@ -667,6 +677,12 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
     const user = requireAuth(req, res);
     if (!user) return;
     return handleGetTopups(req, res, user);
+  }
+  const topupStatusMatch = matchRoute('/api/coins/topup/status/:id', path);
+  if (method === 'GET' && topupStatusMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleGetTopupStatus(req, res, user, topupStatusMatch);
   }
   if (method === 'POST' && path === '/api/coins/withdraw') {
     const user = requireAuth(req, res);

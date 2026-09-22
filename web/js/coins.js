@@ -23,15 +23,22 @@ export const coinsApi = {
     return apiRequest('/coins/exchange-rate');
   },
 
-  async createTopup(phpAmount, paymentMethod, referenceNumber) {
+  async getPaymentAccounts() {
+    return apiRequest('/coins/payment-accounts');
+  },
+
+  async createTopup(phpAmount, paymentMethod) {
     return apiRequest('/coins/topup', {
       method: 'POST',
       body: {
         php_amount: phpAmount,
         payment_method: paymentMethod,
-        reference_number: referenceNumber,
       },
     });
+  },
+
+  async getTopupStatus(topupId) {
+    return apiRequest(`/coins/topup/status/${topupId}`);
   },
 
   async getTopups(limit = 50, offset = 0) {
@@ -60,7 +67,7 @@ function formatCoins(n) {
 }
 
 function formatPhp(n) {
-  return '₱' + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFraction_digits: 2 });
+  return '₱' + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 const STATUS_COLORS = {
@@ -127,7 +134,20 @@ export function renderWalletPage() {
  */
 export async function initWalletPage() {
   await loadWalletBalance();
-  showTransactions();
+
+  // Check if user returned from PayMongo payment redirect
+  const urlParams = new URLSearchParams(window.location.search);
+  const topupResult = urlParams.get('topup');
+  const topupId = urlParams.get('id');
+
+  if (topupResult && topupId) {
+    // Clean the URL params without reloading
+    const cleanUrl = window.location.pathname + '#/wallet';
+    window.history.replaceState({}, '', cleanUrl);
+    showTopupResult(topupResult, topupId);
+  } else {
+    showTransactions();
+  }
 
   document.getElementById('btn-cashin')?.addEventListener('click', showCashInForm);
   document.getElementById('btn-cashout')?.addEventListener('click', showCashOutForm);
@@ -146,6 +166,48 @@ async function loadWalletBalance() {
     console.error('[WALLET] Failed to load balance:', err);
     document.getElementById('wallet-balance').textContent = 'Error loading balance';
   }
+}
+
+/**
+ * Show payment result after returning from PayMongo redirect.
+ * Polls the topup status briefly to reflect the latest state.
+ */
+function showTopupResult(result, topupId) {
+  const section = document.getElementById('wallet-section');
+  const isSuccess = result === 'success';
+
+  section.innerHTML = `
+    <div style="background:#fff;border-radius:0.75rem;padding:1.25rem;border:1px solid #e5e7eb;text-align:center;">
+      <div style="font-size:2.5rem;margin-bottom:0.75rem;">${isSuccess ? '&#9989;' : '&#10060;'}</div>
+      <h3 style="font-family:'Fredoka',sans-serif;font-size:1.1rem;margin-bottom:0.5rem;">
+        ${isSuccess ? 'Payment Successful' : 'Payment Failed'}
+      </h3>
+      <p style="font-size:0.85rem;color:#6b7280;margin-bottom:1rem;">
+        ${isSuccess
+          ? 'Your payment is being processed. Coins will be credited shortly.'
+          : 'Your payment was not completed. No coins were deducted. Please try again.'}
+      </p>
+      <div id="topup-status-msg" style="font-size:0.85rem;color:#6b7280;">Checking status...</div>
+      <button onclick="window.location.hash='/wallet';window.location.reload()" style="margin-top:1rem;padding:0.6rem 1.5rem;border:none;border-radius:0.5rem;background:#0e6e6e;color:#fff;font-weight:600;cursor:pointer;">Back to Wallet</button>
+    </div>
+  `;
+
+  // Poll topup status
+  (async () => {
+    try {
+      const data = await coinsApi.getTopupStatus(topupId);
+      const msgEl = document.getElementById('topup-status-msg');
+      if (msgEl && data.topup) {
+        const s = data.topup.status;
+        const color = STATUS_COLORS[s] || '#6b7280';
+        msgEl.innerHTML = `Status: ${statusBadge(s)} — ${formatCoins(data.topup.coins_amount)} coins (₱${data.topup.php_amount})`;
+      }
+      await loadWalletBalance();
+    } catch (err) {
+      const msgEl = document.getElementById('topup-status-msg');
+      if (msgEl) msgEl.textContent = 'Status will update shortly. Refresh to check.';
+    }
+  })();
 }
 
 function showTransactions() {
@@ -196,7 +258,7 @@ function showCashInForm() {
   section.innerHTML = `
     <div style="background:#fff;border-radius:0.75rem;padding:1.25rem;border:1px solid #e5e7eb;">
       <h3 style="font-family:'Fredoka',sans-serif;font-size:1.1rem;margin-bottom:1rem;">Cash In (GCash / Maya)</h3>
-      <p style="font-size:0.85rem;color:#6b7280;margin-bottom:1rem;">Rate: 10 coins = ₱1. Send payment, then submit the form below.</p>
+      <p style="font-size:0.85rem;color:#6b7280;margin-bottom:1rem;">Rate: 10 coins = ₱1. Choose your payment method and amount — you'll be redirected to complete payment securely.</p>
       <form id="cashin-form">
         <div style="margin-bottom:1rem;">
           <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.25rem;color:#374151;">Amount (PHP)</label>
@@ -209,12 +271,8 @@ function showCashInForm() {
             <option value="maya">Maya</option>
           </select>
         </div>
-        <div style="margin-bottom:1rem;">
-          <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.25rem;color:#374151;">Reference Number</label>
-          <input type="text" id="cashin-ref" required placeholder="GCash/Maya reference number" style="width:100%;padding:0.6rem;border:1px solid #d1d5db;border-radius:0.5rem;font-size:0.95rem;">
-        </div>
         <div id="cashin-error" style="color:#ef4444;font-size:0.85rem;margin-bottom:0.75rem;"></div>
-        <button type="submit" id="cashin-submit" style="width:100%;padding:0.75rem;border:none;border-radius:0.5rem;background:#3b82f6;color:#fff;font-weight:600;cursor:pointer;font-size:0.95rem;">Submit Cash In</button>
+        <button type="submit" id="cashin-submit" style="width:100%;padding:0.75rem;border:none;border-radius:0.5rem;background:#3b82f6;color:#fff;font-weight:600;cursor:pointer;font-size:0.95rem;">Proceed to Payment</button>
       </form>
     </div>
   `;
@@ -225,23 +283,27 @@ function showCashInForm() {
     const btn = document.getElementById('cashin-submit');
     errEl.textContent = '';
     btn.disabled = true;
-    btn.textContent = 'Submitting...';
+    btn.textContent = 'Preparing payment...';
 
     const amount = parseFloat(document.getElementById('cashin-amount').value);
     const method = document.getElementById('cashin-method').value;
-    const ref = document.getElementById('cashin-ref').value.trim();
 
     try {
-      await coinsApi.createTopup(amount, method, ref);
-      errEl.style.color = '#10b981';
-      errEl.textContent = 'Cash-in request submitted! Waiting for admin approval.';
-      btn.textContent = 'Submitted';
-      await loadWalletBalance();
+      const result = await coinsApi.createTopup(amount, method);
+      const redirectUrl = result.topup?.redirect_url;
+      if (redirectUrl) {
+        btn.textContent = 'Redirecting...';
+        window.location.href = redirectUrl;
+      } else {
+        errEl.textContent = 'Payment redirect URL not received. Please try again.';
+        btn.disabled = false;
+        btn.textContent = 'Proceed to Payment';
+      }
     } catch (err) {
       errEl.style.color = '#ef4444';
-      errEl.textContent = err.message || 'Failed to submit cash-in.';
+      errEl.textContent = err.message || 'Failed to initiate payment.';
       btn.disabled = false;
-      btn.textContent = 'Submit Cash In';
+      btn.textContent = 'Proceed to Payment';
     }
   });
 }

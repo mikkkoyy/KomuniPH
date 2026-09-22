@@ -5,6 +5,8 @@
 
 import { queryOne, queryAll, execute, transaction } from './database.js';
 import { generateId, now, jsonResponse, errorResponse, parseBody } from './utils.js';
+import config from './config.js';
+import { createSource, getSource, verifyWebhookSignature } from './paymongo.js';
 
 const COINS_PER_PHP = 10;
 const PHP_PER_COIN = 1 / COINS_PER_PHP;
@@ -146,13 +148,32 @@ export function handleGetExchangeRate(req, res) {
 }
 
 /**
+ * Handle GET /api/coins/payment-accounts
+ * Returns configured payment account details for cash-in instructions.
+ */
+export function handleGetPaymentAccounts(req, res) {
+  const accounts = config.paymentAccounts || {};
+  jsonResponse(res, 200, {
+    gcash: {
+      number: accounts.gcash?.number || '',
+      accountName: accounts.gcash?.accountName || '',
+    },
+    maya: {
+      number: accounts.maya?.number || '',
+      accountName: accounts.maya?.accountName || '',
+    },
+  });
+}
+
+/**
  * Handle POST /api/coins/topup
- * Creates a cash-in request. User submits PHP amount + proof of payment.
+ * Creates a PayMongo Source and returns a redirect URL for GCash/Maya payment.
+ * The user never sees "PayMongo" — only "GCash" / "Maya".
  */
 export async function handleCreateTopup(req, res, user) {
   try {
     const body = await parseBody(req);
-    const { php_amount, payment_method, reference_number } = body;
+    const { php_amount, payment_method } = body;
 
     if (!php_amount || typeof php_amount !== 'number' || php_amount <= 0) {
       return errorResponse(res, 422, 'Valid PHP amount is required');
@@ -166,20 +187,32 @@ export async function handleCreateTopup(req, res, user) {
       return errorResponse(res, 422, 'Payment method must be gcash or maya');
     }
 
-    if (!reference_number || typeof reference_number !== 'string' || !reference_number.trim()) {
-      return errorResponse(res, 422, 'Reference number is required');
-    }
-
     const coinsAmount = Math.floor(php_amount * COINS_PER_PHP);
     const topupId = generateId();
     const timestamp = now();
+    const appUrl = config.paymongo.appUrl;
 
     ensureWallet(user.sub);
 
+    // Create a PayMongo Source (redirect-based e-wallet payment)
+    let source;
+    try {
+      source = await createSource({
+        amount: php_amount,
+        type: payment_method,
+        successUrl: `${appUrl}/#/wallet?topup=success&id=${topupId}`,
+        failedUrl: `${appUrl}/#/wallet?topup=failed&id=${topupId}`,
+      });
+    } catch (pmErr) {
+      console.error('[COINS] PayMongo createSource failed:', pmErr.message);
+      return errorResponse(res, 502, 'Payment provider error. Please try again.');
+    }
+
+    // Store the topup with the PayMongo source ID
     execute(
-      `INSERT INTO coin_topups (id, user_id, php_amount, coins_amount, payment_method, reference_number, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-      [topupId, user.sub, php_amount, coinsAmount, payment_method, reference_number.trim(), timestamp, timestamp]
+      `INSERT INTO coin_topups (id, user_id, php_amount, coins_amount, payment_method, reference_number, status, paymongo_source_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
+      [topupId, user.sub, php_amount, coinsAmount, payment_method, null, source.id, timestamp, timestamp]
     );
 
     jsonResponse(res, 201, {
@@ -188,11 +221,11 @@ export async function handleCreateTopup(req, res, user) {
         php_amount,
         coins_amount: coinsAmount,
         payment_method,
-        reference_number: reference_number.trim(),
         status: 'pending',
+        redirect_url: source.redirectUrl,
         created_at: timestamp,
       },
-      message: 'Cash-in request submitted. It will be reviewed by an admin.',
+      message: 'Redirecting to payment page...',
     });
   } catch (err) {
     console.error('[COINS] Create topup error:', err);
@@ -239,6 +272,116 @@ export function handleGetTopups(req, res, user) {
   } catch (err) {
     console.error('[COINS] Get topups error:', err);
     errorResponse(res, 500, 'Internal server error');
+  }
+}
+
+/**
+ * Handle GET /api/coins/topup/status/:id
+ * Returns the status of a specific topup (for frontend polling after redirect).
+ */
+export function handleGetTopupStatus(req, res, user, params) {
+  try {
+    const topup = queryOne(
+      'SELECT id, status, coins_amount, php_amount, payment_method, created_at, updated_at FROM coin_topups WHERE id = ? AND user_id = ?',
+      [params.id, user.sub]
+    );
+
+    if (!topup) {
+      return errorResponse(res, 404, 'Top-up not found');
+    }
+
+    jsonResponse(res, 200, { topup });
+  } catch (err) {
+    console.error('[COINS] Get topup status error:', err);
+    errorResponse(res, 500, 'Internal server error');
+  }
+}
+
+/**
+ * Handle POST /api/coins/paymongo/webhook
+ * Receives PayMongo webhook events for source status changes.
+ * When a source becomes "chargeable", credits coins to the user.
+ *
+ * CRITICAL: PayMongo is an internal implementation detail.
+ * All user-facing strings reference only "GCash" / "Maya".
+ */
+export async function handlePaymongoWebhook(req, res) {
+  try {
+    // Read raw body for signature verification
+    const rawBody = await new Promise((resolve, reject) => {
+      let data = '';
+      req.on('data', chunk => { data += chunk.toString(); });
+      req.on('end', () => resolve(data));
+      req.on('error', reject);
+    });
+
+    // Verify webhook signature
+    const signature = req.headers['x-paymongo-signature'] || '';
+    if (!verifyWebhookSignature(rawBody, signature)) {
+      console.warn('[PAYMONGO] Webhook signature verification failed');
+      return errorResponse(res, 401, 'Invalid signature');
+    }
+
+    const event = JSON.parse(rawBody);
+    const eventType = event?.data?.attributes?.type;
+    const source = event?.data?.attributes?.data?.attributes;
+
+    if (!source) {
+      return jsonResponse(res, 200, { received: true });
+    }
+
+    console.log(`[PAYMONGO] Webhook received: ${eventType}, source=${source.id}, status=${source.status}`);
+
+    // Only process chargeable sources (payment completed successfully)
+    if (source.status !== 'chargeable') {
+      return jsonResponse(res, 200, { received: true, skipped: true });
+    }
+
+    // Find the topup linked to this PayMongo source
+    const topup = queryOne(
+      'SELECT * FROM coin_topups WHERE paymongo_source_id = ?',
+      [source.id]
+    );
+
+    if (!topup) {
+      console.warn(`[PAYMONGO] No topup found for source ${source.id}`);
+      return jsonResponse(res, 200, { received: true, unknown_source: true });
+    }
+
+    if (topup.status !== 'pending') {
+      // Already processed (idempotent)
+      return jsonResponse(res, 200, { received: true, already_processed: true });
+    }
+
+    // Verify amount matches (centavos from PayMongo vs PHP amount stored)
+    const expectedCentavos = Math.round(topup.php_amount * 100);
+    if (source.amount !== expectedCentavos) {
+      console.error(`[PAYMONGO] Amount mismatch: source=${source.amount} centavos, expected=${expectedCentavos} centavos for topup ${topup.id}`);
+      return jsonResponse(res, 200, { received: true, amount_mismatch: true });
+    }
+
+    // Credit coins to user
+    transaction(() => {
+      execute(
+        "UPDATE coin_topups SET status = 'completed', updated_at = datetime('now') WHERE id = ?",
+        [topup.id]
+      );
+      recordTransaction(
+        topup.user_id,
+        topup.coins_amount,
+        'cash_in',
+        `Cash in ₱${topup.php_amount} via ${topup.payment_method}`,
+        'coin_topup',
+        topup.id
+      );
+    });
+
+    console.log(`[PAYMONGO] Topup ${topup.id} completed: ${topup.coins_amount} coins credited to user ${topup.user_id}`);
+    jsonResponse(res, 200, { received: true, credited: true });
+  } catch (err) {
+    console.error('[PAYMONGO] Webhook handler error:', err);
+    // Return 200 to prevent PayMongo from retrying on our bugs
+    jsonResponse(res, 200, { received: true, error: true });
   }
 }
 

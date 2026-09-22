@@ -14,6 +14,7 @@ import { renderAlbumPage, initAlbumPage } from './albums.js';
 import { renderMessagesPage, initMessagesPage, destroyMessagesPage } from './messages.js';
 import { renderCommunityPage, initCommunityPage, renderCommunityDetailPage, initCommunityDetailPage } from './communities.js';
 import { renderWalletPage, initWalletPage } from './coins.js';
+import { renderAdminPage, initAdminPage } from './admin.js';
 
 const app = document.getElementById('app');
 
@@ -155,6 +156,14 @@ function render() {
       }
       html = renderCommunityPage();
       initFn = initCommunityPage;
+      break;
+    case '/admin':
+      if (!isAuthenticated()) {
+        navigate('/login');
+        return;
+      }
+      html = renderAdminPage();
+      initFn = initAdminPage;
       break;
     default:
       // GALLERY-ROUTES-01: gallery + album hash routes MUST be matched before

@@ -60,6 +60,21 @@ const config = {
     maxHeight: parseInt(process.env.UPLOAD_PROFILE_MAX_HEIGHT || '1024', 10),
     webpQuality: parseInt(process.env.UPLOAD_PROFILE_WEBP_QUALITY || '80', 10),
   },
+  paymentAccounts: {
+    gcash: {
+      number: process.env.GCASH_NUMBER || '',
+      accountName: process.env.GCASH_ACCOUNT_NAME || '',
+    },
+    maya: {
+      number: process.env.MAYA_NUMBER || '',
+      accountName: process.env.MAYA_ACCOUNT_NAME || '',
+    },
+  },
+  paymongo: {
+    secretKey: process.env.PAYMONGO_SECRET_KEY || '',
+    webhookSecret: process.env.PAYMONGO_WEBHOOK_SECRET || '',
+    appUrl: process.env.APP_URL || 'http://localhost:3000',
+  },
   cors: {
     origins: (process.env.CORS_ORIGINS || 'http://localhost:3000').split(',').map(s => s.trim()),
   },

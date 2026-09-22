@@ -33,6 +33,10 @@ export async function handleAdminLogin(req, res) {
       return errorResponse(res, 403, 'Admin access required');
     }
 
+    if (user.account_status === 'suspended') {
+      return errorResponse(res, 403, 'Admin account is suspended');
+    }
+
     const passwordValid = await bcrypt.compare(password, user.password_hash);
     if (!passwordValid) {
       return errorResponse(res, 401, 'Invalid credentials');

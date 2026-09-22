@@ -273,7 +273,7 @@ async function handleApi(req, res) {
    // Photo Gallery routes
    const photosMatch = matchRoute('/api/profiles/:username/photos', path);
    if (method === 'GET' && photosMatch) {
-     return handleGetPhotos(req, res, photosMatch);
+     return handleGetPhotosWithAlbum(req, res, photosMatch);
    }
 
    if (method === 'POST' && path === '/api/profile/photos') {

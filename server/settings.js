@@ -8,14 +8,19 @@ import { jsonResponse, errorResponse, parseBody } from './utils.js';
 
 /**
  * Handle GET /api/admin/settings
- * Returns all app settings.
+ * Returns all app settings. Masks secret values.
  */
 export function handleGetSettings(req, res) {
   try {
     const rows = queryAll('SELECT key, value FROM app_settings');
+    const secretKeys = ['paymongo_secret_key', 'paymongo_webhook_secret'];
     const settings = {};
     for (const row of rows) {
-      settings[row.key] = row.value;
+      if (secretKeys.includes(row.key) && row.value) {
+        settings[row.key] = row.value.substring(0, 4) + '••••••••' + row.value.slice(-4);
+      } else {
+        settings[row.key] = row.value;
+      }
     }
     jsonResponse(res, 200, { settings });
   } catch (err) {

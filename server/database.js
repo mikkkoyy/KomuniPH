@@ -635,10 +635,14 @@ export function initDatabase() {
   // Profile privacy: opt-in birthday sharing, including existing accounts.
   const profileColumns = database.prepare('PRAGMA table_info(profiles)').all();
   if (!profileColumns.some(column => column.name === 'birthday_visible')) {
-    database.exec('ALTER TABLE profiles ADD COLUMN birthday_visible INTEGER NOT NULL DEFAULT 0 CHECK (birthday_visible IN (0, 1))');
+    try {
+      database.exec('ALTER TABLE profiles ADD COLUMN birthday_visible INTEGER NOT NULL DEFAULT 0 CHECK (birthday_visible IN (0, 1))');
+    } catch (err) { /* column already exists — safe no-op */ }
   }
   if (!profileColumns.some(column => column.name === 'real_name_visible')) {
-    database.exec('ALTER TABLE profiles ADD COLUMN real_name_visible INTEGER NOT NULL DEFAULT 0 CHECK (real_name_visible IN (0, 1))');
+    try {
+      database.exec('ALTER TABLE profiles ADD COLUMN real_name_visible INTEGER NOT NULL DEFAULT 0 CHECK (real_name_visible IN (0, 1))');
+    } catch (err) { /* column already exists — safe no-op */ }
   }
 
 
@@ -869,7 +873,7 @@ export function initDatabase() {
         php_amount REAL NOT NULL CHECK (php_amount > 0),
         coins_amount INTEGER NOT NULL CHECK (coins_amount > 0),
         payment_method TEXT NOT NULL CHECK (payment_method IN ('gcash','maya')),
-        reference_number TEXT NOT NULL,
+        reference_number TEXT,
         status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','completed','rejected')),
         admin_notes TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -893,7 +897,34 @@ export function initDatabase() {
   // COINS-02: Make reference_number nullable for PayMongo-sourced topups.
   try {
     database.exec("ALTER TABLE coin_topups ALTER COLUMN reference_number DROP NOT NULL");
-  } catch (err) { /* SQLite < 3.35 or already nullable — safe no-op */ }
+  } catch (err) {
+    // SQLite < 3.35 fallback: recreate table with nullable reference_number
+    try {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS coin_topups_new (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          php_amount REAL NOT NULL CHECK (php_amount > 0),
+          coins_amount INTEGER NOT NULL CHECK (coins_amount > 0),
+          payment_method TEXT NOT NULL CHECK (payment_method IN ('gcash','maya')),
+          reference_number TEXT,
+          status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','completed','rejected')),
+          admin_notes TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+      database.exec(`
+        INSERT INTO coin_topups_new (id, user_id, php_amount, coins_amount, payment_method, reference_number, status, admin_notes, created_at, updated_at)
+        SELECT id, user_id, php_amount, coins_amount, payment_method, reference_number, status, admin_notes, created_at, updated_at
+        FROM coin_topups
+      `);
+      database.exec('DROP TABLE coin_topups');
+      database.exec('ALTER TABLE coin_topups_new RENAME TO coin_topups');
+      database.exec('CREATE INDEX IF NOT EXISTS idx_coin_topups_user_id ON coin_topups(user_id)');
+      database.exec('CREATE INDEX IF NOT EXISTS idx_coin_topups_status ON coin_topups(status)');
+    } catch (recreateErr) { /* table doesn't exist yet — safe no-op */ }
+  }
 
   // COINS-01: Create wallets for existing users who don't have one yet.
   try {

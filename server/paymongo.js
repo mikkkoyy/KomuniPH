@@ -117,8 +117,8 @@ export async function getSource(sourceId) {
 export function verifyWebhookSignature(rawBody, signature) {
   const secret = config.paymongo.webhookSecret;
   if (!secret) {
-    console.warn('[PAYMONGO] No webhook secret configured — skipping signature verification');
-    return true;
+    console.error('[PAYMONGO] No webhook secret configured — rejecting webhook');
+    return false;
   }
 
   if (!signature) return false;
@@ -140,5 +140,8 @@ export function verifyWebhookSignature(rawBody, signature) {
     .update(signedPayload)
     .digest('hex');
 
-  return crypto.timingSafeEqual(Buffer.from(v1, 'hex'), Buffer.from(expected, 'hex'));
+  const v1Buf = Buffer.from(v1, 'hex');
+  const expectedBuf = Buffer.from(expected, 'hex');
+  if (v1Buf.length !== expectedBuf.length) return false;
+  return crypto.timingSafeEqual(v1Buf, expectedBuf);
 }

@@ -522,10 +522,13 @@ export async function handleAdminApproveTopup(req, res, params) {
     const adminNotes = body.admin_notes || null;
 
     transaction(() => {
-      execute(
-        'UPDATE coin_topups SET status = \'completed\', admin_notes = ?, updated_at = datetime(\'now\') WHERE id = ?',
+      const result = execute(
+        "UPDATE coin_topups SET status = 'completed', admin_notes = ?, updated_at = datetime('now') WHERE id = ? AND status = 'pending'",
         [adminNotes, topup.id]
       );
+      if (result.changes === 0) {
+        return errorResponse(res, 409, 'Top-up was already processed');
+      }
       recordTransaction(topup.user_id, topup.coins_amount, 'cash_in', `Cash in ₱${topup.php_amount} via ${topup.payment_method}`, 'coin_topup', topup.id);
     });
 
@@ -633,10 +636,13 @@ export async function handleAdminApproveWithdrawal(req, res, params) {
     const adminNotes = body.admin_notes || null;
 
     transaction(() => {
-      execute(
-        'UPDATE withdrawal_requests SET status = \'approved\', admin_notes = ?, updated_at = datetime(\'now\') WHERE id = ?',
+      const result = execute(
+        "UPDATE withdrawal_requests SET status = 'approved', admin_notes = ?, updated_at = datetime('now') WHERE id = ? AND status = 'pending'",
         [adminNotes, withdrawal.id]
       );
+      if (result.changes === 0) {
+        return errorResponse(res, 409, 'Withdrawal was already processed');
+      }
       recordTransaction(withdrawal.user_id, withdrawal.coins_amount, 'cash_out', `Withdrawal approved: ${withdrawal.coins_amount} coins to ${withdrawal.payment_method}`, 'withdrawal_request', withdrawal.id);
       execute(
         'UPDATE user_wallets SET frozen_balance = frozen_balance - ?, updated_at = datetime(\'now\') WHERE user_id = ?',

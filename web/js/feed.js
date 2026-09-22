@@ -82,6 +82,7 @@ export function getSidebarHtml(activeRoute = 'home') {
     { route: 'community', label: 'Communities', href: '#/community', isButton: false },
     { route: 'creator-studio', label: 'Creator Studio', href: '#/creator-studio', isButton: false },
     { route: 'marketplace', label: 'Marketplace', href: '#/marketplace', isButton: false },
+    { route: 'wallet', label: 'Wallet', href: '#/wallet', isButton: false },
     { route: 'divider-2', label: null, href: null, isDivider: true },
     { route: 'settings', label: 'Settings', href: null, isButton: false, comingSoon: true },
   ];

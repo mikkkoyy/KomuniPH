@@ -13,6 +13,7 @@ import { renderGalleryPage, initGalleryPage } from './gallery.js';
 import { renderAlbumPage, initAlbumPage } from './albums.js';
 import { renderMessagesPage, initMessagesPage, destroyMessagesPage } from './messages.js';
 import { renderCommunityPage, initCommunityPage, renderCommunityDetailPage, initCommunityDetailPage } from './communities.js';
+import { renderWalletPage, initWalletPage } from './coins.js';
 
 const app = document.getElementById('app');
 
@@ -130,6 +131,14 @@ function render() {
       }
       html = renderPlaceholderPage('Marketplace', 'Discover products and listings from the KomuniPH community.', '🛍️', 'marketplace');
       initFn = initPlaceholderPage;
+      break;
+    case '/wallet':
+      if (!isAuthenticated()) {
+        navigate('/login');
+        return;
+      }
+      html = renderWalletPage();
+      initFn = initWalletPage;
       break;
     case '/groups':
       if (!isAuthenticated()) {

@@ -799,6 +799,113 @@ export function initDatabase() {
     console.log('[PROFILE-04] Identity fields backfill skipped:', err.message);
   }
 
+  // COINS-01: Double-entry ledger coin economy with GCash/Maya cash in/out.
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS user_wallets (
+        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        balance INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0),
+        frozen_balance INTEGER NOT NULL DEFAULT 0 CHECK (frozen_balance >= 0),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+  } catch (err) { /* safe no-op */ }
+
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS coin_transactions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        amount INTEGER NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('earn','spend','cash_in','cash_out','creator_payout','admin_adjust','freeze','unfreeze')),
+        reference_type TEXT,
+        reference_id TEXT,
+        description TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+  } catch (err) { /* safe no-op */ }
+
+  try {
+    database.exec('CREATE INDEX IF NOT EXISTS idx_coin_transactions_user_id ON coin_transactions(user_id)');
+  } catch (err) { /* safe no-op */ }
+  try {
+    database.exec('CREATE INDEX IF NOT EXISTS idx_coin_transactions_type ON coin_transactions(type)');
+  } catch (err) { /* safe no-op */ }
+  try {
+    database.exec('CREATE INDEX IF NOT EXISTS idx_coin_transactions_created_at ON coin_transactions(created_at DESC)');
+  } catch (err) { /* safe no-op */ }
+
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS withdrawal_requests (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        coins_amount INTEGER NOT NULL CHECK (coins_amount > 0),
+        php_amount REAL NOT NULL CHECK (php_amount > 0),
+        payment_method TEXT NOT NULL CHECK (payment_method IN ('gcash','maya')),
+        account_number TEXT NOT NULL,
+        account_name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected','completed')),
+        admin_notes TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+  } catch (err) { /* safe no-op */ }
+
+  try {
+    database.exec('CREATE INDEX IF NOT EXISTS idx_withdrawal_requests_user_id ON withdrawal_requests(user_id)');
+  } catch (err) { /* safe no-op */ }
+  try {
+    database.exec('CREATE INDEX IF NOT EXISTS idx_withdrawal_requests_status ON withdrawal_requests(status)');
+  } catch (err) { /* safe no-op */ }
+
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS coin_topups (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        php_amount REAL NOT NULL CHECK (php_amount > 0),
+        coins_amount INTEGER NOT NULL CHECK (coins_amount > 0),
+        payment_method TEXT NOT NULL CHECK (payment_method IN ('gcash','maya')),
+        reference_number TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','completed','rejected')),
+        admin_notes TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+  } catch (err) { /* safe no-op */ }
+
+  try {
+    database.exec('CREATE INDEX IF NOT EXISTS idx_coin_topups_user_id ON coin_topups(user_id)');
+  } catch (err) { /* safe no-op */ }
+  try {
+    database.exec('CREATE INDEX IF NOT EXISTS idx_coin_topups_status ON coin_topups(status)');
+  } catch (err) { /* safe no-op */ }
+
+  // COINS-01: Create wallets for existing users who don't have one yet.
+  try {
+    const usersWithoutWallet = database.prepare(`
+      SELECT u.id FROM users u
+      WHERE NOT EXISTS (
+        SELECT 1 FROM user_wallets w WHERE w.user_id = u.id
+      )
+    `).all();
+
+    for (const user of usersWithoutWallet) {
+      database.prepare(
+        "INSERT INTO user_wallets (user_id, balance, frozen_balance) VALUES (?, 0, 0)"
+      ).run(user.id);
+    }
+    if (usersWithoutWallet.length > 0) {
+      console.log(`[COINS-01] Created wallets for ${usersWithoutWallet.length} user(s)`);
+    }
+  } catch (err) {
+    console.log('[COINS-01] Wallet backfill skipped:', err.message);
+  }
+
   console.log('[DB] Database initialized successfully');
   return database;
 }

@@ -80,6 +80,23 @@ import {
   handleGetUnreadCount,
   handleMarkConversationRead,
 } from './messages.js';
+import {
+  handleGetWallet,
+  handleGetTransactions,
+  handleGetExchangeRate,
+  handleCreateTopup,
+  handleGetTopups,
+  handleCreateWithdrawal,
+  handleGetWithdrawals,
+  handleAdminListTopups,
+  handleAdminApproveTopup,
+  handleAdminRejectTopup,
+  handleAdminListWithdrawals,
+  handleAdminApproveWithdrawal,
+  handleAdminRejectWithdrawal,
+  handleAdminCompleteWithdrawal,
+  handleAdminCoinSummary,
+} from './coins.js';
 import { jsonResponse, errorResponse, matchRoute, parseQuery } from './utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -625,6 +642,96 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
     const user = requireAuth(req, res);
     if (!user) return;
     return handleUpdateCommunitySettings(req, res, user, settingsMatch);
+  }
+
+  // COINS-01: Coin economy routes
+  if (method === 'GET' && path === '/api/coins/wallet') {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleGetWallet(req, res, user);
+  }
+  if (method === 'GET' && path === '/api/coins/transactions') {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleGetTransactions(req, res, user);
+  }
+  if (method === 'GET' && path === '/api/coins/exchange-rate') {
+    return handleGetExchangeRate(req, res);
+  }
+  if (method === 'POST' && path === '/api/coins/topup') {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleCreateTopup(req, res, user);
+  }
+  if (method === 'GET' && path === '/api/coins/topups') {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleGetTopups(req, res, user);
+  }
+  if (method === 'POST' && path === '/api/coins/withdraw') {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleCreateWithdrawal(req, res, user);
+  }
+  if (method === 'GET' && path === '/api/coins/withdrawals') {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleGetWithdrawals(req, res, user);
+  }
+
+  // COINS-01: Admin coin economy routes (admin only)
+  if (method === 'GET' && path === '/api/admin/coins/summary') {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    if (user.role !== 'admin') return errorResponse(res, 403, 'Admin access required');
+    return handleAdminCoinSummary(req, res);
+  }
+  if (method === 'GET' && path === '/api/admin/coins/topups') {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    if (user.role !== 'admin') return errorResponse(res, 403, 'Admin access required');
+    return handleAdminListTopups(req, res);
+  }
+  const adminTopupApproveMatch = matchRoute('/api/admin/coins/topups/:id/approve', path);
+  if (method === 'POST' && adminTopupApproveMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    if (user.role !== 'admin') return errorResponse(res, 403, 'Admin access required');
+    return handleAdminApproveTopup(req, res, adminTopupApproveMatch);
+  }
+  const adminTopupRejectMatch = matchRoute('/api/admin/coins/topups/:id/reject', path);
+  if (method === 'POST' && adminTopupRejectMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    if (user.role !== 'admin') return errorResponse(res, 403, 'Admin access required');
+    return handleAdminRejectTopup(req, res, adminTopupRejectMatch);
+  }
+  if (method === 'GET' && path === '/api/admin/coins/withdrawals') {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    if (user.role !== 'admin') return errorResponse(res, 403, 'Admin access required');
+    return handleAdminListWithdrawals(req, res);
+  }
+  const adminWithdrawalApproveMatch = matchRoute('/api/admin/coins/withdrawals/:id/approve', path);
+  if (method === 'POST' && adminWithdrawalApproveMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    if (user.role !== 'admin') return errorResponse(res, 403, 'Admin access required');
+    return handleAdminApproveWithdrawal(req, res, adminWithdrawalApproveMatch);
+  }
+  const adminWithdrawalRejectMatch = matchRoute('/api/admin/coins/withdrawals/:id/reject', path);
+  if (method === 'POST' && adminWithdrawalRejectMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    if (user.role !== 'admin') return errorResponse(res, 403, 'Admin access required');
+    return handleAdminRejectWithdrawal(req, res, adminWithdrawalRejectMatch);
+  }
+  const adminWithdrawalCompleteMatch = matchRoute('/api/admin/coins/withdrawals/:id/complete', path);
+  if (method === 'POST' && adminWithdrawalCompleteMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    if (user.role !== 'admin') return errorResponse(res, 403, 'Admin access required');
+    return handleAdminCompleteWithdrawal(req, res, adminWithdrawalCompleteMatch);
   }
 
   // 404 for unknown API routes

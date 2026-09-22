@@ -98,6 +98,22 @@ export function requireAuth(req, res) {
 }
 
 /**
+ * Require admin role - returns 403 if user is not an admin.
+ * Looks up the role from the database since JWT tokens don't include it.
+ */
+export function requireAdmin(req, res) {
+  const user = requireAuth(req, res);
+  if (!user) return null;
+
+  const dbUser = queryOne('SELECT role FROM users WHERE id = ?', [user.sub]);
+  if (!dbUser || dbUser.role !== 'admin') {
+    errorResponse(res, 403, 'Admin access required');
+    return null;
+  }
+  return user;
+}
+
+/**
  * Handle POST /api/auth/register
  */
 export async function handleRegister(req, res) {

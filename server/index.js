@@ -10,7 +10,7 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import config from './config.js';
 import { initDatabase, closeDatabase, seedDefaultTheme } from './database.js';
-import { requireAuth } from './auth.js';
+import { requireAuth, requireAdmin } from './auth.js';
 import { handleRegister, handleLogin, handleVerify, handleVerifyEmailLink, handleForgotPassword, handleResetPassword } from './auth.js';
 import { handleGetProfile, handleGetPublicProfile, handleUpdateProfile, handleUploadPhoto, handleUpdateTheme, handleUploadBackground } from './profile.js';
 import { handleGetTestimonials, handleCreateTestimonial, handleDeleteTestimonial, handleGetUserTestimonials } from './testimonials.js';
@@ -697,56 +697,48 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
 
   // COINS-01: Admin coin economy routes (admin only)
   if (method === 'GET' && path === '/api/admin/coins/summary') {
-    const user = requireAuth(req, res);
+    const user = requireAdmin(req, res);
     if (!user) return;
-    if (user.role !== 'admin') return errorResponse(res, 403, 'Admin access required');
     return handleAdminCoinSummary(req, res);
   }
   if (method === 'GET' && path === '/api/admin/coins/topups') {
-    const user = requireAuth(req, res);
+    const user = requireAdmin(req, res);
     if (!user) return;
-    if (user.role !== 'admin') return errorResponse(res, 403, 'Admin access required');
     return handleAdminListTopups(req, res);
   }
   const adminTopupApproveMatch = matchRoute('/api/admin/coins/topups/:id/approve', path);
   if (method === 'POST' && adminTopupApproveMatch) {
-    const user = requireAuth(req, res);
+    const user = requireAdmin(req, res);
     if (!user) return;
-    if (user.role !== 'admin') return errorResponse(res, 403, 'Admin access required');
     return handleAdminApproveTopup(req, res, adminTopupApproveMatch);
   }
   const adminTopupRejectMatch = matchRoute('/api/admin/coins/topups/:id/reject', path);
   if (method === 'POST' && adminTopupRejectMatch) {
-    const user = requireAuth(req, res);
+    const user = requireAdmin(req, res);
     if (!user) return;
-    if (user.role !== 'admin') return errorResponse(res, 403, 'Admin access required');
     return handleAdminRejectTopup(req, res, adminTopupRejectMatch);
   }
   if (method === 'GET' && path === '/api/admin/coins/withdrawals') {
-    const user = requireAuth(req, res);
+    const user = requireAdmin(req, res);
     if (!user) return;
-    if (user.role !== 'admin') return errorResponse(res, 403, 'Admin access required');
     return handleAdminListWithdrawals(req, res);
   }
   const adminWithdrawalApproveMatch = matchRoute('/api/admin/coins/withdrawals/:id/approve', path);
   if (method === 'POST' && adminWithdrawalApproveMatch) {
-    const user = requireAuth(req, res);
+    const user = requireAdmin(req, res);
     if (!user) return;
-    if (user.role !== 'admin') return errorResponse(res, 403, 'Admin access required');
     return handleAdminApproveWithdrawal(req, res, adminWithdrawalApproveMatch);
   }
   const adminWithdrawalRejectMatch = matchRoute('/api/admin/coins/withdrawals/:id/reject', path);
   if (method === 'POST' && adminWithdrawalRejectMatch) {
-    const user = requireAuth(req, res);
+    const user = requireAdmin(req, res);
     if (!user) return;
-    if (user.role !== 'admin') return errorResponse(res, 403, 'Admin access required');
     return handleAdminRejectWithdrawal(req, res, adminWithdrawalRejectMatch);
   }
   const adminWithdrawalCompleteMatch = matchRoute('/api/admin/coins/withdrawals/:id/complete', path);
   if (method === 'POST' && adminWithdrawalCompleteMatch) {
-    const user = requireAuth(req, res);
+    const user = requireAdmin(req, res);
     if (!user) return;
-    if (user.role !== 'admin') return errorResponse(res, 403, 'Admin access required');
     return handleAdminCompleteWithdrawal(req, res, adminWithdrawalCompleteMatch);
   }
 

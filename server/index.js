@@ -9,9 +9,11 @@ import { resolve, extname } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import config from './config.js';
-import { initDatabase, closeDatabase, seedDefaultTheme } from './database.js';
+import { initDatabase, closeDatabase, seedDefaultTheme, seedAdminUser } from './database.js';
 import { requireAuth, requireAdmin } from './auth.js';
 import { handleRegister, handleLogin, handleVerify, handleVerifyEmailLink, handleForgotPassword, handleResetPassword } from './auth.js';
+import { handleAdminLogin, handleAdminChangePassword } from './adminAuth.js';
+import { handleGetSettings, handleUpdateSettings } from './settings.js';
 import { handleGetProfile, handleGetPublicProfile, handleUpdateProfile, handleUploadPhoto, handleUpdateTheme, handleUploadBackground } from './profile.js';
 import { handleGetTestimonials, handleCreateTestimonial, handleDeleteTestimonial, handleGetUserTestimonials } from './testimonials.js';
 import { handleGetPhotos, handleUploadPhoto as handleGalleryUploadPhoto, handleDeletePhoto, handleGetOwnPhotos } from './gallery.js';
@@ -210,6 +212,16 @@ async function handleApi(req, res) {
   }
   if (method === 'POST' && path === '/api/auth/reset-password') {
     return handleResetPassword(req, res);
+  }
+
+  // Admin auth routes (no auth for login, admin auth for change-password)
+  if (method === 'POST' && path === '/api/admin/login') {
+    return handleAdminLogin(req, res);
+  }
+  if (method === 'POST' && path === '/api/admin/change-password') {
+    const user = requireAdmin(req, res);
+    if (!user) return;
+    return handleAdminChangePassword(req, res, user);
   }
 
   // Profile routes (auth required)
@@ -695,6 +707,18 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
     return handleGetWithdrawals(req, res, user);
   }
 
+  // Admin settings routes (admin only)
+  if (method === 'GET' && path === '/api/admin/settings') {
+    const user = requireAdmin(req, res);
+    if (!user) return;
+    return handleGetSettings(req, res);
+  }
+  if (method === 'PUT' && path === '/api/admin/settings') {
+    const user = requireAdmin(req, res);
+    if (!user) return;
+    return handleUpdateSettings(req, res);
+  }
+
   // COINS-01: Admin coin economy routes (admin only)
   if (method === 'GET' && path === '/api/admin/coins/summary') {
     const user = requireAdmin(req, res);
@@ -816,6 +840,9 @@ function start() {
 
   // PROFILE-02: seed default theme and backfill existing profiles
   seedDefaultTheme();
+
+  // ADMIN-SEED: create default admin user if none exists
+  seedAdminUser();
 
   // COMMUNITY-01: seed Nationwide communities and City/Barangay communities
   // derived from existing profile locations (idempotent).

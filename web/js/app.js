@@ -157,15 +157,13 @@ function render() {
       html = renderCommunityPage();
       initFn = initCommunityPage;
       break;
-    case '/admin':
-      if (!isAuthenticated()) {
-        navigate('/login');
-        return;
-      }
-      html = renderAdminPage();
-      initFn = initAdminPage;
-      break;
     default:
+      // Admin routes: /admin, /admin/login, /admin/dashboard, /admin/cashin, etc.
+      if (route.startsWith('/admin')) {
+        html = renderAdminPage();
+        initFn = initAdminPage;
+        break;
+      }
       // GALLERY-ROUTES-01: gallery + album hash routes MUST be matched before
       // the public-profile catch-all below, because `(.+)` also matches "/"
       // and would otherwise swallow /profile/:user/photos[/:albumId].

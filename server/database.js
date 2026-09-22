@@ -916,6 +916,21 @@ export function initDatabase() {
     console.log('[COINS-01] Wallet backfill skipped:', err.message);
   }
 
+  // APP-SETTINGS: app_settings table for PayMongo config and other key-value settings.
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+  } catch (err) { /* safe no-op */ }
+
+  // ADMIN-SEED: Create default admin user (admin/admin) if no admin exists.
+  // Note: actual seeding is done async via seedAdminUser() called from index.js startup.
+  // Table creation here ensures the schema is ready.
+
   console.log('[DB] Database initialized successfully');
   return database;
 }
@@ -1007,6 +1022,34 @@ export function seedDefaultTheme() {
       console.log(`[PROFILE-02] Backfilled ${updated.changes} profile(s) with default theme`);
     }
   })();
+}
+
+/**
+ * Seed the default admin user (admin/admin) if none exists.
+ * Async because it uses bcrypt — must be called after initDatabase().
+ */
+export async function seedAdminUser() {
+  const database = getDb();
+  try {
+    const adminExists = database.prepare("SELECT id FROM users WHERE role = 'admin'").get();
+    if (adminExists) return;
+
+    const bcrypt = await import('bcrypt');
+    const adminId = crypto.randomUUID();
+    const passwordHash = await bcrypt.hash('admin', 12);
+    const ts = new Date().toISOString();
+    database.prepare(
+      "INSERT INTO users (id, email, username, password_hash, role, account_status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(adminId, 'admin@komuniph.local', 'admin', passwordHash, 'admin', 'active', ts, ts);
+
+    database.prepare(
+      "INSERT INTO user_wallets (user_id, balance, frozen_balance) VALUES (?, 0, 0)"
+    ).run(adminId);
+
+    console.log('[ADMIN-SEED] Default admin user created (username: admin, password: admin)');
+  } catch (err) {
+    console.log('[ADMIN-SEED] Admin seed skipped:', err.message);
+  }
 }
 
 // Run schema initialization when executed directly

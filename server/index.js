@@ -101,6 +101,7 @@ import {
   handleAdminRejectWithdrawal,
   handleAdminCompleteWithdrawal,
   handleAdminCoinSummary,
+  handleAdminAdjust,
 } from './coins.js';
 import { jsonResponse, errorResponse, matchRoute, parseQuery } from './utils.js';
 
@@ -724,6 +725,11 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
     const user = requireAdmin(req, res);
     if (!user) return;
     return handleAdminCoinSummary(req, res);
+  }
+  if (method === 'POST' && path === '/api/admin/coins/adjust') {
+    const user = requireAdmin(req, res);
+    if (!user) return;
+    return handleAdminAdjust(req, res);
   }
   if (method === 'GET' && path === '/api/admin/coins/topups') {
     const user = requireAdmin(req, res);

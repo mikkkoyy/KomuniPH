@@ -8,7 +8,8 @@
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "db:init": "node server/database.js --init",
-    "test:bugfix": "node tests/test_bugfix01.mjs"
+    "test:bugfix": "node tests/test_bugfix01.mjs",
+    "test:coins": "node tests/test_coins.mjs"
   },
   "engines": {
     "node": ">=18.0.0"

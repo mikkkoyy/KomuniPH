@@ -24,6 +24,7 @@ KomuniPH is a community-first social networking platform for the Philippines, bu
 - **Events** — community events with member creation and moderator deletion
 - **Media** — image URLs shared in community posts, listed per community
 - **Settings** — per-community toggles (`allow_member_posts`, `allow_member_comments`, `allow_events`, `allow_media`, `moderation_enabled`)
+- **Coins & Wallet** — one wallet per user (`.balance`, `.frozen_balance`, available = balance − frozen); an atomic, source-idempotent transaction ledger (`coin_transactions`) records every credit/debit/freeze/unfreeze with running balances; GCash/Maya top-ups via PayMongo webhooks (`/api/coins/paymongo/webhook`); withdrawals freeze coins on request and cash them out on admin approval; a one-time 15-coin reward on identity verification; admin adjust `/api/admin/coins/adjust` with full audit trail
 
 ## Getting Started
 
@@ -46,5 +47,11 @@ Focused discovery suite (COMMUNITY-04):
 
 ```bash
 node tests/test_community_discovery.mjs
+```
+
+Coin economy suite (COINS-01) — self-contained (temp DB, runs offline):
+
+```bash
+npm run test:coins
 ```
 

@@ -7,44 +7,24 @@ import { queryOne, queryAll, execute, transaction } from './database.js';
 import { generateId, now, jsonResponse, errorResponse, parseBody } from './utils.js';
 import config from './config.js';
 import { createSource, getSource, verifyWebhookSignature } from './paymongo.js';
+import { FIRST_VERIFICATION_REWARD_COINS, getVerifiedRecordForUser } from './identity.js';
 
 const COINS_PER_PHP = 10;
 const PHP_PER_COIN = 1 / COINS_PER_PHP;
 
-/**
- * Record a coin transaction and update the wallet balance.
- * Must be called inside an existing transaction() block.
- */
-export function recordTransaction(userId, amount, type, description, referenceType, referenceId) {
-  const txId = generateId();
-  execute(
-    'INSERT INTO coin_transactions (id, user_id, amount, type, reference_type, reference_id, description) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [txId, userId, amount, type, referenceType || null, referenceId || null, description || null]
-  );
+const CREDIT_TYPES = new Set(['earn', 'cash_in', 'creator_payout', 'admin_adjust', 'verification_reward']);
+const DEBIT_TYPES = new Set(['spend', 'cash_out', 'freeze', 'admin_adjust']);
+const LEDGER_TYPES = new Set(['earn', 'spend', 'cash_in', 'cash_out', 'creator_payout', 'admin_adjust', 'freeze', 'unfreeze', 'verification_reward']);
 
-  if (type === 'freeze') {
-    execute(
-      'UPDATE user_wallets SET frozen_balance = frozen_balance + ?, updated_at = datetime(\'now\') WHERE user_id = ?',
-      [amount, userId]
-    );
-  } else if (type === 'unfreeze') {
-    execute(
-      'UPDATE user_wallets SET frozen_balance = frozen_balance - ?, updated_at = datetime(\'now\') WHERE user_id = ?',
-      [amount, userId]
-    );
-  } else if (['earn', 'cash_in', 'creator_payout', 'admin_adjust'].includes(type)) {
-    execute(
-      'UPDATE user_wallets SET balance = balance + ?, updated_at = datetime(\'now\') WHERE user_id = ?',
-      [amount, userId]
-    );
-  } else if (['spend', 'cash_out'].includes(type)) {
-    execute(
-      'UPDATE user_wallets SET balance = balance - ?, updated_at = datetime(\'now\') WHERE user_id = ?',
-      [amount, userId]
-    );
-  }
+function markError(error, code) {
+  if (error && typeof error === 'object') error.code = code;
+  return error;
+}
 
-  return txId;
+function assertValidLedgerArgs(amount, direction, type) {
+  if (!Number.isInteger(amount) || amount <= 0) throw new Error(`Invalid coin amount: ${amount}`);
+  if (!['credit', 'debit'].includes(direction)) throw new Error(`Invalid ledger direction: ${direction}`);
+  if (!LEDGER_TYPES.has(type)) throw new Error(`Invalid ledger type: ${type}`);
 }
 
 /**
@@ -57,6 +37,184 @@ function ensureWallet(userId) {
     wallet = queryOne('SELECT * FROM user_wallets WHERE user_id = ?', [userId]);
   }
   return wallet;
+}
+
+/**
+ * Read the user's current wallet position (coins are integer units only).
+ * @returns {{ balance: number, frozen_balance: number, available_balance: number, updated_at: string }}
+ */
+export function getCoinBalance(userId) {
+  const wallet = ensureWallet(userId);
+  return {
+    balance: wallet.balance,
+    frozen_balance: wallet.frozen_balance,
+    available_balance: wallet.balance - wallet.frozen_balance,
+    updated_at: wallet.updated_at,
+  };
+}
+
+/**
+ * Record a coin transaction and update the wallet atomically.
+ *
+ * COINS-01 accounting model:
+ *  - Every row captures the AVAILABLE balance (balance - frozen_balance) before
+ *    and after the movement, making the ledger fully replayable and invariant-checked.
+ *  - freeze  (debit)  moves available coins into the frozen reserve.
+ *  - unfreeze(credit) releases reserved coins back to available.
+ *  - cash_out(debit)  settles an approved withdrawal: it can never exceed the
+ *    frozen reserve, so the available balance is unchanged by the approval.
+ *  - spend   (debit)  checks available balance (no frozen coins).
+ *  - All other debits check available; all credits raise available.
+ *
+ * The function is self-atomic: it always runs inside a transaction (nested calls
+ * become SQLite savepoints), so it is safe both standalone and when composed with
+ * the caller's own transaction() block. A source event can only ever produce one
+ * ledger row of a given type via the partial unique index on
+ * (reference_type, reference_id, type).
+ *
+ * @param {string} userId - The user ID
+ * @param {number} amount - Positive coin amount in integer units
+ * @param {string} direction - 'credit' or 'debit'
+ * @param {string} type - One of LEDGER_TYPES
+ * @param {string} description - Human-readable description
+ * @param {string} referenceType - e.g. 'coin_topup', 'withdrawal_request'
+ * @param {string} referenceId - The ID of the referencing record
+ * @returns {string} The transaction ID
+ */
+export function recordTransaction(userId, amount, direction, type, description, referenceType, referenceId) {
+  assertValidLedgerArgs(amount, direction, type);
+  return transaction(() => {
+    const wallet = ensureWallet(userId);
+    const availableBefore = wallet.balance - wallet.frozen_balance;
+    let balance = wallet.balance;
+    let frozen = wallet.frozen_balance;
+
+    if (type === 'freeze') {
+      if (direction !== 'debit') throw markError(new Error('freeze must be recorded as a debit'), 'INVALID_LEDGER_DIRECTION');
+      if (availableBefore < amount) {
+        throw markError(new Error(`Insufficient available balance: ${availableBefore}`), 'INSUFFICIENT_BALANCE');
+      }
+      frozen += amount;
+    } else if (type === 'unfreeze') {
+      if (direction !== 'credit') throw markError(new Error('unfreeze must be recorded as a credit'), 'INVALID_LEDGER_DIRECTION');
+      if (wallet.frozen_balance < amount) throw new Error('Cannot unfreeze more than the frozen balance');
+      frozen -= amount;
+    } else if (type === 'cash_out') {
+      if (direction !== 'debit') throw markError(new Error('cash_out must be recorded as a debit'), 'INVALID_LEDGER_DIRECTION');
+      if (wallet.frozen_balance < amount) throw new Error('Cannot cash out more than the frozen balance');
+      balance -= amount;
+      frozen -= amount;
+    } else if (direction === 'debit') {
+      if (availableBefore < amount) {
+        throw markError(new Error(`Insufficient available balance: ${availableBefore}`), 'INSUFFICIENT_BALANCE');
+      }
+      balance -= amount;
+    } else {
+      balance += amount;
+    }
+
+    const availableAfter = balance - frozen;
+    const txId = generateId();
+    execute(
+      `INSERT INTO coin_transactions (id, user_id, amount, direction, type, reference_type, reference_id, description, balance_before, balance_after, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+      [txId, userId, amount, direction, type, referenceType || null, referenceId || null, description || null, availableBefore, availableAfter]
+    );
+    execute(
+      "UPDATE user_wallets SET balance = ?, frozen_balance = ?, updated_at = datetime('now') WHERE user_id = ?",
+      [balance, frozen, userId]
+    );
+    return txId;
+  });
+}
+
+/**
+ * Credit coins to a user (earn, cash_in, creator_payout, admin_adjust, verification_reward).
+ */
+export function creditCoins({ userId, amount, type, description, referenceType, referenceId }) {
+  if (!CREDIT_TYPES.has(type)) throw new Error(`Invalid credit ledger type: ${type}`);
+  return recordTransaction(userId, amount, 'credit', type, description, referenceType, referenceId);
+}
+
+/**
+ * Debit coins from a user (spend, cash_out). Fails with code INSUFFICIENT_BALANCE
+ * when the available balance is insufficient (spend), or the frozen reserve does
+ * not cover the amount (cash_out).
+ */
+export function debitCoins({ userId, amount, type, description, referenceType, referenceId }) {
+  if (!DEBIT_TYPES.has(type)) throw new Error(`Invalid debit ledger type: ${type}`);
+  return recordTransaction(userId, amount, 'debit', type, description, referenceType, referenceId);
+}
+
+/**
+ * Freeze available coins for an in-flight withdrawal request.
+ */
+export function freezeCoins({ userId, amount, description, referenceType, referenceId }) {
+  return recordTransaction(userId, amount, 'debit', 'freeze', description, referenceType, referenceId);
+}
+
+/**
+ * Release previously frozen coins (rejected withdrawal).
+ */
+export function unfreezeCoins({ userId, amount, description, referenceType, referenceId }) {
+  return recordTransaction(userId, amount, 'credit', 'unfreeze', description, referenceType, referenceId);
+}
+
+/**
+ * Award the one-time identity verification reward (15 Coins).
+ *
+ * Server-authoritative and idempotent:
+ *  - Only fires against an actual 'verified' identity_verifications record.
+ *  - Never reaches the client; it is invoked by the server-side verification flow.
+ *  - A conditional UPDATE claims the reward (WHERE reward_awarded = 0) which only
+ *    one "winner" can win even under concurrent calls, and the ledger write is
+ *    guarded by the partial unique index on the (identity_verification) reference.
+ *  - The whole reward — claim + ledger entry — commits atomically or not at all.
+ *
+ * @param {string} userId - The user ID
+ * @returns {{ awarded: boolean, newBalance: number, message: string }}
+ */
+export function awardVerificationReward(userId) {
+  return transaction(() => {
+    const record = getVerifiedRecordForUser(userId);
+    if (!record) throw new Error('No verified identity record found for user');
+
+    const alreadyAwarded = record.reward_awarded === 1 ||
+      (queryOne(
+        "SELECT COUNT(*) as c FROM coin_transactions WHERE user_id = ? AND type = 'verification_reward' AND reference_id = ?",
+        [userId, record.id]
+      )?.c ?? 0) > 0;
+
+    if (alreadyAwarded) {
+      // Reconcile the flag if the ledger entry exists but the flag was not persisted.
+      execute(
+        "UPDATE identity_verifications SET reward_awarded = 1, updated_at = datetime('now') WHERE id = ? AND reward_awarded = 0",
+        [record.id]
+      );
+      return { awarded: false, newBalance: getCoinBalance(userId).balance, message: 'Verification reward already awarded' };
+    }
+
+    const claimed = execute(
+      "UPDATE identity_verifications SET reward_awarded = 1, updated_at = datetime('now') WHERE id = ? AND reward_awarded = 0",
+      [record.id]
+    );
+    if (claimed.changes === 0) {
+      return { awarded: false, newBalance: getCoinBalance(userId).balance, message: 'Verification reward already awarded' };
+    }
+
+    recordTransaction(
+      userId,
+      FIRST_VERIFICATION_REWARD_COINS,
+      'credit',
+      'verification_reward',
+      'First identity verification reward',
+      'identity_verification',
+      record.id
+    );
+
+    const newBalance = getCoinBalance(userId).balance;
+    return { awarded: true, newBalance, message: `₱${(FIRST_VERIFICATION_REWARD_COINS / COINS_PER_PHP).toFixed(2)} cash-in equivalent credited` };
+  });
 }
 
 /**
@@ -118,10 +276,13 @@ export function handleGetTransactions(req, res, user) {
       transactions: transactions.map(tx => ({
         id: tx.id,
         amount: tx.amount,
+        direction: tx.direction,
         type: tx.type,
         reference_type: tx.reference_type,
         reference_id: tx.reference_id,
         description: tx.description,
+        balance_before: tx.balance_before,
+        balance_after: tx.balance_after,
         created_at: tx.created_at,
       })),
       total: totalRow ? totalRow.count : 0,
@@ -360,21 +521,30 @@ export async function handlePaymongoWebhook(req, res) {
       return jsonResponse(res, 200, { received: true, amount_mismatch: true });
     }
 
-    // Credit coins to user
-    transaction(() => {
-      execute(
-        "UPDATE coin_topups SET status = 'completed', updated_at = datetime('now') WHERE id = ?",
+    // Credit coins to user. Ledger + status flip commit atomically, and the
+    // guarded UPDATE makes this handler idempotent even if PayMongo replays
+    // the same event: once completed, no second ledger entry can be created.
+    const credited = transaction(() => {
+      const result = execute(
+        "UPDATE coin_topups SET status = 'completed', updated_at = datetime('now') WHERE id = ? AND status = 'pending'",
         [topup.id]
       );
+      if (result.changes === 0) return false;
       recordTransaction(
         topup.user_id,
         topup.coins_amount,
+        'credit',
         'cash_in',
         `Cash in ₱${topup.php_amount} via ${topup.payment_method}`,
         'coin_topup',
         topup.id
       );
+      return true;
     });
+
+    if (!credited) {
+      return jsonResponse(res, 200, { received: true, already_processed: true });
+    }
 
     console.log(`[PAYMONGO] Topup ${topup.id} completed: ${topup.coins_amount} coins credited to user ${topup.user_id}`);
     jsonResponse(res, 200, { received: true, credited: true });
@@ -432,7 +602,9 @@ export async function handleCreateWithdrawal(req, res, user) {
         [withdrawalId, user.sub, coins_amount, phpAmount, payment_method, account_number.trim(), account_name.trim(), timestamp, timestamp]
       );
 
-      recordTransaction(user.sub, coins_amount, 'freeze', `Withdrawal request: ${coins_amount} coins`, 'withdrawal_request', withdrawalId);
+      // The authoritative availability check happens inside the freeze, so two
+      // concurrent withdrawals for the same user cannot over-freeze their coins.
+      recordTransaction(user.sub, coins_amount, 'debit', 'freeze', `Withdrawal request: ${coins_amount} coins`, 'withdrawal_request', withdrawalId);
     });
 
     jsonResponse(res, 201, {
@@ -449,6 +621,9 @@ export async function handleCreateWithdrawal(req, res, user) {
       message: 'Withdrawal request submitted. Coins are frozen until reviewed.',
     });
   } catch (err) {
+    if (err.code === 'INSUFFICIENT_BALANCE') {
+      return errorResponse(res, 422, err.message);
+    }
     console.error('[COINS] Create withdrawal error:', err);
     errorResponse(res, 500, 'Internal server error');
   }
@@ -521,16 +696,27 @@ export async function handleAdminApproveTopup(req, res, params) {
     const body = await parseBody(req);
     const adminNotes = body.admin_notes || null;
 
-    transaction(() => {
+    const completed = transaction(() => {
       const result = execute(
         "UPDATE coin_topups SET status = 'completed', admin_notes = ?, updated_at = datetime('now') WHERE id = ? AND status = 'pending'",
         [adminNotes, topup.id]
       );
-      if (result.changes === 0) {
-        return errorResponse(res, 409, 'Top-up was already processed');
-      }
-      recordTransaction(topup.user_id, topup.coins_amount, 'cash_in', `Cash in ₱${topup.php_amount} via ${topup.payment_method}`, 'coin_topup', topup.id);
+      if (result.changes === 0) return false;
+      recordTransaction(
+        topup.user_id,
+        topup.coins_amount,
+        'credit',
+        'cash_in',
+        `Cash in ₱${topup.php_amount} via ${topup.payment_method}`,
+        'coin_topup',
+        topup.id
+      );
+      return true;
     });
+
+    if (!completed) {
+      return errorResponse(res, 409, 'Top-up was already processed');
+    }
 
     jsonResponse(res, 200, { message: 'Top-up approved and coins credited' });
   } catch (err) {
@@ -635,20 +821,29 @@ export async function handleAdminApproveWithdrawal(req, res, params) {
     const body = await parseBody(req);
     const adminNotes = body.admin_notes || null;
 
-    transaction(() => {
+    // cash_out settles the previously frozen coins: it debits balance and the
+    // frozen reserve atomically, leaving the available balance unchanged.
+    const merged = transaction(() => {
       const result = execute(
         "UPDATE withdrawal_requests SET status = 'approved', admin_notes = ?, updated_at = datetime('now') WHERE id = ? AND status = 'pending'",
         [adminNotes, withdrawal.id]
       );
-      if (result.changes === 0) {
-        return errorResponse(res, 409, 'Withdrawal was already processed');
-      }
-      recordTransaction(withdrawal.user_id, withdrawal.coins_amount, 'cash_out', `Withdrawal approved: ${withdrawal.coins_amount} coins to ${withdrawal.payment_method}`, 'withdrawal_request', withdrawal.id);
-      execute(
-        'UPDATE user_wallets SET frozen_balance = frozen_balance - ?, updated_at = datetime(\'now\') WHERE user_id = ?',
-        [withdrawal.coins_amount, withdrawal.user_id]
+      if (result.changes === 0) return false;
+      recordTransaction(
+        withdrawal.user_id,
+        withdrawal.coins_amount,
+        'debit',
+        'cash_out',
+        `Withdrawal approved: ${withdrawal.coins_amount} coins to ${withdrawal.payment_method}`,
+        'withdrawal_request',
+        withdrawal.id
       );
+      return true;
     });
+
+    if (!merged) {
+      return errorResponse(res, 409, 'Withdrawal was already processed');
+    }
 
     jsonResponse(res, 200, { message: 'Withdrawal approved' });
   } catch (err) {
@@ -675,13 +870,27 @@ export async function handleAdminRejectWithdrawal(req, res, params) {
     const body = await parseBody(req);
     const adminNotes = body.admin_notes || null;
 
-    transaction(() => {
-      execute(
-        'UPDATE withdrawal_requests SET status = \'rejected\', admin_notes = ?, updated_at = datetime(\'now\') WHERE id = ?',
+    const rejected = transaction(() => {
+      const result = execute(
+        "UPDATE withdrawal_requests SET status = 'rejected', admin_notes = ?, updated_at = datetime('now') WHERE id = ? AND status = 'pending'",
         [adminNotes, withdrawal.id]
       );
-      recordTransaction(withdrawal.user_id, withdrawal.coins_amount, 'unfreeze', `Withdrawal rejected: coins unfrozen`, 'withdrawal_request', withdrawal.id);
+      if (result.changes === 0) return false;
+      recordTransaction(
+        withdrawal.user_id,
+        withdrawal.coins_amount,
+        'credit',
+        'unfreeze',
+        'Withdrawal rejected: coins unfrozen',
+        'withdrawal_request',
+        withdrawal.id
+      );
+      return true;
     });
+
+    if (!rejected) {
+      return errorResponse(res, 409, 'Withdrawal was already processed');
+    }
 
     jsonResponse(res, 200, { message: 'Withdrawal rejected and coins unfrozen' });
   } catch (err) {
@@ -745,6 +954,54 @@ export function handleAdminCoinSummary(req, res) {
     });
   } catch (err) {
     console.error('[COINS] Admin summary error:', err);
+    errorResponse(res, 500, 'Internal server error');
+  }
+}
+
+/**
+ * Handle POST /api/admin/coins/adjust
+ * Credits or debits a member's wallet directly (admin only).
+ * Used for corrections, bonuses, clawbacks, and support payouts. Every
+ * adjustment lands in the immutable ledger as an admin_adjust entry.
+ */
+export async function handleAdminAdjust(req, res) {
+  try {
+    const body = await parseBody(req);
+    const { user_id, amount, reason } = body;
+
+    if (!user_id || typeof user_id !== 'string' || !user_id.trim()) {
+      return errorResponse(res, 422, 'user_id is required');
+    }
+    if (!Number.isInteger(amount) || amount === 0) {
+      return errorResponse(res, 422, 'amount must be a non-zero integer (in coins)');
+    }
+    if (!reason || typeof reason !== 'string' || !reason.trim()) {
+      return errorResponse(res, 422, 'reason is required');
+    }
+
+    const target = queryOne('SELECT id FROM users WHERE id = ?', [user_id]);
+    if (!target) {
+      return errorResponse(res, 404, 'User not found');
+    }
+
+    const absAmount = Math.abs(amount);
+    const description = `Admin adjustment: ${reason.trim()}`;
+    const txId = amount > 0
+      ? creditCoins({ userId: user_id, amount: absAmount, type: 'admin_adjust', description, referenceType: 'admin_adjust' })
+      : debitCoins({ userId: user_id, amount: absAmount, type: 'admin_adjust', description, referenceType: 'admin_adjust' });
+
+    jsonResponse(res, 200, {
+      message: amount > 0
+        ? `Added ${absAmount} coins to the wallet`
+        : `Deducted ${absAmount} coins from the wallet`,
+      balance: getCoinBalance(user_id),
+      transaction_id: txId,
+    });
+  } catch (err) {
+    if (err.code === 'INSUFFICIENT_BALANCE') {
+      return errorResponse(res, 422, err.message);
+    }
+    console.error('[COINS] Admin adjust error:', err);
     errorResponse(res, 500, 'Internal server error');
   }
 }

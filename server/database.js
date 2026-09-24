@@ -207,6 +207,25 @@ export function initDatabase() {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    -- IDENTITY-01: Identity verification records
+    CREATE TABLE IF NOT EXISTS identity_verifications (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      legal_name TEXT,
+      birthday TEXT,
+      address TEXT,
+      status TEXT NOT NULL DEFAULT 'unverified' CHECK (status IN ('unverified','pending','review_required','verified','rejected')),
+      submitted_at TEXT NOT NULL DEFAULT (datetime('now')),
+      verified_at TEXT,
+      reward_awarded INTEGER NOT NULL DEFAULT 0 CHECK (reward_awarded IN (0,1)),
+      review_notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_identity_verifications_user_id ON identity_verifications(user_id);
+    CREATE INDEX IF NOT EXISTS idx_identity_verifications_status ON identity_verifications(status);
+
     -- Indexes for performance
     CREATE INDEX IF NOT EXISTS idx_profiles_user_id ON profiles(user_id);
     CREATE INDEX IF NOT EXISTS idx_posts_author_id ON posts(author_id);
@@ -815,20 +834,92 @@ export function initDatabase() {
     `);
   } catch (err) { /* safe no-op */ }
 
+  // COINS-01: Transactional ledger with immutable before/after accounting.
+  // The legacy coin_transactions table (pre-COINS-01) lacked the accounting
+  // columns (direction, balance_before, balance_after) and its type CHECK
+  // could not record the 15-coin identity verification reward. SQLite cannot
+  // ALTER a CHECK constraint, so when that legacy shape is detected the
+  // table is recreated in place, preserving every existing row (columns,
+  // foreign key, and data) — historical before/after balances are replayed
+  // from the legacy balance movement. Idempotent on every startup.
   try {
-    database.exec(`
-      CREATE TABLE IF NOT EXISTS coin_transactions (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        amount INTEGER NOT NULL,
-        type TEXT NOT NULL CHECK (type IN ('earn','spend','cash_in','cash_out','creator_payout','admin_adjust','freeze','unfreeze')),
-        reference_type TEXT,
-        reference_id TEXT,
-        description TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    const ledgerTable = database.prepare(
+      "SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name = 'coin_transactions'"
+    ).get();
+    const ledgerHasAccounting =
+      ledgerTable &&
+      ['direction', 'balance_before', 'balance_after'].every(col =>
+        database.prepare('PRAGMA table_info(coin_transactions)').all().some(c => c.name === col)
       );
-    `);
-  } catch (err) { /* safe no-op */ }
+    const ledgerCanStoreReward = ledgerTable && (ledgerTable.sql || '').includes('verification_reward');
+
+    if (!ledgerTable) {
+      database.exec(`
+        CREATE TABLE coin_transactions (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          amount INTEGER NOT NULL,
+          direction TEXT NOT NULL DEFAULT 'credit' CHECK (direction IN ('credit','debit')),
+          type TEXT NOT NULL CHECK (type IN ('earn','spend','cash_in','cash_out','creator_payout','admin_adjust','freeze','unfreeze','verification_reward')),
+          reference_type TEXT,
+          reference_id TEXT,
+          description TEXT,
+          balance_before INTEGER NOT NULL DEFAULT 0,
+          balance_after INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+      `);
+    } else if (!ledgerHasAccounting || !ledgerCanStoreReward) {
+      const legacyRows = database.prepare(
+        'SELECT id, user_id, type, amount FROM coin_transactions ORDER BY created_at ASC, rowid ASC'
+      ).all();
+      database.exec(`
+        CREATE TABLE coin_transactions_new (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          amount INTEGER NOT NULL,
+          direction TEXT NOT NULL DEFAULT 'credit' CHECK (direction IN ('credit','debit')),
+          type TEXT NOT NULL CHECK (type IN ('earn','spend','cash_in','cash_out','creator_payout','admin_adjust','freeze','unfreeze','verification_reward')),
+          reference_type TEXT,
+          reference_id TEXT,
+          description TEXT,
+          balance_before INTEGER NOT NULL DEFAULT 0,
+          balance_after INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+      `);
+      database.exec(`
+        INSERT INTO coin_transactions_new (id, user_id, amount, type, reference_type, reference_id, description, created_at)
+        SELECT id, user_id, amount, type, reference_type, reference_id, description, created_at
+        FROM coin_transactions
+      `);
+      database.exec('DROP TABLE coin_transactions');
+      database.exec('ALTER TABLE coin_transactions_new RENAME TO coin_transactions');
+
+      // Replay legacy rows into the accounting columns using the available
+      // balance (balance - frozen_balance) movement each type represents.
+      const creditTypes = ['earn', 'cash_in', 'creator_payout', 'admin_adjust'];
+      const debitTypes = ['spend', 'cash_out', 'freeze'];
+      const availableByUser = new Map();
+      const replay = database.prepare(
+        'UPDATE coin_transactions SET direction = ?, balance_before = ?, balance_after = ? WHERE id = ?'
+      );
+      for (const row of legacyRows) {
+        const available = availableByUser.get(row.user_id) ?? 0;
+        let after = available;
+        if (creditTypes.includes(row.type)) after = available + row.amount;
+        else if (debitTypes.includes(row.type)) after = available - row.amount;
+        else if (row.type === 'unfreeze') after = available + row.amount;
+        replay.run(debitTypes.includes(row.type) ? 'debit' : 'credit', available, Math.max(after, 0), row.id);
+        availableByUser.set(row.user_id, after);
+      }
+      if (legacyRows.length > 0) {
+        console.log(`[COINS-01] Upgraded coin_transactions to ledger schema (${legacyRows.length} preserved row(s))`);
+      }
+    }
+  } catch (err) {
+    console.log('[COINS-01] coin_transactions migration skipped:', err.message);
+  }
 
   try {
     database.exec('CREATE INDEX IF NOT EXISTS idx_coin_transactions_user_id ON coin_transactions(user_id)');
@@ -839,6 +930,21 @@ export function initDatabase() {
   try {
     database.exec('CREATE INDEX IF NOT EXISTS idx_coin_transactions_created_at ON coin_transactions(created_at DESC)');
   } catch (err) { /* safe no-op */ }
+
+  // COINS-01: Idempotency guard. The same source event (reference_type +
+  // reference_id) must never produce two ledger entries of the same type —
+  // e.g. a PayMongo payment delivered twice, a top-up approved twice, or the
+  // one-time 15-coin verification reward. Multi-leg source events (freeze,
+  // then cash_out OR unfreeze) use distinct types and remain unaffected.
+  try {
+    database.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_coin_transactions_reference_unique
+        ON coin_transactions(reference_type, reference_id, type)
+        WHERE reference_id IS NOT NULL
+    `);
+  } catch (err) {
+    console.log('[COINS-01] Idempotency index skipped:', err.message);
+  }
 
   try {
     database.exec(`
@@ -894,12 +1000,20 @@ export function initDatabase() {
     database.exec("ALTER TABLE coin_topups ADD COLUMN paymongo_source_id TEXT");
   } catch (err) { /* column already exists or table missing — safe no-op */ }
 
-  // COINS-02: Make reference_number nullable for PayMongo-sourced topups.
+  // COINS-01: Make reference_number nullable for PayMongo-sourced topups.
+  // SQLite cannot ALTER a NOT NULL column, so when the live table still
+  // declares reference_number NOT NULL the table is recreated with the FULL
+  // current schema — preserving paymongo_source_id and all other payload
+  // columns, unlike older recreate paths that dropped them.
   try {
-    database.exec("ALTER TABLE coin_topups ALTER COLUMN reference_number DROP NOT NULL");
-  } catch (err) {
-    // SQLite < 3.35 fallback: recreate table with nullable reference_number
-    try {
+    const topupsTable = database.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'coin_topups'"
+    ).get();
+    const referenceNumberNullable = database
+      .prepare('PRAGMA table_info(coin_topups)')
+      .all()
+      .some(col => col.name === 'reference_number' && col.notnull !== 1);
+    if (topupsTable && !referenceNumberNullable) {
       database.exec(`
         CREATE TABLE IF NOT EXISTS coin_topups_new (
           id TEXT PRIMARY KEY,
@@ -910,21 +1024,22 @@ export function initDatabase() {
           reference_number TEXT,
           status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','completed','rejected')),
           admin_notes TEXT,
+          paymongo_source_id TEXT,
           created_at TEXT NOT NULL DEFAULT (datetime('now')),
           updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         )
       `);
       database.exec(`
-        INSERT INTO coin_topups_new (id, user_id, php_amount, coins_amount, payment_method, reference_number, status, admin_notes, created_at, updated_at)
-        SELECT id, user_id, php_amount, coins_amount, payment_method, reference_number, status, admin_notes, created_at, updated_at
+        INSERT INTO coin_topups_new (id, user_id, php_amount, coins_amount, payment_method, reference_number, status, admin_notes, paymongo_source_id, created_at, updated_at)
+        SELECT id, user_id, php_amount, coins_amount, payment_method, reference_number, status, admin_notes, paymongo_source_id, created_at, updated_at
         FROM coin_topups
       `);
       database.exec('DROP TABLE coin_topups');
       database.exec('ALTER TABLE coin_topups_new RENAME TO coin_topups');
       database.exec('CREATE INDEX IF NOT EXISTS idx_coin_topups_user_id ON coin_topups(user_id)');
       database.exec('CREATE INDEX IF NOT EXISTS idx_coin_topups_status ON coin_topups(status)');
-    } catch (recreateErr) { /* table doesn't exist yet — safe no-op */ }
-  }
+    }
+  } catch (recreateErr) { /* table doesn't exist yet — safe no-op */ }
 
   // COINS-01: Create wallets for existing users who don't have one yet.
   try {

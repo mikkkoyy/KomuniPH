@@ -9,7 +9,7 @@ import { resolve, extname } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import config from './config.js';
-import { initDatabase, closeDatabase, seedDefaultTheme, seedAdminUser } from './database.js';
+import { initDatabase, closeDatabase, seedDefaultTheme, seedAdminUser, promoteDevAdmin } from './database.js';
 import { requireAuth, requireAdmin } from './auth.js';
 import { handleRegister, handleLogin, handleVerify, handleVerifyEmailLink, handleForgotPassword, handleResetPassword } from './auth.js';
 import { handleAdminLogin, handleAdminChangePassword } from './adminAuth.js';
@@ -887,6 +887,20 @@ function start() {
 
   // ADMIN-SEED: create default admin user if none exists
   seedAdminUser();
+
+  // CREATOR-01B: optional, env-flag-guarded promotion of a single dev account.
+  // Disabled unless DEV_ADMIN_ENABLED=true AND DEV_ADMIN_USERNAME is set in the
+  // gitignored config/.env. Idempotent; result is audit-logged.
+  if (config.devAdmin.enabled && config.devAdmin.username) {
+    const result = promoteDevAdmin(config.devAdmin.username);
+    if (result.promoted) {
+      console.log(`[ADMIN-SEED] Promoted dev account "${result.username}" to admin`);
+    } else if (result.alreadyAdmin) {
+      console.log(`[ADMIN-SEED] Dev account "${result.username}" is already an admin`);
+    } else {
+      console.log(`[ADMIN-SEED] Dev admin promotion skipped: ${result.reason}`);
+    }
+  }
 
   // COMMUNITY-01: seed Nationwide communities and City/Barangay communities
   // derived from existing profile locations (idempotent).

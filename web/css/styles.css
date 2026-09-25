@@ -5239,3 +5239,68 @@ select:focus {
 .profile-frame.has-profile-design #profile-content {
   position: relative;
 }
+
+/* CREATOR-01B user-content components (text / image / card / sticker).
+   These nodes are absolutely positioned by the renderer and only exist inside
+   the design canvas (#profile-content). All child content is set with element
+   APIs, so these rules are purely visual. */
+.profile-frame.has-profile-design #profile-content .design-component {
+  position: absolute;
+  box-sizing: border-box;
+  overflow: hidden;
+  font-weight: inherit;
+}
+.profile-frame.has-profile-design #profile-content .design-component a,
+.profile-frame.has-profile-design #profile-content .design-component button,
+.profile-frame.has-profile-design #profile-content .design-component p {
+  pointer-events: none;
+}
+.profile-frame.has-profile-design .design-image-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+}
+.profile-frame.has-profile-design .design-image-inner img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.profile-frame.has-profile-design .design-image-fit-cover img {
+  object-fit: cover;
+}
+.profile-frame.has-profile-design .design-image-fit-contain img {
+  object-fit: contain;
+}
+.profile-frame.has-profile-design .design-image-fit-fill img {
+  object-fit: fill;
+}
+.profile-frame.has-profile-design .design-image-inner.design-image-broken {
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px dashed rgba(232, 237, 244, 0.25);
+  color: rgba(232, 237, 244, 0.45);
+}
+.profile-frame.has-profile-design .design-image-inner.design-image-broken img {
+  display: none;
+}
+.profile-frame.has-profile-design .design-text-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+.profile-frame.has-profile-design .design-card-heading {
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 0 0 0.45em;
+}
+.profile-frame.has-profile-design .design-card-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}

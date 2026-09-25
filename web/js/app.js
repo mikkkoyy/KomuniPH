@@ -8,6 +8,7 @@ import { renderLoginPage, renderRegisterPage, renderVerifyEmailPage, renderForgo
 import { renderHomePage, initHomePage, renderPlaceholderPage, initPlaceholderPage } from './feed.js';
 import { renderProfilePage, initProfilePage } from './profile.js';
 import { renderProfileEditorPage, initProfileEditorPage, destroyProfileEditorPage, canLeaveProfileEditor } from './profileEditor.js';
+import { renderCreatorStudioPage, initCreatorStudioPage, destroyCreatorStudioPage, canLeaveCreatorStudio } from './creatorStudio.js';
 // PHASE-3 GALLERY-SPLIT-01: gallery/album pages live in their own modules
 import { renderGalleryPage, initGalleryPage } from './gallery.js';
 import { renderAlbumPage, initAlbumPage } from './albums.js';
@@ -47,10 +48,18 @@ function render() {
   if (route === '/profile/edit' && isAuthenticated() && document.getElementById('profile-editor')) return;
   destroyProfileEditorPage();
 
+  // Keep Creator Studio drafts when Back/Forward would leave the workspace.
+  if (route !== '/creator-studio' && !canLeaveCreatorStudio()) {
+    window.location.hash = '/creator-studio';
+    return;
+  }
+  if (route === '/creator-studio' && isAuthenticated() && document.getElementById('creator-studio')) return;
+
   // Cleanup previous page
   if (destroyMessagesPage) {
     destroyMessagesPage();
   }
+  destroyCreatorStudioPage();
 
   // Clear tokens on logout
   if (route === '/logout') {
@@ -122,8 +131,8 @@ function render() {
         navigate('/login');
         return;
       }
-      html = renderPlaceholderPage('Creator Studio', 'Create and manage your content from one place.', '🎬', 'creator-studio');
-      initFn = initPlaceholderPage;
+      html = renderCreatorStudioPage();
+      initFn = initCreatorStudioPage;
       break;
     case '/marketplace':
       if (!isAuthenticated()) {

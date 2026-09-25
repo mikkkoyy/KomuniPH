@@ -10,7 +10,8 @@
     "db:init": "node server/database.js --init",
     "test:bugfix": "node tests/test_bugfix01.mjs",
     "test:coins": "node tests/test_coins.mjs",
-    "test:creator": "node tests/test_creator_design.mjs"
+    "test:creator": "node tests/test_creator_design.mjs",
+    "test:studio": "node tests/test_creator_studio.mjs"
   },
   "engines": {
     "node": ">=18.0.0"

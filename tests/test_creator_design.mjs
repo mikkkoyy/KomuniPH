@@ -1,9 +1,10 @@
 /**
- * CREATOR-01A — Profile Design Engine test suite.
+ * CREATOR-01A / CREATOR-01B — Profile Design Engine test suite.
  *
- * Run:   npm run test:design
+ * Run:   npm run test:creator
  *
- * Covers the design foundation:
+ * Covers the design foundation (CREATOR-01A) plus the CREATOR-01B content
+ * component contract (text / image / card / sticker configs, rotation):
  *   - controlled component registry + strict layout validation
  *   - design CRUD (create/read/list/update) with server-derived ownership
  *   - publishing flow: one published per user, archival of the previous,
@@ -168,7 +169,7 @@ test('unknown component type is rejected', async () => {
 test('future/unbuilt component types are rejected', async () => {
   const r = await api('POST', '/api/profile/design', {
     token: tokenA,
-    body: { name: 'Future', layout: { components: [{ id: 'c1', type: 'text', x: 0, y: 0, width: 100, height: 100, zIndex: 0, visible: true, locked: false, config: { content: 'hi' } }] } },
+    body: { name: 'Future', layout: { components: [{ id: 'c1', type: 'video', x: 0, y: 0, width: 100, height: 100, zIndex: 0, visible: true, locked: false, config: { content: 'hi' } }] } },
   });
   check(r.status === 400, `expected 400, got ${r.status}`);
   check(String(r.data?.error?.message).includes('not renderable yet'), 'must explain future type is not renderable');
@@ -588,7 +589,108 @@ test('registries expose the controlled contract for clients', async () => {
   for (const type of expected) {
     check(profileDesign.DESIGN_COMPONENT_TYPES.has(type), `missing controlled type: ${type}`);
   }
-  check(profileDesign.DESIGN_COMPONENT_TYPES.size === 8, 'registry must contain exactly the 8 initial types');
+  check(profileDesign.DESIGN_COMPONENT_TYPES.size === 12, 'registry must contain the 8 controlled + 4 content types');
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// B2. Content components (CREATOR-01B)
+// ════════════════════════════════════════════════════════════════════════════
+group('Content components');
+
+test('text component with valid config round-trips', async () => {
+  const config = {
+    text: 'Hello from my profile design',
+    fontSize: 24,
+    fontWeight: 600,
+    textAlign: 'center',
+    lineHeight: 1.5,
+    textColor: '#334155',
+  };
+  const r = await api('POST', '/api/profile/design', {
+    token: tokenA,
+    body: { name: 'Text Comp', layout: { components: [
+      { id: 'txt1', type: 'text', x: 10, y: 20, width: 320, height: 96, zIndex: 0, visible: true, locked: false, rotation: 0, config },
+    ] } },
+  });
+  check(r.status === 201, `expected 201, got ${r.status}: ${JSON.stringify(r.data)}`);
+  const comp = r.data.design.layout.components[0];
+  check(comp.config.text === config.text, 'text must round-trip');
+  check(comp.config.fontSize === 24 && comp.config.fontWeight === 600, 'font settings must round-trip');
+});
+
+test('content config out-of-range values are rejected', async () => {
+  const bad = [
+    { text: { fontSize: 7 } },
+    { text: { fontSize: 'big' } },
+    { text: { fontWeight: 950 } },
+    { text: { lineHeight: 3.5 } },
+    { text: { textAlign: 'justify' } },
+    { text: undefined },
+  ];
+  for (const config of bad) {
+    const r = await api('POST', '/api/profile/design', {
+      token: tokenA,
+      body: { name: 'BadCfg', layout: { components: [
+        { id: randomUUID(), type: 'text', x: 0, y: 0, width: 320, height: 96, zIndex: 0, visible: true, locked: false, config },
+      ] } },
+    });
+    check(r.status === 400, `config ${JSON.stringify(config)} must be rejected, got ${r.status}`);
+  }
+});
+
+test('image config requires an http(s) URL and valid fit', async () => {
+  const good = await api('POST', '/api/profile/design', {
+    token: tokenA,
+    body: { name: 'Img', layout: { components: [
+      { id: 'img1', type: 'image', x: 0, y: 0, width: 360, height: 240, zIndex: 0, visible: true, locked: false, config: { imageUrl: 'https://cdn.example.com/pic.png', fit: 'cover', alt: 'A photo', backgroundColor: '#0f172a' } },
+    ] } },
+  });
+  check(good.status === 201, `expected 201, got ${good.status}`);
+  for (const imageUrl of ['javascript:alert(1)', 'ftp://cdn.example.com/a.png', 'data:text/html,hi', 'https://exa mple.com/x']) {
+    const r = await api('POST', '/api/profile/design', {
+      token: tokenA,
+      body: { name: 'BadImg', layout: { components: [
+        { id: randomUUID(), type: 'image', x: 0, y: 0, width: 360, height: 240, zIndex: 0, visible: true, locked: false, config: { imageUrl, fit: 'contain' } },
+      ] } },
+    });
+    check(r.status === 400, `imageUrl ${JSON.stringify(imageUrl)} must be rejected, got ${r.status}`);
+  }
+  const badFit = await api('POST', '/api/profile/design', {
+    token: tokenA,
+    body: { name: 'BadFit', layout: { components: [
+      { id: randomUUID(), type: 'sticker', x: 0, y: 0, width: 160, height: 160, zIndex: 0, visible: true, locked: false, config: { imageUrl: 'https://cdn.example.com/s.png', fit: 'stretch' } },
+    ] } },
+  });
+  check(badFit.status === 400, `bad fit must be rejected, got ${badFit.status}`);
+});
+
+test('rotation outside 0-360 is rejected', async () => {
+  for (const rotation of [-1, 361, '45deg']) {
+    const r = await api('POST', '/api/profile/design', {
+      token: tokenA,
+      body: { name: 'Rot', layout: { components: [
+        { id: randomUUID(), type: 'card', x: 0, y: 0, width: 340, height: 190, zIndex: 0, visible: true, locked: false, rotation, config: { heading: 'H', body: 'B' } },
+      ] } },
+    });
+    check(r.status === 400, `rotation ${JSON.stringify(rotation)} must be rejected, got ${r.status}`);
+  }
+});
+
+test('card component requires a heading and allows body', async () => {
+  const good = await api('POST', '/api/profile/design', {
+    token: tokenA,
+    body: { name: 'Card', layout: { components: [
+      { id: 'card1', type: 'card', x: 0, y: 0, width: 340, height: 190, zIndex: 0, visible: true, locked: false, config: { heading: 'Welcome', body: 'Thanks for visiting', headingColor: '#0e6e6e', textColor: '#2a2130', textAlign: 'center' } },
+    ] } },
+  });
+  check(good.status === 201, `expected 201, got ${good.status}`);
+  const missingHeading = await api('POST', '/api/profile/design', {
+    token: tokenA,
+    body: { name: 'NoHead', layout: { components: [
+      { id: randomUUID(), type: 'card', x: 0, y: 0, width: 340, height: 190, zIndex: 0, visible: true, locked: false, config: { body: 'B' } },
+    ] } },
+  });
+  check(missingHeading.status === 400, 'card without a heading must be rejected');
 });
 
 // ── Run + report ─────────────────────────────────────────────────────────────

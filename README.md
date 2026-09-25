@@ -25,7 +25,8 @@ KomuniPH is a community-first social networking platform for the Philippines, bu
 - **Media** — image URLs shared in community posts, listed per community
 - **Settings** — per-community toggles (`allow_member_posts`, `allow_member_comments`, `allow_events`, `allow_media`, `moderation_enabled`)
 - **Coins & Wallet** — one wallet per user (`.balance`, `.frozen_balance`, available = balance − frozen); an atomic, source-idempotent transaction ledger (`coin_transactions`) records every credit/debit/freeze/unfreeze with running balances; GCash/Maya top-ups via PayMongo webhooks (`/api/coins/paymongo/webhook`); withdrawals freeze coins on request and cash them out on admin approval; a one-time 15-coin reward on identity verification; admin adjust `/api/admin/coins/adjust` with full audit trail
-- **Profile designs** — server-validated profile layout engine foundation (`/api/profile/design` CRUD + publish/archive): a controlled component registry (profile photo, name, alias, bio, personal info, gallery, testimonials, communities), strict JSON layout validation (geometry/z-index bounds, 64-component cap, canvas bounds, markup/script rejection), exactly one published design per user (publishing archives the previous one, each publish bumps `version`); published designs are attached to own and public profile responses as `profile.design`, while drafts and archived designs are never exposed and invalid stored designs safely degrade to a default profile
+- **Profile designs** — server-validated profile layout engine (`/api/profile/design` CRUD + publish/archive): a controlled component registry (profile photo, name, alias, bio, personal info, gallery, testimonials, communities) plus four user-content components (text, image, card, sticker), strict JSON layout validation (geometry/rotation/z-index bounds, style field limits, per-type config contracts, http(s)-only image URLs, 64-component cap, canvas bounds, markup/script rejection), exactly one published design per user (publishing archives the previous one, each publish bumps `version`); published designs are attached to own and public profile responses as `profile.design`, while drafts and archived designs are never exposed and invalid stored designs safely degrade to a default profile
+- **Creator Studio** — in-app visual editor (`#/creator-studio`) for profile designs: drag/resize/rotate components on a WYSIWYG canvas, snap-to-guides, eight-way handles, an elements panel, a live properties panel (geometry, appearance, per-type content), a layers panel with z-order operations (front/back/forward/backward, hide, lock, duplicate, delete, z-index field), undo/redo, zoom, and a preview mode; drafts are saved per design (Save Draft) and publishing (`designApi.publishDesign`) makes the design live on the owner's profile; the studio only edits the stored model through the existing validated API and never bypasses server checks
 
 ## Getting Started
 
@@ -61,4 +62,37 @@ Profile design engine suite (CREATOR-01A) — self-contained (temp DB, runs offl
 ```bash
 npm run test:creator
 ```
+
+Creator Studio integration suite (CREATOR-01B) — self-contained (temp DB, runs offline):
+
+```bash
+npm run test:studio
+```
+
+BUGFIX regression suite (requires the server running on port 3000):
+
+```bash
+node tests/test_bugfix01.mjs
+```
+
+Community composer suite (requires the server running on port 3000):
+
+```bash
+node tests/test_community_composer.mjs
+```
+
+## Development admin account (CREATOR-01B)
+
+During local development only, a single account can be promoted to `admin` on
+server startup using two gitignored variables in `config/.env`:
+
+```bash
+DEV_ADMIN_ENABLED=true
+DEV_ADMIN_USERNAME=your-username
+```
+
+The promotion is idempotent and reuses the existing `users.role` model /
+`requireAdmin` checks — no bypass, backdoor, or hardcoded credentials. It is a
+no-op in production unless you explicitly enable it. This account was used to
+verify the admin-gated endpoints during local testing.
 

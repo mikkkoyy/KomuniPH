@@ -6,10 +6,10 @@
  * passes strict validation, and the server always derives ownership from the
  * authenticated user (user.sub) — never from the client.
  *
- * This milestone stores and validates the model and serves the published
- * design alongside public/own profiles. The visual drag-and-drop editor is a
- * separate, later milestone; clients that understand the layout can already
- * position the platform's existing controlled modules.
+ * CREATOR-01A stored and validated the model and served the published design
+ * alongside public/own profiles. CREATOR-01B added the visual Creator Studio
+ * editor plus four user-content component types (text / image / card /
+ * sticker) with strict per-type config, per-component style and rotation.
  */
 
 import { queryOne, queryAll, execute, transaction } from './database.js';
@@ -20,6 +20,8 @@ import { validateThemeConfig } from './profile.js';
  * Controlled component types renderable on a profile. Each maps to an existing
  * KomuniPH profile section; content stays server-rendered and escaped, so the
  * design can only reposition/resize/visibility the section, never inject code.
+ * CREATOR-01B added the four user-content types below; those carry a strict
+ * per-type config and are rendered by the client renderer (never server HTML).
  */
 export const DESIGN_COMPONENT_TYPES = new Set([
   'profile_photo',
@@ -30,6 +32,10 @@ export const DESIGN_COMPONENT_TYPES = new Set([
   'gallery',
   'testimonials',
   'communities',
+  'text',
+  'image',
+  'card',
+  'sticker',
 ]);
 
 /**
@@ -37,7 +43,7 @@ export const DESIGN_COMPONENT_TYPES = new Set([
  * never claim a layout the platform cannot render yet.
  */
 export const FUTURE_COMPONENT_TYPES = new Set([
-  'text', 'image', 'video', 'music', 'card', 'sticker', 'button',
+  'video', 'music', 'button',
   'visitor_counter', 'who_visited', 'decoration',
 ]);
 
@@ -56,6 +62,46 @@ const CANVAS_WIDTH_MIN = 320;
 const CANVAS_WIDTH_MAX = 1920;
 const CANVAS_MIN_HEIGHT_MIN = 480;
 const CANVAS_MIN_HEIGHT_MAX = 10000;
+
+// ── CREATOR-01B per-component style & rotation limits ────────────────────────
+const ROTATION_MIN = 0;
+const ROTATION_MAX = 360;
+
+// An empty string means "inherit the platform default" for that property.
+const isCssColor = value => value === '' || /^#[0-9a-fA-F]{3,8}$/.test(value);
+
+const STYLE_FIELDS = new Set([
+  'background', 'textColor', 'borderColor', 'borderWidth', 'borderRadius',
+  'opacity', 'shadowEnabled', 'shadowOffset', 'shadowBlur', 'shadowColor',
+]);
+const BORDER_WIDTH_MAX = 100;
+const BORDER_RADIUS_MAX = 500;
+const SHADOW_OFFSET_MAX = 100;
+const SHADOW_BLUR_MAX = 200;
+
+// ── CREATOR-01B per-type content config limits ───────────────────────────────
+const TEXT_MAX = 2000;
+const HEADING_MAX = 200;
+const ALT_MAX = 200;
+const TEXT_ALIGNS = new Set(['left', 'center', 'right']);
+const IMAGE_FITS = new Set(['cover', 'contain', 'fill']);
+const FONT_SIZE_MIN = 8;
+const FONT_SIZE_MAX = 200;
+const FONT_WEIGHT_MIN = 100;
+const FONT_WEIGHT_MAX = 900;
+const LINE_HEIGHT_MIN = 0.5;
+const LINE_HEIGHT_MAX = 3;
+
+// Content types accept only http(s) image URLs — never data:, javascript: or
+// any scheme that could smuggle script or bypass the render-time img element.
+const HTTP_URL_RE = /^https?:\/\/[^\s'"<>]+$/i;
+
+const CONTENT_TYPE_CONFIG_FIELDS = {
+  text: new Set(['text', 'fontSize', 'fontWeight', 'textAlign', 'lineHeight', 'textColor']),
+  image: new Set(['imageUrl', 'alt', 'fit', 'backgroundColor']),
+  sticker: new Set(['imageUrl', 'alt', 'fit', 'backgroundColor']),
+  card: new Set(['heading', 'body', 'headingColor', 'textAlign', 'textColor']),
+};
 
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -82,6 +128,135 @@ function jsonSafeValue(value, depth = 0) {
       typeof key === 'string' && key.length <= 64 && jsonSafeValue(item, depth + 1));
   }
   return false; // functions, symbols, etc.
+}
+
+/**
+ * CREATOR-01B: rotation + per-component style (background / typography color /
+ * border / radius / opacity / shadow), all optional with safe defaults.
+ */
+function validateComponentRotateStyle(component, errors) {
+  const { id, rotation, style } = component;
+
+  if (rotation !== undefined && (!isFiniteNumber(rotation) || rotation < ROTATION_MIN || rotation > ROTATION_MAX)) {
+    errors.push(`Component "${id}" rotation must be a number between ${ROTATION_MIN} and ${ROTATION_MAX}`);
+  }
+
+  if (style === null || style === undefined) return;
+  if (!isPlainObject(style)) {
+    errors.push(`Component "${id}" style must be an object or null`);
+    return;
+  }
+
+  for (const key of Object.keys(style)) {
+    if (!STYLE_FIELDS.has(key)) errors.push(`Component "${id}" style has unknown field: ${key}`);
+  }
+
+  if (style.background !== undefined && !isCssColor(style.background)) errors.push(`Component "${id}" style.background must be a hex color or empty`);
+  if (style.textColor !== undefined && !isCssColor(style.textColor)) errors.push(`Component "${id}" style.textColor must be a hex color or empty`);
+  if (style.borderColor !== undefined && !isCssColor(style.borderColor)) errors.push(`Component "${id}" style.borderColor must be a hex color or empty`);
+  if (style.shadowColor !== undefined && !isCssColor(style.shadowColor)) errors.push(`Component "${id}" style.shadowColor must be a hex color or empty`);
+
+  if (style.borderWidth !== undefined && (!isFiniteNumber(style.borderWidth) || style.borderWidth < 0 || style.borderWidth > BORDER_WIDTH_MAX)) {
+    errors.push(`Component "${id}" style.borderWidth must be a number between 0 and ${BORDER_WIDTH_MAX}`);
+  }
+  if (style.borderRadius !== undefined && (!isFiniteNumber(style.borderRadius) || style.borderRadius < 0 || style.borderRadius > BORDER_RADIUS_MAX)) {
+    errors.push(`Component "${id}" style.borderRadius must be a number between 0 and ${BORDER_RADIUS_MAX}`);
+  }
+  if (style.opacity !== undefined && (!isFiniteNumber(style.opacity) || style.opacity < 0 || style.opacity > 1)) {
+    errors.push(`Component "${id}" style.opacity must be a number between 0 and 1`);
+  }
+  if (style.shadowOffset !== undefined && (!isFiniteNumber(style.shadowOffset) || style.shadowOffset < -SHADOW_OFFSET_MAX || style.shadowOffset > SHADOW_OFFSET_MAX)) {
+    errors.push(`Component "${id}" style.shadowOffset must be a number between ${-SHADOW_OFFSET_MAX} and ${SHADOW_OFFSET_MAX}`);
+  }
+  if (style.shadowBlur !== undefined && (!isFiniteNumber(style.shadowBlur) || style.shadowBlur < 0 || style.shadowBlur > SHADOW_BLUR_MAX)) {
+    errors.push(`Component "${id}" style.shadowBlur must be a number between 0 and ${SHADOW_BLUR_MAX}`);
+  }
+  if (style.shadowEnabled !== undefined && typeof style.shadowEnabled !== 'boolean') {
+    errors.push(`Component "${id}" style.shadowEnabled must be a boolean`);
+  }
+}
+
+/**
+ * CREATOR-01B: strict per-type config for text / image / card / sticker.
+ * The controlled sections keep a freeish (but json-safe) config that the
+ * renderer ignores; content types get an exact field contract so stored
+ * payloads always map to what the renderer can display.
+ */
+function validateContentConfig(component, errors) {
+  const { id, type, config } = component;
+  if (type !== 'text' && type !== 'image' && type !== 'card' && type !== 'sticker') return;
+
+  if (config === null || config === undefined) {
+    errors.push(`Component "${id}" is a ${type} and requires a config object`);
+    return;
+  }
+  if (!isPlainObject(config)) return; // shape errors already reported
+
+  const allowed = CONTENT_TYPE_CONFIG_FIELDS[type];
+  for (const key of Object.keys(config)) {
+    if (!allowed.has(key)) errors.push(`Component "${id}" config has unknown field: ${key}`);
+  }
+
+  if (type === 'text') {
+    const text = config.text;
+    if (typeof text !== 'string' || !text.trim() || text.trim().length > TEXT_MAX) {
+      errors.push(`Component "${id}" config.text must be a non-empty string of at most ${TEXT_MAX} characters`);
+    } else if (config.text !== text.trim()) {
+      errors.push(`Component "${id}" config.text must not have leading/trailing whitespace`);
+    }
+    if (config.fontSize !== undefined && (!isFiniteNumber(config.fontSize) || config.fontSize < FONT_SIZE_MIN || config.fontSize > FONT_SIZE_MAX)) {
+      errors.push(`Component "${id}" config.fontSize must be a number between ${FONT_SIZE_MIN} and ${FONT_SIZE_MAX}`);
+    }
+    if (config.fontWeight !== undefined && (!Number.isInteger(config.fontWeight) || config.fontWeight < FONT_WEIGHT_MIN || config.fontWeight > FONT_WEIGHT_MAX)) {
+      errors.push(`Component "${id}" config.fontWeight must be an integer between ${FONT_WEIGHT_MIN} and ${FONT_WEIGHT_MAX}`);
+    }
+    if (config.textAlign !== undefined && !TEXT_ALIGNS.has(config.textAlign)) {
+      errors.push(`Component "${id}" config.textAlign must be one of: ${[...TEXT_ALIGNS].join(', ')}`);
+    }
+    if (config.lineHeight !== undefined && (!isFiniteNumber(config.lineHeight) || config.lineHeight < LINE_HEIGHT_MIN || config.lineHeight > LINE_HEIGHT_MAX)) {
+      errors.push(`Component "${id}" config.lineHeight must be a number between ${LINE_HEIGHT_MIN} and ${LINE_HEIGHT_MAX}`);
+    }
+    if (config.textColor !== undefined && !isCssColor(config.textColor)) {
+      errors.push(`Component "${id}" config.textColor must be a hex color or empty`);
+    }
+  }
+
+  if (type === 'image' || type === 'sticker') {
+    const url = config.imageUrl;
+    if (typeof url !== 'string' || !HTTP_URL_RE.test(url)) {
+      errors.push(`Component "${id}" config.imageUrl must be a valid http(s) image URL`);
+    }
+    if (config.alt !== undefined && (typeof config.alt !== 'string' || config.alt.length > ALT_MAX)) {
+      errors.push(`Component "${id}" config.alt must be a string of at most ${ALT_MAX} characters`);
+    }
+    if (config.fit !== undefined && !IMAGE_FITS.has(config.fit)) {
+      errors.push(`Component "${id}" config.fit must be one of: ${[...IMAGE_FITS].join(', ')}`);
+    }
+    if (config.backgroundColor !== undefined && !isCssColor(config.backgroundColor)) {
+      errors.push(`Component "${id}" config.backgroundColor must be a hex color or empty`);
+    }
+  }
+
+  if (type === 'card') {
+    const heading = config.heading;
+    if (typeof heading !== 'string' || !heading.trim() || heading.trim().length > HEADING_MAX) {
+      errors.push(`Component "${id}" config.heading must be a non-empty string of at most ${HEADING_MAX} characters`);
+    } else if (config.heading !== heading.trim()) {
+      errors.push(`Component "${id}" config.heading must not have leading/trailing whitespace`);
+    }
+    if (config.body !== undefined && (typeof config.body !== 'string' || config.body.length > TEXT_MAX)) {
+      errors.push(`Component "${id}" config.body must be a string of at most ${TEXT_MAX} characters`);
+    }
+    if (config.headingColor !== undefined && !isCssColor(config.headingColor)) {
+      errors.push(`Component "${id}" config.headingColor must be a hex color or empty`);
+    }
+    if (config.textColor !== undefined && !isCssColor(config.textColor)) {
+      errors.push(`Component "${id}" config.textColor must be a hex color or empty`);
+    }
+    if (config.textAlign !== undefined && !TEXT_ALIGNS.has(config.textAlign)) {
+      errors.push(`Component "${id}" config.textAlign must be one of: ${[...TEXT_ALIGNS].join(', ')}`);
+    }
+  }
 }
 
 function validateComponent(component, seenIds, errors) {
@@ -133,6 +308,10 @@ function validateComponent(component, seenIds, errors) {
   } else if (config !== null && config !== undefined && !jsonSafeValue(config)) {
     errors.push(`Component "${id}" config contains unsupported, unsafe or oversized values`);
   }
+
+  // CREATOR-01B: rotation + style are optional; when present they must be sane.
+  validateComponentRotateStyle(component, errors);
+  validateContentConfig(component, errors);
 }
 
 function validateLayoutConfig(layout) {

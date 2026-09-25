@@ -81,6 +81,14 @@ const config = {
   logging: {
     level: process.env.LOG_LEVEL || 'INFO',
   },
+  // CREATOR-01B: optional, env-flag-guarded promotion of ONE dev account to the
+  // admin role at startup. No default value and never enabled unless explicitly
+  // set in the (gitignored) config/.env — so a repo clone can never silently
+  // escalate a user. Reuses the existing users.role model / requireAdmin checks.
+  devAdmin: {
+    enabled: process.env.DEV_ADMIN_ENABLED === 'true',
+    username: process.env.DEV_ADMIN_USERNAME || '',
+  },
 };
 
 export default config;

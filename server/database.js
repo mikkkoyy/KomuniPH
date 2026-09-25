@@ -1221,6 +1221,32 @@ export async function seedAdminUser() {
   }
 }
 
+/**
+ * CREATOR-01B: promote one verified development account to the admin role.
+ * Idempotent and safe to call on every startup — it only acts when the exact
+ * username exists and is not already an admin. Intended to be driven by the
+ * env-flag-guarded startup path (config.devAdmin), never from a client call.
+ * Returns a result object the caller can audit-log.
+ */
+export function promoteDevAdmin(username) {
+  const database = getDb();
+  if (typeof username !== 'string' || !username.trim()) {
+    return { promoted: false, reason: 'no username' };
+  }
+  const user = database.prepare(
+    // usernames are stored lower-cased at registration time
+    'SELECT id, username, role FROM users WHERE username = ?'
+  ).get(username.toLowerCase());
+  if (!user) {
+    return { promoted: false, reason: 'user not found', username };
+  }
+  if (user.role === 'admin') {
+    return { promoted: false, alreadyAdmin: true, username: user.username };
+  }
+  database.prepare("UPDATE users SET role = 'admin', updated_at = datetime('now') WHERE id = ?").run(user.id);
+  return { promoted: true, username: user.username };
+}
+
 // Run schema initialization when executed directly
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   initDatabase();

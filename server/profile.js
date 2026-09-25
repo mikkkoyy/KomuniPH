@@ -15,6 +15,7 @@ import { queryOne, queryAll, execute } from './database.js';
 import { jsonResponse, errorResponse, parseBody } from './utils.js';
 import { getCountries, getCities, getBarangays } from './locations.js';
 import { seedDefaultTheme } from './database.js';
+import { getPublishedDesignForUser, getPublishedDesignByUsername } from './profileDesign.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -68,7 +69,7 @@ function isValidHexColor(value) {
   return typeof value === 'string' && HEX_COLOR_RE.test(value);
 }
 
-function validateThemeConfig(body) {
+export function validateThemeConfig(body) {
   const errors = [];
   const allowedFields = new Set([
     'backgroundImage', 'backgroundPosition', 'backgroundRepeat', 'backgroundSize',
@@ -234,6 +235,8 @@ function getProfileByUserId(userId) {
     profile.hometown = profile.hometown || null;
     profile.interests = profile.interests || null;
     profile.theme = buildTheme(profile);
+    // CREATOR-01A: the user's published design (validated; null when none or invalid).
+    profile.design = getPublishedDesignForUser(userId);
   }
   return profile;
 }
@@ -312,6 +315,8 @@ export function handleGetPublicProfile(req, res, params) {
     }
     profile.theme = buildTheme(profile);
     delete profile.custom_theme_config;
+    // CREATOR-01A: the published, validated design (null when none or invalid).
+    profile.design = getPublishedDesignByUsername(params.username);
 
     jsonResponse(res, 200, profile);
   } catch (err) {

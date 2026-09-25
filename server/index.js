@@ -15,6 +15,7 @@ import { handleRegister, handleLogin, handleVerify, handleVerifyEmailLink, handl
 import { handleAdminLogin, handleAdminChangePassword } from './adminAuth.js';
 import { handleGetSettings, handleUpdateSettings } from './settings.js';
 import { handleGetProfile, handleGetPublicProfile, handleUpdateProfile, handleUploadPhoto, handleUpdateTheme, handleUploadBackground } from './profile.js';
+import { handleListDesigns, handleCreateDesign, handleGetDesign, handleUpdateDesign, handlePublishDesign, handleArchiveDesign } from './profileDesign.js';
 import { handleGetTestimonials, handleCreateTestimonial, handleDeleteTestimonial, handleGetUserTestimonials } from './testimonials.js';
 import { handleGetPhotos, handleUploadPhoto as handleGalleryUploadPhoto, handleDeletePhoto, handleGetOwnPhotos } from './gallery.js';
 import { getAllLocations, getCountries, getCities, getBarangays } from './locations.js';
@@ -352,6 +353,43 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
     const profileCommunitiesMatch = matchRoute('/api/profile/:username/communities', path);
     if (method === 'GET' && profileCommunitiesMatch) {
       return handleGetProfileCommunities(req, res, profileCommunitiesMatch);
+    }
+
+    // CREATOR-01A Profile design engine (auth required). Registered before the
+    // single-segment public profile route so GET /api/profile/design is never
+    // mistaken for a profile named "design".
+    if (method === 'GET' && path === '/api/profile/design') {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleListDesigns(req, res, user);
+    }
+    if (method === 'POST' && path === '/api/profile/design') {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleCreateDesign(req, res, user);
+    }
+    const designMatch = matchRoute('/api/profile/design/:id', path);
+    if (method === 'GET' && designMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleGetDesign(req, res, user, designMatch);
+    }
+    if (method === 'PATCH' && designMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleUpdateDesign(req, res, user, designMatch);
+    }
+    const designPublishMatch = matchRoute('/api/profile/design/:id/publish', path);
+    if (method === 'POST' && designPublishMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handlePublishDesign(req, res, user, designPublishMatch);
+    }
+    const designArchiveMatch = matchRoute('/api/profile/design/:id/archive', path);
+    if (method === 'POST' && designArchiveMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleArchiveDesign(req, res, user, designArchiveMatch);
     }
 
     // Public profile by username

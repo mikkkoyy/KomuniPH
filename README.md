@@ -25,6 +25,7 @@ KomuniPH is a community-first social networking platform for the Philippines, bu
 - **Media** — image URLs shared in community posts, listed per community
 - **Settings** — per-community toggles (`allow_member_posts`, `allow_member_comments`, `allow_events`, `allow_media`, `moderation_enabled`)
 - **Coins & Wallet** — one wallet per user (`.balance`, `.frozen_balance`, available = balance − frozen); an atomic, source-idempotent transaction ledger (`coin_transactions`) records every credit/debit/freeze/unfreeze with running balances; GCash/Maya top-ups via PayMongo webhooks (`/api/coins/paymongo/webhook`); withdrawals freeze coins on request and cash them out on admin approval; a one-time 15-coin reward on identity verification; admin adjust `/api/admin/coins/adjust` with full audit trail
+- **Profile designs** — server-validated profile layout engine foundation (`/api/profile/design` CRUD + publish/archive): a controlled component registry (profile photo, name, alias, bio, personal info, gallery, testimonials, communities), strict JSON layout validation (geometry/z-index bounds, 64-component cap, canvas bounds, markup/script rejection), exactly one published design per user (publishing archives the previous one, each publish bumps `version`); published designs are attached to own and public profile responses as `profile.design`, while drafts and archived designs are never exposed and invalid stored designs safely degrade to a default profile
 
 ## Getting Started
 
@@ -53,5 +54,11 @@ Coin economy suite (COINS-01) — self-contained (temp DB, runs offline):
 
 ```bash
 npm run test:coins
+```
+
+Profile design engine suite (CREATOR-01A) — self-contained (temp DB, runs offline):
+
+```bash
+npm run test:creator
 ```
 

@@ -293,6 +293,47 @@ export const profileApi = {
 };
 
 /**
+ * Profile Design API (CREATOR-01A)
+ */
+export const designApi = {
+  async listDesigns() {
+    return apiRequest('/profile/design');
+  },
+
+  async createDesign(data) {
+    return apiRequest('/profile/design', {
+      method: 'POST',
+      body: data,
+    });
+  },
+
+  async getDesign(id) {
+    return apiRequest(`/profile/design/${id}`);
+  },
+
+  async updateDesign(id, data) {
+    return apiRequest(`/profile/design/${id}`, {
+      method: 'PATCH',
+      body: data,
+    });
+  },
+
+  async publishDesign(id) {
+    return apiRequest(`/profile/design/${id}/publish`, {
+      method: 'POST',
+      body: {},
+    });
+  },
+
+  async archiveDesign(id) {
+    return apiRequest(`/profile/design/${id}/archive`, {
+      method: 'POST',
+      body: {},
+    });
+  },
+};
+
+/**
  * Messages API
  */
 export const messagesApi = {

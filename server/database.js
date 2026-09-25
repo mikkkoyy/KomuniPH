@@ -1073,6 +1073,29 @@ export function initDatabase() {
     `);
   } catch (err) { /* safe no-op */ }
 
+  // CREATOR-01A: profile design engine. One row is one design "version" (a
+  // draft / published / archived snapshot). A user keeps at most one published
+  // design; publishing a new one archives the previous. layout_config holds the
+  // controlled layout (canvas + components); theme_config optionally restyles
+  // the profile via the existing theme field contract.
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS profile_designs (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'archived')),
+        version INTEGER NOT NULL DEFAULT 1,
+        layout_config TEXT NOT NULL DEFAULT '{}',
+        theme_config TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        published_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_profile_designs_user_status ON profile_designs(user_id, status);
+    `);
+  } catch (err) { /* safe no-op */ }
+
   // ADMIN-SEED: Create default admin user (admin/admin) if no admin exists.
   // Note: actual seeding is done async via seedAdminUser() called from index.js startup.
   // Table creation here ensures the schema is ready.

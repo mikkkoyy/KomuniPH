@@ -5227,3 +5227,15 @@ select:focus {
     flex-basis: 100%;
   }
 }
+
+/* ── CREATOR-01A Profile Design engine ────────────────────────────────────────
+   Design mode activates only when a valid published design is present: the
+   content area becomes the positioning canvas (its own modules may turn
+   absolute), and the frame carries the design's minimum height. With no
+   design these rules never apply, so the default layout is unchanged. */
+.profile-frame.has-profile-design {
+  min-height: var(--design-canvas-minheight, 1200px);
+}
+.profile-frame.has-profile-design #profile-content {
+  position: relative;
+}

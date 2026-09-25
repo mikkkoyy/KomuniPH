@@ -5,6 +5,7 @@
 import { profileApi, testimonialsApi, galleryApi, albumsApi, authApi, isAuthenticated, getCurrentUserProfile, setCurrentUserProfile } from './api.js';
 import { navigate } from './app.js';
 import { renderGalleryItemHtml, bindGalleryGridLightbox, isOwnUsername, safeDecode, renderAlbumCardsHtml } from './gallery.js'; // PHASE-3 GALLERY-SPLIT-01
+import { applyProfileDesign } from './profileDesign.js'; // CREATOR-01A
 
 let currentProfile = null;
 let customizationDirty = false;
@@ -505,6 +506,23 @@ export function applyProfileBackground(profile) {
 }
 
 /**
+ * CREATOR-01A: apply a profile's published design layout, then fold any
+ * design-level theme overrides into the existing theme pipeline. Design
+ * overrides ride on the same custom-config path the editor writes, so there is
+ * exactly one theme mechanism. No design -> default rendering, no re-theme.
+ */
+function applyProfileDesignAndTheme(profile) {
+  applyProfileDesign(profile);
+  const designTheme = profile && profile.design && profile.design.theme;
+  if (designTheme && typeof designTheme === 'object' && Object.keys(designTheme).length > 0) {
+    applyProfileBackground({
+      ...profile,
+      theme: { ...(profile.theme || {}), custom: { ...(profile.theme?.custom || {}), ...designTheme } },
+    });
+  }
+}
+
+/**
  * Load profile
  */
 window.loadProfile = async function() {
@@ -517,6 +535,7 @@ window.loadProfile = async function() {
     await loadAndRenderTestimonials(profile.username, false);
     await loadAndRenderGallery(profile.username, true);
     await loadAndRenderProfileCommunities(profile.username);
+    applyProfileDesignAndTheme(profile);
 
   } catch (err) {
     console.error('[PROFILE] Load profile error:', err);
@@ -575,6 +594,7 @@ window.loadPublicProfile = async function(username) {
 
     await loadAndRenderGallery(profile.username, false);
     await loadAndRenderProfileCommunities(profile.username);
+    applyProfileDesignAndTheme(profile);
 
   } catch (err) {
     console.error('[PROFILE] Load public profile error:', err);

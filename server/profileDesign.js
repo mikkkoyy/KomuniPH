@@ -51,7 +51,8 @@ export const FUTURE_COMPONENT_TYPES = new Set([
 const MAX_COMPONENTS = 64;
 const MAX_LAYOUT_BYTES = 512 * 1024;
 const COMPONENT_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
-const DANGEROUS_CONFIG_RE = /<\s*(script|iframe|object|embed|style)\b/i;
+// CREATOR-02: exported for reuse by creatorAssets.js validation.
+export const DANGEROUS_CONFIG_RE = /<\s*(script|iframe|object|embed|style)\b/i;
 
 const POSITION_MIN = -10000;
 const POSITION_MAX = 10000;
@@ -68,7 +69,8 @@ const ROTATION_MIN = 0;
 const ROTATION_MAX = 360;
 
 // An empty string means "inherit the platform default" for that property.
-const isCssColor = value => value === '' || /^#[0-9a-fA-F]{3,8}$/.test(value);
+// CREATOR-02: exported for reuse by creatorAssets.js validation.
+export const isCssColor = value => value === '' || /^#[0-9a-fA-F]{3,8}$/.test(value);
 
 const STYLE_FIELDS = new Set([
   'background', 'textColor', 'borderColor', 'borderWidth', 'borderRadius',
@@ -84,7 +86,8 @@ const TEXT_MAX = 2000;
 const HEADING_MAX = 200;
 const ALT_MAX = 200;
 const TEXT_ALIGNS = new Set(['left', 'center', 'right']);
-const IMAGE_FITS = new Set(['cover', 'contain', 'fill']);
+// CREATOR-02: exported for reuse by creatorAssets.js validation.
+export const IMAGE_FITS = new Set(['cover', 'contain', 'fill']);
 const FONT_SIZE_MIN = 8;
 const FONT_SIZE_MAX = 200;
 const FONT_WEIGHT_MIN = 100;
@@ -94,7 +97,8 @@ const LINE_HEIGHT_MAX = 3;
 
 // Content types accept only http(s) image URLs — never data:, javascript: or
 // any scheme that could smuggle script or bypass the render-time img element.
-const HTTP_URL_RE = /^https?:\/\/[^\s'"<>]+$/i;
+// CREATOR-02: exported for reuse by creatorAssets.js validation.
+export const HTTP_URL_RE = /^https?:\/\/[^\s'"<>]+$/i;
 
 const CONTENT_TYPE_CONFIG_FIELDS = {
   text: new Set(['text', 'fontSize', 'fontWeight', 'textAlign', 'lineHeight', 'textColor']),
@@ -103,15 +107,16 @@ const CONTENT_TYPE_CONFIG_FIELDS = {
   card: new Set(['heading', 'body', 'headingColor', 'textAlign', 'textColor']),
 };
 
-function isPlainObject(value) {
+// CREATOR-02: exported for reuse by creatorAssets.js validation.
+export function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function isFiniteNumber(value) {
+export function isFiniteNumber(value) {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-function jsonSafeValue(value, depth = 0) {
+export function jsonSafeValue(value, depth = 0) {
   if (value === null) return true;
   if (depth > 12) return false;
   const type = typeof value;

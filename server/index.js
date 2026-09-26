@@ -16,6 +16,7 @@ import { handleAdminLogin, handleAdminChangePassword } from './adminAuth.js';
 import { handleGetSettings, handleUpdateSettings } from './settings.js';
 import { handleGetProfile, handleGetPublicProfile, handleUpdateProfile, handleUploadPhoto, handleUpdateTheme, handleUploadBackground } from './profile.js';
 import { handleListDesigns, handleCreateDesign, handleGetDesign, handleUpdateDesign, handlePublishDesign, handleArchiveDesign } from './profileDesign.js';
+import { handleListAssets, handleCreateAsset, handleGetAsset, handleUpdateAsset, handleSubmitAsset, handlePublishAsset, handleArchiveAsset } from './creatorAssets.js';
 import { handleGetTestimonials, handleCreateTestimonial, handleDeleteTestimonial, handleGetUserTestimonials } from './testimonials.js';
 import { handleGetPhotos, handleUploadPhoto as handleGalleryUploadPhoto, handleDeletePhoto, handleGetOwnPhotos } from './gallery.js';
 import { getAllLocations, getCountries, getCities, getBarangays } from './locations.js';
@@ -390,6 +391,49 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
       const user = requireAuth(req, res);
       if (!user) return;
       return handleArchiveDesign(req, res, user, designArchiveMatch);
+    }
+
+    // CREATOR-02 creator assets (auth required). Ownership is derived from the
+    // authenticated user inside the handlers; cross-user reads 404 and archive
+    // additionally accepts an existing admin via requireAdmin.
+    if (method === 'GET' && path === '/api/creator/assets') {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleListAssets(req, res, user);
+    }
+    if (method === 'POST' && path === '/api/creator/assets') {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleCreateAsset(req, res, user);
+    }
+    const creatorAssetMatch = matchRoute('/api/creator/assets/:id', path);
+    if (method === 'GET' && creatorAssetMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleGetAsset(req, res, user, creatorAssetMatch);
+    }
+    if (method === 'PATCH' && creatorAssetMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleUpdateAsset(req, res, user, creatorAssetMatch);
+    }
+    const creatorAssetSubmitMatch = matchRoute('/api/creator/assets/:id/submit', path);
+    if (method === 'POST' && creatorAssetSubmitMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleSubmitAsset(req, res, user, creatorAssetSubmitMatch);
+    }
+    const creatorAssetPublishMatch = matchRoute('/api/creator/assets/:id/publish', path);
+    if (method === 'POST' && creatorAssetPublishMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handlePublishAsset(req, res, user, creatorAssetPublishMatch);
+    }
+    const creatorAssetArchiveMatch = matchRoute('/api/creator/assets/:id/archive', path);
+    if (method === 'POST' && creatorAssetArchiveMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleArchiveAsset(req, res, user, creatorAssetArchiveMatch);
     }
 
     // Public profile by username

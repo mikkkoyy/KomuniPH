@@ -334,6 +334,55 @@ export const designApi = {
 };
 
 /**
+ * Creator Assets API (CREATOR-02). Publishing foundation only — no purchases,
+ * payments or coin movement exist yet; price_coins is stored metadata.
+ */
+export const creatorAssetsApi = {
+  async listAssets() {
+    return apiRequest('/creator/assets');
+  },
+
+  async createAsset(data) {
+    return apiRequest('/creator/assets', {
+      method: 'POST',
+      body: data,
+    });
+  },
+
+  async getAsset(id) {
+    return apiRequest(`/creator/assets/${id}`);
+  },
+
+  async updateAsset(id, data) {
+    return apiRequest(`/creator/assets/${id}`, {
+      method: 'PATCH',
+      body: data,
+    });
+  },
+
+  async submitAsset(id) {
+    return apiRequest(`/creator/assets/${id}/submit`, {
+      method: 'POST',
+      body: {},
+    });
+  },
+
+  async publishAsset(id) {
+    return apiRequest(`/creator/assets/${id}/publish`, {
+      method: 'POST',
+      body: {},
+    });
+  },
+
+  async archiveAsset(id) {
+    return apiRequest(`/creator/assets/${id}/archive`, {
+      method: 'POST',
+      body: {},
+    });
+  },
+};
+
+/**
  * Messages API
  */
 export const messagesApi = {

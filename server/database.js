@@ -1096,6 +1096,39 @@ export function initDatabase() {
     `);
   } catch (err) { /* safe no-op */ }
 
+  // CREATOR-02: creator asset publishing foundation. A creator asset is a
+  // controlled, versioned product snapshot (theme / background / profile_design
+  // / sticker / decoration) owned by exactly one creator. One row is one asset;
+  // status drives the lifecycle (draft -> submitted -> published -> archived).
+  // 'submitted' is a validation checkpoint used before publishing; 'rejected'
+  // is reserved for a future moderation milestone (no workflow sets it yet).
+  // preview_data and asset_data are JSON columns only ever written after
+  // server-side validation (see server/creatorAssets.js). price_coins is the
+  // marketplace price field only — CREATOR-02 performs no coin movement.
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS creator_assets (
+        id TEXT PRIMARY KEY,
+        creator_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        asset_type TEXT NOT NULL CHECK (asset_type IN ('theme','background','profile_design','sticker','decoration')),
+        status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','submitted','published','archived','rejected')),
+        version INTEGER NOT NULL DEFAULT 1,
+        preview_data TEXT,
+        asset_data TEXT NOT NULL DEFAULT '{}',
+        price_coins INTEGER NOT NULL DEFAULT 0 CHECK (price_coins >= 0),
+        source_design_id TEXT REFERENCES profile_designs(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        published_at TEXT,
+        archived_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_creator_assets_creator_status ON creator_assets(creator_user_id, status);
+      CREATE INDEX IF NOT EXISTS idx_creator_assets_type_status ON creator_assets(asset_type, status);
+    `);
+  } catch (err) { /* safe no-op */ }
+
   // ADMIN-SEED: Create default admin user (admin/admin) if no admin exists.
   // Note: actual seeding is done async via seedAdminUser() called from index.js startup.
   // Table creation here ensures the schema is ready.

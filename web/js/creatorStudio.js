@@ -15,7 +15,7 @@
  * using the same visual classes as the public renderer.
  */
 
-import { designApi, profileApi } from './api.js';
+import { designApi, profileApi, creatorAssetsApi } from './api.js';
 import {
   CONTENT_COMPONENT_TYPES,
   applyGeometryToElement,
@@ -75,6 +75,9 @@ let idCounter = 0;
 let history = [];
 let future = [];
 let drag = null;
+// CREATOR-02: Save as Creator Asset modal session state.
+let assetModal = null;
+let assetModalAsset = null;
 
 function keyHandler(event) { onKey(event); }
 function beforeUnload(event) {
@@ -190,6 +193,7 @@ export function renderCreatorStudioPage() {
         <button id="studio-open-profile" class="btn btn-secondary" type="button" title="Open your published profile in a new tab">Open Profile↗</button>
         <button id="studio-save" class="btn btn-primary" type="button">Save Draft</button>
         <button id="studio-publish" class="btn btn-cta" type="button">Publish</button>
+        <button id="studio-save-asset" class="btn btn-secondary" type="button" title="Create a reusable marketplace asset from this design">Save as Asset</button>
       </div>
       <div class="studio-layout">
         <aside id="studio-elements" class="studio-panel" aria-label="Elements">
@@ -1169,6 +1173,176 @@ async function publish() {
   });
 }
 
+// ── Save as Creator Asset (CREATOR-02) ───────────────────────────────────────
+const ASSET_TYPE_LABELS = {
+  profile_design: 'Profile Design (this layout)',
+  theme: 'Theme (this design theme)',
+  background: 'Background (image)',
+  sticker: 'Sticker (image)',
+  decoration: 'Decoration (image)',
+};
+const ASSET_IMAGE_TYPES = new Set(['background', 'sticker', 'decoration']);
+
+function openSaveAssetModal() {
+  if (!currentDesign) return;
+  closeAssetModal();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'studio-modal-overlay';
+  overlay.dataset.close = '';
+  overlay.innerHTML = `
+    <div class="studio-modal" role="dialog" aria-modal="true" aria-labelledby="studio-asset-title">
+      <button type="button" class="studio-modal-close" data-close aria-label="Close">&times;</button>
+      <h2 id="studio-asset-title">Save as Creator Asset</h2>
+      <p class="studio-modal-note">Create a reusable marketplace product from this design. Your live
+      profile design and drafts are not changed — an asset is an independent snapshot.</p>
+      <label class="studio-field"><span>Asset name</span>
+        <input id="studio-asset-name" type="text" maxlength="100" required></label>
+      <label class="studio-field"><span>Description</span>
+        <textarea id="studio-asset-desc" rows="3" maxlength="2000"></textarea></label>
+      <label class="studio-field"><span>Asset type</span>
+        <select id="studio-asset-type">${Object.entries(ASSET_TYPE_LABELS).map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}</select></label>
+      <label class="studio-field"><span>Price (coins)</span>
+        <input id="studio-asset-price" type="number" min="0" step="1" value="0">
+        <small class="studio-modal-hint">Store price only — marketplace payments are not implemented yet.</small></label>
+      <div id="studio-asset-image-fields" class="studio-field-group" hidden>
+        <label class="studio-field"><span>Image URL</span>
+          <input id="studio-asset-image-url" type="text" placeholder="https://example.com/image.png"></label>
+        <label class="studio-field"><span>Fit</span>
+          <select id="studio-asset-fit">
+            <option value="contain">Contain</option>
+            <option value="cover">Cover</option>
+            <option value="fill">Fill</option>
+          </select></label>
+      </div>
+      <div class="studio-modal-actions">
+        <button type="button" class="btn btn-secondary" data-close>Cancel</button>
+        <button type="button" class="btn btn-primary" id="studio-asset-save">Save as Draft Asset</button>
+      </div>
+      <div id="studio-asset-result"></div>
+    </div>`;
+  overlay.addEventListener('pointerdown', event => {
+    if (event.target === overlay || event.target.dataset.close !== undefined) closeAssetModal();
+  });
+  overlay.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      closeAssetModal();
+    }
+  });
+
+  root.appendChild(overlay);
+  assetModal = overlay;
+
+  const nameInput = overlay.querySelector('#studio-asset-name');
+  const base = (currentDesign.name || 'My Design').slice(0, 80);
+  nameInput.value = `${base} — marketplace asset`;
+
+  overlay.querySelector('#studio-asset-type').addEventListener('change', () => {
+    const type = overlay.querySelector('#studio-asset-type').value;
+    overlay.querySelector('#studio-asset-image-fields').hidden = !ASSET_IMAGE_TYPES.has(type);
+  });
+
+  overlay.querySelector('#studio-asset-save').addEventListener('click', () => saveAssetFromModal());
+}
+
+function assetDataFromModal(overlay, type) {
+  if (type === 'profile_design') {
+    return { layout: clone(layout()), theme: currentDesign.theme ?? null };
+  }
+  if (type === 'theme') {
+    return { theme: currentDesign.theme ?? null };
+  }
+  const imageUrl = overlay.querySelector('#studio-asset-image-url').value.trim();
+  const fit = overlay.querySelector('#studio-asset-fit').value;
+  return { imageUrl, fit };
+}
+
+function renderAssetResult(message) {
+  const overlay = assetModal;
+  if (!overlay) return;
+  const box = overlay.querySelector('#studio-asset-result');
+  const asset = assetModalAsset;
+  if (!asset) {
+    box.textContent = message || '';
+    return;
+  }
+  box.innerHTML = `
+    <p class="studio-modal-status"><strong>${asset.name}</strong> — ${asset.status} (v${asset.version}). ${message || ''}</p>
+    <div class="studio-modal-actions">
+      ${asset.status === 'draft' ? '<button type="button" class="btn btn-primary" id="studio-asset-submit">Submit</button>' : ''}
+      ${asset.status === 'submitted' ? '<button type="button" class="btn btn-cta" id="studio-asset-publish">Publish</button>' : ''}
+      <button type="button" class="btn btn-secondary" data-close>Done</button>
+    </div>`;
+  const submit = box.querySelector('#studio-asset-submit');
+  if (submit) submit.addEventListener('click', () => submitAssetFromModal());
+  const publish = box.querySelector('#studio-asset-publish');
+  if (publish) publish.addEventListener('click', () => publishAssetFromModal());
+}
+
+async function saveAssetFromModal() {
+  const overlay = assetModal;
+  if (!overlay) return;
+  const name = overlay.querySelector('#studio-asset-name').value.trim();
+  const description = overlay.querySelector('#studio-asset-desc').value.trim();
+  const type = overlay.querySelector('#studio-asset-type').value;
+  const priceCoins = Number(overlay.querySelector('#studio-asset-price').value);
+  if (!name) {
+    setStatus('Asset name is required.');
+    return;
+  }
+  const assetData = assetDataFromModal(overlay, type);
+  if (ASSET_IMAGE_TYPES.has(type) && !assetData.imageUrl) {
+    setStatus('Image URL is required for this asset type.');
+    return;
+  }
+  await runAction(async () => {
+    setStatus('Creating asset…');
+    const result = await creatorAssetsApi.createAsset({
+      name,
+      description,
+      asset_type: type,
+      price_coins: priceCoins,
+      asset_data: assetData,
+    });
+    assetModalAsset = result.asset;
+    setStatus(`Asset "${result.asset.name}" created as a draft.`);
+    renderAssetResult('Created as a draft. Submit it when the content is final.');
+  });
+}
+
+async function submitAssetFromModal() {
+  const asset = assetModalAsset;
+  if (!asset) return;
+  await runAction(async () => {
+    setStatus('Submitting asset…');
+    const result = await creatorAssetsApi.submitAsset(asset.id);
+    assetModalAsset = result.asset;
+    setStatus(`Asset "${result.asset.name}" submitted and validated.`);
+    renderAssetResult('Submitted and validated — ready to publish.');
+  });
+}
+
+async function publishAssetFromModal() {
+  const asset = assetModalAsset;
+  if (!asset) return;
+  await runAction(async () => {
+    setStatus('Publishing asset…');
+    const result = await creatorAssetsApi.publishAsset(asset.id);
+    assetModalAsset = result.asset;
+    setStatus(`Asset "${result.asset.name}" published (v${result.asset.version}).`);
+    renderAssetResult('Published. It will be available to buyers in a future Marketplace milestone.');
+  });
+}
+
+function closeAssetModal() {
+  if (assetModal && assetModal.parentNode) {
+    assetModal.remove();
+  }
+  assetModal = null;
+  assetModalAsset = null;
+}
+
 async function switchDesign(designId) {
   if (dirty && !window.confirm('Discard unsaved changes to the current design?')) return;
   const design = designs.find(d => d.id === designId);
@@ -1226,6 +1400,7 @@ function attachEvents() {
   root.querySelector('#studio-redo').addEventListener('click', redo);
   root.querySelector('#studio-save').addEventListener('click', saveDraft);
   root.querySelector('#studio-publish').addEventListener('click', publish);
+  root.querySelector('#studio-save-asset').addEventListener('click', openSaveAssetModal);
   root.querySelector('#studio-new-design').addEventListener('click', createNewDesign);
   root.querySelector('#studio-open-profile').addEventListener('click', () => navigate('/profile'));
 
@@ -1298,6 +1473,7 @@ export function canLeaveCreatorStudio() {
 }
 
 export function destroyCreatorStudioPage() {
+  closeAssetModal();
   window.removeEventListener('keydown', keyHandler);
   window.removeEventListener('beforeunload', beforeUnload);
   window.removeEventListener('pointermove', onPointerMove);

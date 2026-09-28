@@ -16,6 +16,7 @@
  */
 
 import { apiRequest } from './api.js';
+import { renderBackButton } from './marketplace.js';
 
 function escapeHtml(text) {
   if (text == null) return '';
@@ -42,6 +43,10 @@ const IMAGE_TYPES = new Set(['background', 'sticker', 'decoration']);
 export function renderCoinShopManagerPage() {
   return `
     <section class="marketplace-page manager-page">
+      <div class="back-nav-row">
+        ${renderBackButton({ label: 'Back to Creator Studio', href: '#/creator-studio' })}
+        ${renderBackButton({ label: 'Back to Coin Shop', href: '#/coin-shop' })}
+      </div>
       <header class="marketplace-header">
         <h1>My Coin Shop</h1>
         <p>Create and manage digital assets that you sell for KomuniPH Coins.</p>

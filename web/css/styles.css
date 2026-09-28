@@ -6045,6 +6045,22 @@ select:focus {
   color: var(--kp-error);
 }
 
+/* ─── Shared Back Navigation (CREATOR-06) ─────────────────────── */
+
+.back-nav-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.back-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 600;
+}
+
 /* ─── Seller Center (CREATOR-05) ──────────────────────────── */
 
 .seller-identity-strip {

@@ -87,6 +87,14 @@ export function renderCoinShopProductCard(asset) {
 
 // ─── Product Detail Page ─────────────────────────────────────
 
+/**
+ * Shared Back Button (CREATOR-06): a small reusable presentation helper.
+ * Deterministic application routes, no history hacks, no framework.
+ */
+export function renderBackButton({ label, href }) {
+  return `<a href="${escapeHtml(href)}" class="btn btn-outline back-nav">← ${escapeHtml(label)}</a>`;
+}
+
 export function renderMarketplaceProductDetail(listing) {
   const images = listing.images && listing.images.length > 0
     ? listing.images.map(img => `<img src="${escapeHtml(img)}" alt="${escapeHtml(listing.title)}" class="product-detail-image">`).join('')
@@ -96,6 +104,7 @@ export function renderMarketplaceProductDetail(listing) {
 
   return `
     <section class="product-detail-page">
+      <div class="back-nav-row">${renderBackButton({ label: 'Back to Marketplace', href: '#/marketplace' })}</div>
       <div class="product-detail-gallery">
         ${images}
       </div>
@@ -131,6 +140,7 @@ export function renderCoinShopProductDetailPage(product) {
 
   return `
     <section class="product-detail-page coin-shop-product">
+      <div class="back-nav-row">${renderBackButton({ label: 'Back to Coin Shop', href: '#/coin-shop' })}</div>
       <div class="product-detail-gallery">
         ${preview}
       </div>
@@ -232,7 +242,7 @@ async function loadListings() {
   const categoryParam = url.searchParams.get('category') || '';
   const page = url.searchParams.get('page') || '1';
   try {
-    let path = `/api/marketplace/listings?page=${page}&limit=20`;
+    let path = `/marketplace/listings?page=${page}&limit=20`;
     if (searchParam) path += `&search=${encodeURIComponent(searchParam)}`;
     if (categoryParam && categoryParam !== 'all') path += `&category=${encodeURIComponent(categoryParam)}`;
     const data = await apiRequest(path);
@@ -294,7 +304,12 @@ export function renderCoinShopPage() {
         <div class="marketplace-user-controls">
           <a href="#/marketplace" class="btn btn-outline">Marketplace</a>
           <a href="#/coin-shop/library" class="btn btn-secondary">My Library</a>
+          <a href="#/creator-studio/coin-shop" class="btn btn-outline">My Coin Shop</a>
         </div>
+      </div>
+
+      <div class="back-nav-row">
+        ${renderBackButton({ label: 'Back to Marketplace', href: '#/marketplace' })}
       </div>
 
       <div class="coin-shop-catalog">
@@ -325,7 +340,7 @@ async function loadAssets() {
   const categoryParam = url.searchParams.get('category') || '';
   const page = url.searchParams.get('page') || '1';
   try {
-    let path = `/api/marketplace/assets?page=${page}&limit=20`;
+    let path = `/marketplace/assets?page=${page}&limit=20`;
     if (searchParam) path += `&search=${encodeURIComponent(searchParam)}`;
     if (categoryParam && categoryParam !== 'all') path += `&category=${encodeURIComponent(categoryParam)}`;
     const data = await apiRequest(path);
@@ -395,6 +410,7 @@ async function handleBuy(e) {
 export function renderManagePage() {
   return `
     <section class="marketplace-page manage-page">
+      <div class="back-nav-row">${renderBackButton({ label: 'Back to Marketplace', href: '#/marketplace' })}</div>
       <header class="marketplace-header">
         <h1>Marketplace Seller Center</h1>
         <p>Manage your Marketplace products and listings.</p>
@@ -769,12 +785,12 @@ const INSTALLABLE_TYPES = new Set(['profile_design']);
 export function renderLibraryPage() {
   return `
     <section class="coin-shop-page library-page">
+      <div class="back-nav-row">${renderBackButton({ label: 'Back to Coin Shop', href: '#/coin-shop' })}</div>
       <header class="coin-shop-header">
         <h1>My Library</h1>
         <p>Creator assets you own</p>
       </header>
       <div class="manage-actions">
-        <a href="#/coin-shop" class="btn btn-outline">Back to Coin Shop</a>
         <a href="#/creator-studio" class="btn btn-secondary">Open Creator Studio</a>
       </div>
       <div id="library-list" class="coin-shop-catalog">

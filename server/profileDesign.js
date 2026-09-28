@@ -99,6 +99,13 @@ const LINE_HEIGHT_MAX = 3;
 // any scheme that could smuggle script or bypass the render-time img element.
 // CREATOR-02: exported for reuse by creatorAssets.js validation.
 export const HTTP_URL_RE = /^https?:\/\/[^\s'"<>]+$/i;
+/**
+ * CREATOR-06: image URL rule for component/asset/listing image fields.
+ * Accepts http(s) URLs plus same-origin application uploads (/uploads/...,
+ * e.g. Creator Studio uploads). Protocol-relative, javascript:, data: and
+ * other schemes are still rejected.
+ */
+export const APP_IMAGE_URL_RE = /^(?:https?:\/\/[^\s'"<>]+|\/uploads\/[^\s'"<>]+)$/i;
 
 const CONTENT_TYPE_CONFIG_FIELDS = {
   text: new Set(['text', 'fontSize', 'fontWeight', 'textAlign', 'lineHeight', 'textColor']),
@@ -228,8 +235,8 @@ function validateContentConfig(component, errors) {
 
   if (type === 'image' || type === 'sticker') {
     const url = config.imageUrl;
-    if (typeof url !== 'string' || !HTTP_URL_RE.test(url)) {
-      errors.push(`Component "${id}" config.imageUrl must be a valid http(s) image URL`);
+    if (typeof url !== 'string' || !APP_IMAGE_URL_RE.test(url)) {
+      errors.push(`Component "${id}" config.imageUrl must be a valid http(s) or /uploads/ image URL`);
     }
     if (config.alt !== undefined && (typeof config.alt !== 'string' || config.alt.length > ALT_MAX)) {
       errors.push(`Component "${id}" config.alt must be a string of at most ${ALT_MAX} characters`);

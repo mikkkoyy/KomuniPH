@@ -19,7 +19,7 @@ import { queryOne, queryAll, execute, transaction } from './database.js';
 import { jsonResponse, errorResponse, generateId, now, parseBody } from './utils.js';
 import { requireAuth } from './auth.js';
 import { serializeAssetRow } from './creatorAssets.js';
-import { validateDesignPayload, HTTP_URL_RE, DANGEROUS_CONFIG_RE } from './profileDesign.js';
+import { validateDesignPayload, HTTP_URL_RE, APP_IMAGE_URL_RE, DANGEROUS_CONFIG_RE } from './profileDesign.js';
 
 const ASSET_SELECT = `
   SELECT id, creator_user_id, name, description, asset_type, status, version,
@@ -96,10 +96,10 @@ function validateListingPayload(body, { partial = false } = {}) {
       errors.push('Maximum 10 images');
     } else {
       const bad = body.images.find(img =>
-        typeof img !== 'string' || !img.trim() || img.trim().length > 500 || !HTTP_URL_RE.test(img.trim())
+        typeof img !== 'string' || !img.trim() || img.trim().length > 500 || !APP_IMAGE_URL_RE.test(img.trim())
       );
       if (bad !== undefined) {
-        errors.push('Each image must be an http(s) URL of at most 500 characters');
+        errors.push('Each image must be an http(s) or /uploads/ URL of at most 500 characters');
       } else {
         data.images = body.images.map(img => img.trim());
       }

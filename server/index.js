@@ -17,6 +17,7 @@ import { handleGetSettings, handleUpdateSettings } from './settings.js';
 import { handleGetProfile, handleGetPublicProfile, handleUpdateProfile, handleUploadPhoto, handleUpdateTheme, handleUploadBackground } from './profile.js';
 import { handleListDesigns, handleCreateDesign, handleGetDesign, handleUpdateDesign, handlePublishDesign, handleArchiveDesign } from './profileDesign.js';
 import { handleListAssets, handleCreateAsset, handleGetAsset, handleUpdateAsset, handleSubmitAsset, handlePublishAsset, handleArchiveAsset } from './creatorAssets.js';
+import { handleUploadCreatorMedia } from './creatorMedia.js';
 import { handleListMarketplaceAssets, handleGetMarketplaceAsset, handleListMarketplaceListings, handleCreateListing, handleGetListing, handleUpdateListing, handlePublishListing, handleArchiveListing, handleListOwnListings, handleCreatorSalesSummary, handleGetCoinShopProduct, handleBuyAsset, handleInstallAsset, handleListPurchasedAssets, handleCheckPurchased } from './marketplace.js';
 import { handleGetTestimonials, handleCreateTestimonial, handleDeleteTestimonial, handleGetUserTestimonials } from './testimonials.js';
 import { handleGetPhotos, handleUploadPhoto as handleGalleryUploadPhoto, handleDeletePhoto, handleGetOwnPhotos } from './gallery.js';
@@ -409,6 +410,15 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
       const user = requireAuth(req, res);
       if (!user) return;
       return handleCreatorSalesSummary(req, res, user);
+    }
+
+    // CREATOR-06 creator media upload (auth required). Local image upload
+    // for Creator Studio image/sticker components; responds with the
+    // application URL to store in the component config.
+    if (method === 'POST' && path === '/api/creator/media') {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleUploadCreatorMedia(req, res, user);
     }
 
     // CREATOR-02 creator assets (auth required). Ownership is derived from the

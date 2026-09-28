@@ -4,6 +4,7 @@
  */
 
 import { apiRequest } from './api.js';
+import { renderBackButton } from './marketplace.js';
 
 /**
  * Coins API client
@@ -129,6 +130,7 @@ const TX_TYPE_COLORS = {
 export function renderWalletPage() {
   return `
     <div id="wallet-page" style="max-width:720px;margin:0 auto;padding:1rem;">
+      <div class="back-nav-row">${renderBackButton({ label: 'Back to Profile', href: '#/profile' })}</div>
       <h2 style="font-family:'Fredoka',sans-serif;font-size:1.5rem;margin-bottom:1rem;">My Wallet</h2>
 
       <div id="wallet-balance-card" style="background:linear-gradient(135deg,#0e6e6e,#14b8a6);color:#fff;border-radius:1rem;padding:1.5rem;margin-bottom:1.5rem;">

@@ -27,7 +27,7 @@ import {
   isFiniteNumber,
   jsonSafeValue,
   DANGEROUS_CONFIG_RE,
-  HTTP_URL_RE,
+  APP_IMAGE_URL_RE,
   IMAGE_FITS,
 } from './profileDesign.js';
 
@@ -126,8 +126,8 @@ function validateImageAssetData(body, errors, type) {
   for (const key of Object.keys(body)) {
     if (!allowed.has(key)) errors.push(`Unknown ${type} asset_data field: ${key}`);
   }
-  if (typeof body.imageUrl !== 'string' || !HTTP_URL_RE.test(body.imageUrl)) {
-    errors.push(`${type} asset_data.imageUrl must be a valid http(s) image URL`);
+  if (typeof body.imageUrl !== 'string' || !APP_IMAGE_URL_RE.test(body.imageUrl)) {
+    errors.push(`${type} asset_data.imageUrl must be a valid http(s) or /uploads/ image URL`);
   } else {
     data.imageUrl = body.imageUrl;
   }

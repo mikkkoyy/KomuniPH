@@ -15,7 +15,7 @@
  * using the same visual classes as the public renderer.
  */
 
-import { designApi, profileApi, creatorAssetsApi } from './api.js';
+import { designApi, profileApi, creatorAssetsApi, getAccessToken } from './api.js';
 import {
   CONTENT_COMPONENT_TYPES,
   applyGeometryToElement,
@@ -554,6 +554,110 @@ function colorField(comp, path) {
   return wrap;
 }
 
+/**
+ * Image Source control (CREATOR-06) for image/sticker components: Upload
+ * Image button + live preview next to the existing URL field. Uploading
+ * places the returned application URL into config.imageUrl, marks the
+ * design changed, and refreshes the canvas preview immediately. Alt text
+ * and fit mode are preserved untouched.
+ */
+function imageSourceField(comp) {
+  const wrap = document.createElement('div');
+  wrap.className = 'studio-image-source';
+
+  const label = document.createElement('span');
+  label.className = 'studio-prop-label';
+  label.textContent = 'Image Source';
+  wrap.appendChild(label);
+
+  const preview = document.createElement('img');
+  preview.className = 'studio-image-preview';
+  preview.alt = '';
+  const currentUrl = getPath(comp, 'config.imageUrl') || '';
+  if (currentUrl) {
+    preview.src = currentUrl;
+  } else {
+    preview.hidden = true;
+  }
+  preview.addEventListener('error', () => { preview.hidden = true; });
+  wrap.appendChild(preview);
+
+  const row = document.createElement('div');
+  row.className = 'studio-image-row';
+
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = 'image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp';
+  fileInput.hidden = true;
+
+  const uploadBtn = document.createElement('button');
+  uploadBtn.type = 'button';
+  uploadBtn.className = 'btn btn-secondary studio-upload-btn';
+  uploadBtn.textContent = 'Upload Image';
+  uploadBtn.addEventListener('click', () => fileInput.click());
+
+  const status = document.createElement('p');
+  status.className = 'studio-prop-hint studio-upload-status';
+  status.textContent = 'JPG, PNG or WebP, up to 5 MB.';
+
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files && fileInput.files[0];
+    fileInput.value = '';
+    if (!file) return;
+    uploadBtn.disabled = true;
+    status.textContent = 'Uploading…';
+    try {
+      const url = await uploadStudioImage(file);
+      setPath(comp, 'config.imageUrl', url);
+      markChanged();
+      renderProperties();
+      setStatus('Image uploaded and placed into the component.');
+    } catch (err) {
+      status.textContent = err.message || 'Upload failed. Try a JPG, PNG, or WebP image.';
+    } finally {
+      uploadBtn.disabled = false;
+    }
+  });
+
+  row.appendChild(uploadBtn);
+  wrap.appendChild(row);
+  wrap.appendChild(fileInput);
+  wrap.appendChild(status);
+  return wrap;
+}
+
+/**
+ * POST a local image file to /api/creator/media and return the application
+ * URL. Client-side checks (extension/size) are UX hints only — the server
+ * re-validates everything, including actual file content.
+ */
+async function uploadStudioImage(file) {
+  if (!/\.(jpe?g|png|webp)$/i.test(file.name || '')) {
+    throw new Error('Unsupported file type. Use JPG, PNG, or WebP.');
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    throw new Error('File too large. Maximum size is 5 MB.');
+  }
+  const form = new FormData();
+  form.append('image', file);
+  const token = typeof getAccessToken === 'function' ? getAccessToken() : null;
+  const response = await fetch('/api/creator/media', {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  let data = null;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error('Upload failed. Please try again.');
+  }
+  if (!response.ok || !data || !data.url) {
+    throw new Error((data && data.error && data.error.message) || 'Upload failed. Please try again.');
+  }
+  return data.url;
+}
+
 function getPath(object, path) {
   return path.split('.').reduce((o, key) => (o === null || o === undefined ? o : o[key]), object);
 }
@@ -598,14 +702,18 @@ function componentProperties(frag, comp) {
   idLine.textContent = `id: ${comp.id}`;
   frag.appendChild(idLine);
 
+  frag.appendChild(sectionTitle('Position'));
   frag.appendChild(fieldRow('X', numberField(comp, 'x', { min: -10000, max: 10000, integer: true })));
   frag.appendChild(fieldRow('Y', numberField(comp, 'y', { min: -10000, max: 10000, integer: true })));
+  frag.appendChild(sectionTitle('Size'));
   frag.appendChild(fieldRow('Width', numberField(comp, 'width', { min: 8, max: 4080, integer: true })));
   frag.appendChild(fieldRow('Height', numberField(comp, 'height', { min: 8, max: 4080, integer: true })));
+  frag.appendChild(sectionTitle('Layer'));
   frag.appendChild(fieldRow('Z-index', numberField(comp, 'zIndex', { min: 0, max: 10000, integer: true })));
-  frag.appendChild(fieldRow('Rotation (deg)', numberField(comp, 'rotation', { min: 0, max: 360 })));
   frag.appendChild(fieldRow('Visible', toggleField(comp, 'visible')));
   frag.appendChild(fieldRow('Locked', toggleField(comp, 'locked')));
+  frag.appendChild(sectionTitle('Transform'));
+  frag.appendChild(fieldRow('Rotation (deg)', numberField(comp, 'rotation', { min: 0, max: 360 })));
 
   frag.appendChild(sectionTitle('Appearance'));
   frag.appendChild(fieldRow('Background', colorField(comp, 'style.background')));
@@ -633,13 +741,14 @@ function componentProperties(frag, comp) {
       frag.appendChild(fieldRow('Text color', colorField(comp, 'config.textColor')));
     }
     if (comp.type === 'image' || comp.type === 'sticker') {
+      frag.appendChild(imageSourceField(comp));
       frag.appendChild(fieldRow('Image URL', singleLineField(comp, 'config.imageUrl', { trim: true })));
       frag.appendChild(fieldRow('Alt text', singleLineField(comp, 'config.alt', { max: 200 })));
       frag.appendChild(fieldRow('Fit', selectField(comp, 'config.fit', ['cover', 'contain', 'fill'])));
       frag.appendChild(fieldRow('Background', colorField(comp, 'config.backgroundColor')));
       const hint = document.createElement('p');
       hint.className = 'studio-prop-hint';
-      hint.textContent = 'Use an http(s) image URL. A URL is required before this design can be saved.';
+      hint.textContent = 'Upload an image or use an http(s) image URL. A URL is required before this design can be saved.';
       frag.appendChild(hint);
     }
     if (comp.type === 'card') {
@@ -778,6 +887,10 @@ function placePending(type, pos) {
   selectedId = comp.id;
   pushHistory();
   markChanged(`Added "${meta.label}". Edit its properties on the right.`);
+  // Show the new component's properties immediately (markChanged refreshes
+  // canvas + layers only, so the panel would otherwise still show the
+  // previous selection until the next canvas/layer click).
+  renderProperties();
 }
 
 let unionGuides = new Map();

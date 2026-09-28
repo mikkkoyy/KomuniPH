@@ -5404,6 +5404,9 @@ select:focus {
   box-shadow: var(--kp-card-shadow);
   overflow: hidden;
   transition: transform 0.2s;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 .listing-card:hover {
@@ -5413,6 +5416,7 @@ select:focus {
 .listing-card-media {
   position: relative;
   height: 180px;
+  flex-shrink: 0;
   background: var(--kp-cream);
   display: flex;
   align-items: center;
@@ -5446,6 +5450,9 @@ select:focus {
 
 .listing-card-body {
   padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
 }
 
 .listing-card-title {
@@ -5458,10 +5465,17 @@ select:focus {
   color: var(--kp-ink-soft);
   font-size: 0.875rem;
   margin-bottom: 0.75rem;
+  /* Balance short descriptions so the meta row starts at a consistent
+     position; longer text still grows naturally — no clipping. */
+  min-height: 3.9375rem;
 }
 
 .listing-card-meta {
   margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .listing-price {
@@ -5474,6 +5488,9 @@ select:focus {
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
+  align-items: stretch;
+  margin-top: auto;
+  padding-top: 0.25rem;
 }
 
 /* ─── Product Detail Page ──────────────────────────────── */
@@ -5605,6 +5622,9 @@ select:focus {
   box-shadow: var(--kp-card-shadow);
   overflow: hidden;
   transition: transform 0.2s;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 .coin-card:hover {
@@ -5614,6 +5634,7 @@ select:focus {
 .coin-card-media {
   position: relative;
   height: 180px;
+  flex-shrink: 0;
   background: var(--kp-cream);
   display: flex;
   align-items: center;
@@ -5647,6 +5668,9 @@ select:focus {
 
 .coin-card-body {
   padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
 }
 
 .coin-card-title {
@@ -5659,10 +5683,17 @@ select:focus {
   color: var(--kp-ink-soft);
   font-size: 0.875rem;
   margin-bottom: 0.75rem;
+  /* Same balancing as listing cards: reserve ~3 lines so the meta row
+     starts consistently; longer text grows naturally, never clipped. */
+  min-height: 3.9375rem;
 }
 
 .coin-card-meta {
   margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .coin-price {
@@ -5675,6 +5706,9 @@ select:focus {
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
+  align-items: stretch;
+  margin-top: auto;
+  padding-top: 0.25rem;
 }
 
 .coin-price-large {

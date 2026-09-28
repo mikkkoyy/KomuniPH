@@ -13,7 +13,9 @@
     "test:creator": "node tests/test_creator_design.mjs",
     "test:studio": "node tests/test_creator_studio.mjs",
     "test:assets": "node tests/test_creator_assets.mjs",
-    "test:marketplace": "node tests/test_marketplace.mjs"
+    "test:marketplace": "node tests/test_marketplace.mjs",
+    "test:marketplace-manage": "node tests/test_marketplace_management.mjs",
+    "test:coin-library": "node tests/test_coin_library.mjs"
   },
   "engines": {
     "node": ">=18.0.0"

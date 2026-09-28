@@ -5787,6 +5787,230 @@ select:focus {
   margin-top: 1.5rem;
 }
 
+/* ─── Seller Dashboard (CREATOR-04) ─────────────────────── */
+
+.manage-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.stat-card {
+  background: rgba(255, 247, 236, 0.95);
+  border: 1px solid rgba(255,255,255,0.4);
+  border-radius: var(--kp-control-radius);
+  box-shadow: var(--kp-card-shadow);
+  padding: 1rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+}
+
+.stat-num {
+  font-family: 'Fredoka', system-ui, sans-serif;
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--kp-teal);
+}
+
+.stat-label {
+  font-size: 0.8rem;
+  color: var(--kp-ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.manage-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.5rem;
+}
+
+.manage-listings {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.manage-card {
+  display: flex;
+  gap: 1rem;
+  background: rgba(255, 247, 236, 0.95);
+  border: 1px solid rgba(255,255,255,0.4);
+  border-radius: var(--kp-card-radius);
+  box-shadow: var(--kp-card-shadow);
+  padding: 1rem;
+  align-items: flex-start;
+}
+
+.manage-thumb {
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  border-radius: var(--kp-control-radius);
+  flex-shrink: 0;
+}
+
+.manage-thumb-empty {
+  background: var(--kp-cream);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+}
+
+.manage-card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.manage-card-body h3 {
+  font-size: 1.15rem;
+  margin-bottom: 0.375rem;
+}
+
+.manage-card-meta {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 0.375rem;
+}
+
+.status-badge {
+  padding: 0.2rem 0.65rem;
+  border-radius: 1rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.status-draft {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status-published {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.status-archived {
+  background: #e5e7eb;
+  color: #374151;
+}
+
+.manage-dates {
+  font-size: 0.8rem;
+  color: var(--kp-ink-soft);
+  margin-bottom: 0.375rem;
+}
+
+.external-link {
+  display: inline-block;
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
+}
+
+.manage-card-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.listing-create-form {
+  margin-bottom: 1.5rem;
+}
+
+.image-url-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.image-url-row .form-input {
+  flex: 1;
+}
+
+.image-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.image-list-item {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  background: rgba(255,255,255,0.5);
+  border-radius: var(--kp-control-radius);
+  padding: 0.375rem 0.5rem;
+}
+
+.image-list-thumb {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 0.375rem;
+}
+
+.image-list-url {
+  flex: 1;
+  font-size: 0.8rem;
+  color: var(--kp-ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─── Buyer Library (CREATOR-04) ──────────────────────────── */
+
+.lib-owned {
+  color: #065f46;
+  font-weight: 700;
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+}
+
+.lib-date {
+  font-size: 0.8rem;
+  color: var(--kp-ink-soft);
+}
+
+.lib-status {
+  margin-top: 0.5rem;
+}
+
+/* ─── Messaging Product Context (CREATOR-04) ──────────────── */
+
+.message-context-banner {
+  background: rgba(255, 247, 236, 0.95);
+  border: 1px solid var(--kp-border);
+  border-radius: var(--kp-control-radius);
+  padding: 0.875rem 1rem;
+  margin-bottom: 1rem;
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.message-context-banner p {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.context-recipient {
+  color: var(--kp-ink-soft);
+}
+
+.context-error {
+  color: var(--kp-error);
+}
+
 /* ─── Responsive ──────────────────────────────────────── */
 
 @media (max-width: 640px) {

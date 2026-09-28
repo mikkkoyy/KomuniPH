@@ -1143,6 +1143,8 @@ try {
       category TEXT NOT NULL CHECK (category IN ('products','services','digital','local','all')),
       price_display TEXT NOT NULL DEFAULT '0',
       images TEXT NOT NULL DEFAULT '[]',
+      external_url TEXT,
+      contact_info TEXT,
       status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','published','archived')),
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -1188,6 +1190,15 @@ try {
     CREATE INDEX IF NOT EXISTS idx_listing_images_listing ON marketplace_listing_images(listing_id);
   `);
 } catch (err) { /* safe no-op */ }
+
+// CREATOR-04: external sales/contact destination for normal Marketplace
+// listings. Nullable; validated server-side (http(s) URLs only).
+try {
+  database.exec('ALTER TABLE marketplace_listings ADD COLUMN external_url TEXT');
+} catch (err) { /* column already exists — safe no-op */ }
+try {
+  database.exec('ALTER TABLE marketplace_listings ADD COLUMN contact_info TEXT');
+} catch (err) { /* column already exists — safe no-op */ }
 
   // ADMIN-SEED: Create default admin user (admin/admin) if no admin exists.
   // Note: actual seeding is done async via seedAdminUser() called from index.js startup.

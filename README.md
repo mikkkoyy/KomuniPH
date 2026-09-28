@@ -48,6 +48,15 @@ KomuniPH is a community-first social networking platform for the Philippines, bu
   - `GET /api/coin-shop/purchased/:id` — check if buyer owns asset
 
   - `npm run test:marketplace` runs the CREATOR-03 test suite
+
+- **Marketplace Seller Management & Creator Library** (CREATOR-04) — completes the CREATOR-03 workflow:
+  - **Seller dashboard** (`#/marketplace/manage`) — owner-scoped listings with draft/published/archived counts; create/edit/publish/archive via `GET /api/marketplace/my-listings`, `PATCH /api/marketplace/listings/:id`, `POST .../publish` (also restores archived listings), `POST .../archive` (idempotent). Draft-only editing is preserved; archived listings stay hidden publicly but remain manageable.
+  - **Listing images + external sales** — image URLs are validated server-side (http(s) only, max 10, add/remove/reorder in the UI); optional `external_url` (http(s) only, `javascript:`/`data:` rejected) and `contact_info` identify the seller's external sales destination. No cart, checkout, shipping, orders, or payments — Discovery → Message Seller → External Transaction.
+  - **Buyer library** (`#/coin-shop/library`) — purchased assets from `GET /api/coin-shop/purchases` with preview, creator, price, date, and ownership status. `profile_design` assets install via `POST /api/coin-shop/install/:id` into a buyer-owned draft design through the existing validated design system (creator snapshot untouched; buyer publishes via Creator Studio); other types show a clear not-installable state.
+  - **Contextual messaging** — Message Seller / Message Creator deep-link to `#/messages?to=<username>&listing=<id>` (or `&asset=<id>`); the messages page resolves the recipient server-side from the published product record, shows a product context banner, and opens the existing conversation with a prefilled product reference. Fabricated parameters can never change the recipient.
+
+  - `npm run test:marketplace-manage` runs the CREATOR-04 seller-management suite
+  - `npm run test:coin-library` runs the CREATOR-04 buyer-library suite
 - **Creator Studio** — in-app visual editor (`#/creator-studio`) for profile designs: drag/resize/rotate components on a WYSIWYG canvas, snap-to-guides, eight-way handles, an elements panel, a live properties panel (geometry, appearance, per-type content), a layers panel with z-order operations (front/back/forward/backward, hide, lock, duplicate, delete, z-index field), undo/redo, zoom, and a preview mode; drafts are saved per design (Save Draft) and publishing (`designApi.publishDesign`) makes the design live on the owner's profile; the studio only edits the stored model through the existing validated API and never bypasses server checks
 
 ## Getting Started
@@ -101,6 +110,18 @@ Marketplace & Coin Shop suite (CREATOR-03) — self-contained (temp DB, runs off
 
 ```bash
 npm run test:marketplace
+```
+
+Marketplace seller-management suite (CREATOR-04) — self-contained (temp DB, runs offline):
+
+```bash
+npm run test:marketplace-manage
+```
+
+Coin Shop buyer-library suite (CREATOR-04) — self-contained (temp DB, runs offline):
+
+```bash
+npm run test:coin-library
 ```
 
 BUGFIX regression suite (requires the server running on port 3000):

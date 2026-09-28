@@ -17,7 +17,7 @@ import { handleGetSettings, handleUpdateSettings } from './settings.js';
 import { handleGetProfile, handleGetPublicProfile, handleUpdateProfile, handleUploadPhoto, handleUpdateTheme, handleUploadBackground } from './profile.js';
 import { handleListDesigns, handleCreateDesign, handleGetDesign, handleUpdateDesign, handlePublishDesign, handleArchiveDesign } from './profileDesign.js';
 import { handleListAssets, handleCreateAsset, handleGetAsset, handleUpdateAsset, handleSubmitAsset, handlePublishAsset, handleArchiveAsset } from './creatorAssets.js';
-import { handleListMarketplaceAssets, handleGetMarketplaceAsset, handleListMarketplaceListings, handleCreateListing, handleGetListing, handleUpdateListing, handlePublishListing, handleGetCoinShopProduct, handleBuyAsset, handleListPurchasedAssets, handleCheckPurchased } from './marketplace.js';
+import { handleListMarketplaceAssets, handleGetMarketplaceAsset, handleListMarketplaceListings, handleCreateListing, handleGetListing, handleUpdateListing, handlePublishListing, handleArchiveListing, handleListOwnListings, handleGetCoinShopProduct, handleBuyAsset, handleInstallAsset, handleListPurchasedAssets, handleCheckPurchased } from './marketplace.js';
 import { handleGetTestimonials, handleCreateTestimonial, handleDeleteTestimonial, handleGetUserTestimonials } from './testimonials.js';
 import { handleGetPhotos, handleUploadPhoto as handleGalleryUploadPhoto, handleDeletePhoto, handleGetOwnPhotos } from './gallery.js';
 import { getAllLocations, getCountries, getCities, getBarangays } from './locations.js';
@@ -463,6 +463,13 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
       if (!user) return;
       return handleBuyAsset(req, res, user, coinShopBuyMatch);
     }
+    // CREATOR-04: install a purchased asset into the buyer's own state.
+    const coinShopInstallMatch = matchRoute('/api/coin-shop/install/:id', path);
+    if (method === 'POST' && coinShopInstallMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleInstallAsset(req, res, user, coinShopInstallMatch);
+    }
 
     // CREATOR-03 Purchased assets (buyer ownership).
     if (method === 'GET' && path === '/api/coin-shop/purchases') {
@@ -488,6 +495,13 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
       if (!user) return;
       return handleCreateListing(req, res, user);
     }
+    // CREATOR-04 seller dashboard: owner-scoped listings + counts.
+    // Registered before the generic :id route.
+    if (method === 'GET' && path === '/api/marketplace/my-listings') {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleListOwnListings(req, res, user);
+    }
     const listingMatch = matchRoute('/api/marketplace/listings/:id', path);
     if (method === 'GET' && listingMatch) {
       return handleGetListing(req, res, null, listingMatch);
@@ -502,6 +516,13 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
       const user = requireAuth(req, res);
       if (!user) return;
       return handlePublishListing(req, res, user, listingPublishMatch);
+    }
+    // CREATOR-04: archive a listing (draft/published -> archived).
+    const listingArchiveMatch = matchRoute('/api/marketplace/listings/:id/archive', path);
+    if (method === 'POST' && listingArchiveMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleArchiveListing(req, res, user, listingArchiveMatch);
     }
 
     // Public profile by username

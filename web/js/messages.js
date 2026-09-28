@@ -3,7 +3,7 @@
  * Conversation list and chat view.
  */
 
-import { messagesApi, authApi, isAuthenticated } from './api.js';
+import { messagesApi, authApi, isAuthenticated, apiRequest } from './api.js';
 import { navigate } from './app.js';
 
 let conversationsData = { conversations: [], limit: 20, offset: 0, has_more: false };
@@ -696,6 +696,107 @@ export function initMessagesPage() {
 
   window.loadConversations();
   refreshUnreadCount();
+  initProductContext();
+}
+
+/**
+ * Open (or reuse) a 1:1 conversation and prefill the composer with product
+ * context. The recipient userId MUST come from a server-resolved product
+ * record — never from raw query parameters.
+ */
+export async function startProductConversation(userId, contextText) {
+  try {
+    const conv = await messagesApi.createConversation(userId);
+    await window.loadConversations();
+    const targetId = conv && conv.id ? conv.id : null;
+    if (targetId) {
+      await selectConversation(targetId);
+      const textarea = document.getElementById('chat-message-input');
+      if (textarea && contextText) {
+        textarea.value = contextText;
+        textarea.focus();
+      }
+    }
+  } catch (err) {
+    showToast(err.message || 'Failed to open conversation');
+  }
+}
+
+/**
+ * Contextual deep links from Marketplace / Coin Shop product pages:
+ *   #/messages?to=<username>&listing=<listingId>
+ *   #/messages?to=<username>&asset=<assetId>
+ *
+ * CONTEXT SAFETY: the `to` parameter is display-only. The recipient is
+ * always resolved server-side from the published product record, so a
+ * fabricated `product A + seller B` combination can never redirect the
+ * conversation — an invalid product simply shows an error and no
+ * conversation is opened.
+ */
+async function initProductContext() {
+  const hash = window.location.hash.slice(1) || '';
+  const qIndex = hash.indexOf('?');
+  if (qIndex === -1) return;
+  const params = new URLSearchParams(hash.slice(qIndex + 1));
+  const listingId = params.get('listing');
+  const assetId = params.get('asset');
+  if (!listingId && !assetId) return;
+
+  const chatPane = document.getElementById('messages-chat');
+  if (!chatPane) return;
+
+  const banner = document.createElement('div');
+  banner.id = 'message-product-context';
+  banner.className = 'message-context-banner';
+  banner.innerHTML = '<p>Loading product context...</p>';
+  chatPane.prepend(banner);
+
+  try {
+    let recipientId = null;
+    let recipientName = '';
+    let productTitle = '';
+    let productUrl = '';
+    if (listingId) {
+      const res = await apiRequest(`/marketplace/listings/${listingId}`);
+      if (!res || !res.listing) throw new Error('Product not found or no longer available.');
+      const l = res.listing;
+      recipientId = l.seller_user_id;
+      recipientName = l.seller_display_name || l.seller_username || 'Seller';
+      productTitle = l.title;
+      productUrl = `#/marketplace/product/${l.id}`;
+    } else {
+      const res = await apiRequest(`/coin-shop/products/${assetId}`);
+      if (!res || !res.product) throw new Error('Product not found or no longer available.');
+      const p = res.product;
+      recipientId = p.creator_user_id;
+      recipientName = p.creator_display_name || p.creator_username || 'Creator';
+      productTitle = p.name;
+      productUrl = `#/coin-shop/product/${p.id}`;
+    }
+
+    // Never message yourself about your own product.
+    let selfId = null;
+    try {
+      const me = await apiRequest('/profile');
+      selfId = me && me.user_id ? me.user_id : null;
+    } catch { /* profile fetch failed — proceed; server enforces self-check */ }
+    if (selfId && recipientId === selfId) {
+      banner.innerHTML = `<p>This is your own product: <strong>${escapeHtml(productTitle)}</strong>.</p>`;
+      return;
+    }
+
+    banner.innerHTML = `
+      <p>💬 <strong>${escapeHtml(listingId ? 'Message Seller' : 'Message Creator')}</strong> about
+      <a href="${escapeHtml(productUrl)}">${escapeHtml(productTitle)}</a>
+      <span class="context-recipient">(${escapeHtml(recipientName)})</span></p>
+      <button type="button" class="btn btn-primary btn-sm" id="context-start-btn">Start conversation</button>`;
+    document.getElementById('context-start-btn').addEventListener('click', () => {
+      const origin = window.location.origin;
+      startProductConversation(recipientId, `Hi! I'm interested in "${productTitle}" (${origin}/${productUrl}). `);
+    });
+  } catch (err) {
+    banner.innerHTML = `<p class="context-error">${escapeHtml(err.message || 'Could not load product context.')}</p>`;
+  }
 }
 
 /**

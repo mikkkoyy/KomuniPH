@@ -16,7 +16,7 @@ import { renderMessagesPage, initMessagesPage, destroyMessagesPage } from './mes
 import { renderCommunityPage, initCommunityPage, renderCommunityDetailPage, initCommunityDetailPage } from './communities.js';
 import { renderWalletPage, initWalletPage } from './coins.js';
 import { renderAdminPage, initAdminPage } from './admin.js';
-import { renderMarketplacePage, initMarketplacePage, renderCoinShopPage, initCoinShopPage, initShareButtons, renderMarketplaceProductDetail, renderCoinShopProductDetailPage } from './marketplace.js';
+import { renderMarketplacePage, initMarketplacePage, renderCoinShopPage, initCoinShopPage, initShareButtons, renderMarketplaceProductDetail, renderCoinShopProductDetailPage, renderManagePage, initManagePage, renderLibraryPage, initLibraryPage } from './marketplace.js';
 
 const app = document.getElementById('app');
 
@@ -40,21 +40,25 @@ function getRoute() {
  */
 function render() {
   const route = getRoute();
+  // CREATOR-04: hash routes may carry query state (e.g. #/messages?to=&listing=,
+  // #/marketplace?search=). Match on the path portion only; pages read their
+  // own query parameters where needed.
+  const routePath = route.split('?')[0];
 
   // Keep editor drafts when browser Back/Forward would leave the workspace.
-  if (route !== '/profile/edit' && !canLeaveProfileEditor()) {
+  if (routePath !== '/profile/edit' && !canLeaveProfileEditor()) {
     window.location.hash = '/profile/edit';
     return;
   }
-  if (route === '/profile/edit' && isAuthenticated() && document.getElementById('profile-editor')) return;
+  if (routePath === '/profile/edit' && isAuthenticated() && document.getElementById('profile-editor')) return;
   destroyProfileEditorPage();
 
   // Keep Creator Studio drafts when Back/Forward would leave the workspace.
-  if (route !== '/creator-studio' && !canLeaveCreatorStudio()) {
+  if (routePath !== '/creator-studio' && !canLeaveCreatorStudio()) {
     window.location.hash = '/creator-studio';
     return;
   }
-  if (route === '/creator-studio' && isAuthenticated() && document.getElementById('creator-studio')) return;
+  if (routePath === '/creator-studio' && isAuthenticated() && document.getElementById('creator-studio')) return;
 
   // Cleanup previous page
   if (destroyMessagesPage) {
@@ -63,7 +67,7 @@ function render() {
   destroyCreatorStudioPage();
 
   // Clear tokens on logout
-  if (route === '/logout') {
+  if (routePath === '/logout') {
     clearTokens();
     navigate('/login');
     return;
@@ -72,7 +76,7 @@ function render() {
   let html = '';
   let initFn = null;
 
-  switch (route) {
+  switch (routePath) {
     case '/login':
       html = renderLoginPage();
       initFn = initLoginForm;
@@ -151,6 +155,22 @@ function render() {
       html = renderCoinShopPage();
       initFn = initCoinShopPage;
       break;
+    case '/marketplace/manage':
+      if (!isAuthenticated()) {
+        navigate('/login');
+        return;
+      }
+      html = renderManagePage();
+      initFn = initManagePage;
+      break;
+    case '/coin-shop/library':
+      if (!isAuthenticated()) {
+        navigate('/login');
+        return;
+      }
+      html = renderLibraryPage();
+      initFn = initLibraryPage;
+      break;
     case '/wallet':
       if (!isAuthenticated()) {
         navigate('/login');
@@ -185,37 +205,37 @@ function render() {
       // MARKETPLACE-01: stable public product URLs. Must be matched before
       // the public-profile catch-all since `([^/]+)` would otherwise swallow
       // "marketplace" as a username.
-      const marketplaceProductMatch = route.match(/^\/marketplace\/product\/([^/?#]+)/);
+      const marketplaceProductMatch = routePath.match(/^\/marketplace\/product\/([^/?#]+)/);
       if (marketplaceProductMatch) {
         html = '<section class="product-detail-page"><div class="loading">Loading product...</div></section>';
         initFn = () => loadProductDetail(marketplaceProductMatch[1], 'marketplace');
         break;
       }
-      const coinShopProductMatch = route.match(/^\/coin-shop\/product\/([^/?#]+)/);
+      const coinShopProductMatch = routePath.match(/^\/coin-shop\/product\/([^/?#]+)/);
       if (coinShopProductMatch) {
         html = '<section class="product-detail-page"><div class="loading">Loading product...</div></section>';
         initFn = () => loadProductDetail(coinShopProductMatch[1], 'coin-shop');
         break;
       }
-      const communityDetailMatch = route.match(/^\/community\/([^/]+)$/);
+      const communityDetailMatch = routePath.match(/^\/community\/([^/]+)$/);
       if (communityDetailMatch) {
         html = renderCommunityDetailPage(communityDetailMatch[1]);
         initFn = () => initCommunityDetailPage(communityDetailMatch[1]);
         break;
       }
-      const galleryMatch = route.match(/^\/profile\/([^/]+)\/photos$/);
+      const galleryMatch = routePath.match(/^\/profile\/([^/]+)\/photos$/);
       if (galleryMatch) {
         html = renderGalleryPage(galleryMatch[1]);
         initFn = initGalleryPage;
         break;
       }
-      const albumMatch = route.match(/^\/profile\/([^/]+)\/photos\/([^/]+)$/);
+      const albumMatch = routePath.match(/^\/profile\/([^/]+)\/photos\/([^/]+)$/);
       if (albumMatch) {
         html = renderAlbumPage(albumMatch[1], albumMatch[2]);
         initFn = initAlbumPage;
         break;
       }
-      const publicProfileMatch = route.match(/^\/profile\/([^/]+)$/);
+      const publicProfileMatch = routePath.match(/^\/profile\/([^/]+)$/);
       if (publicProfileMatch) {
         html = renderProfilePage(publicProfileMatch[1]);
         initFn = initProfilePage;

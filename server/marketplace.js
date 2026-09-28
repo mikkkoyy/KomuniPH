@@ -19,6 +19,7 @@ import { queryOne, queryAll, execute, transaction } from './database.js';
 import { jsonResponse, errorResponse, generateId, now, parseBody } from './utils.js';
 import { requireAuth } from './auth.js';
 import { serializeAssetRow } from './creatorAssets.js';
+import { validateDesignPayload, HTTP_URL_RE, DANGEROUS_CONFIG_RE } from './profileDesign.js';
 
 const ASSET_SELECT = `
   SELECT id, creator_user_id, name, description, asset_type, status, version,
@@ -30,7 +31,8 @@ const ASSET_SELECT = `
 
 const LISTING_SELECT = `
   SELECT ml.id, ml.seller_user_id, ml.title, ml.description, ml.category, ml.price_display,
-         ml.images, ml.status, ml.created_at, ml.updated_at, ml.published_at, ml.archived_at,
+         ml.images, ml.external_url, ml.contact_info, ml.status, ml.created_at, ml.updated_at,
+         ml.published_at, ml.archived_at,
          u.username AS seller_username, p.display_name AS seller_display_name,
          p.profile_photo_url AS seller_avatar
   FROM marketplace_listings ml
@@ -93,15 +95,46 @@ function validateListingPayload(body, { partial = false } = {}) {
     } else if (body.images.length > 10) {
       errors.push('Maximum 10 images');
     } else {
-      const validImages = body.images.every(img => typeof img === 'string' && img.trim().length > 0);
-      if (!validImages) {
-        errors.push('Each image must be a non-empty string');
+      const bad = body.images.find(img =>
+        typeof img !== 'string' || !img.trim() || img.trim().length > 500 || !HTTP_URL_RE.test(img.trim())
+      );
+      if (bad !== undefined) {
+        errors.push('Each image must be an http(s) URL of at most 500 characters');
       } else {
-        data.images = body.images;
+        data.images = body.images.map(img => img.trim());
       }
     }
   } else if (!partial) {
     data.images = [];
+  }
+
+  // CREATOR-04: external sales/contact destination. Optional. URLs must be
+  // http(s) — dangerous schemes (javascript:, data:, …) are rejected.
+  // No payment is processed; this is a discovery pointer only.
+  if (body.external_url !== undefined) {
+    if (body.external_url === null || body.external_url === '') {
+      data.external_url = null;
+    } else if (typeof body.external_url !== 'string' || !HTTP_URL_RE.test(body.external_url.trim()) || body.external_url.trim().length > 500) {
+      errors.push('external_url must be an http(s) URL of at most 500 characters');
+    } else {
+      data.external_url = body.external_url.trim();
+    }
+  } else if (!partial) {
+    data.external_url = null;
+  }
+
+  if (body.contact_info !== undefined) {
+    if (body.contact_info === null || body.contact_info === '') {
+      data.contact_info = null;
+    } else if (typeof body.contact_info !== 'string' || body.contact_info.trim().length > 500) {
+      errors.push('contact_info must be a string of at most 500 characters');
+    } else if (DANGEROUS_CONFIG_RE.test(body.contact_info)) {
+      errors.push('contact_info must not contain markup tags');
+    } else {
+      data.contact_info = body.contact_info.trim();
+    }
+  } else if (!partial) {
+    data.contact_info = null;
   }
 
   return { errors, data };
@@ -126,6 +159,8 @@ function serializeListingRow(row) {
       category: row.category,
       price_display: row.price_display,
       images: images,
+      external_url: row.external_url || null,
+      contact_info: row.contact_info || null,
       status: row.status,
       seller_user_id: row.seller_user_id,
       seller_username: row.seller_username || null,
@@ -232,10 +267,10 @@ export async function handleCreateListing(req, res, user) {
     const ts = now();
     execute(
       `INSERT INTO marketplace_listings
-        (id, seller_user_id, title, description, category, price_display, images, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)`,
+        (id, seller_user_id, title, description, category, price_display, images, external_url, contact_info, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)`,
       [id, user.sub, data.title, data.description, data.category, data.price_display,
-       JSON.stringify(data.images), ts, ts]
+       JSON.stringify(data.images), data.external_url, data.contact_info, ts, ts]
     );
 
     const listing = findOwnedListing(id, user.sub);
@@ -301,11 +336,15 @@ export async function handlePublishListing(req, res, user, params) {
   try {
     const existing = findOwnedListing(params.id, user.sub);
     if (!existing) return errorResponse(res, 404, 'Listing not found');
-    if (existing.status !== 'draft') return errorResponse(res, 409, 'Only draft listings can be published');
+    // CREATOR-04: publish from draft, or re-publish (restore) from archived.
+    // Published listings stay published (409) — no silent data rewrite.
+    if (existing.status !== 'draft' && existing.status !== 'archived') {
+      return errorResponse(res, 409, 'Only draft or archived listings can be published');
+    }
 
     const ts = now();
     execute(
-      `UPDATE marketplace_listings SET status = 'published', published_at = ?, updated_at = ? WHERE id = ? AND seller_user_id = ?`,
+      `UPDATE marketplace_listings SET status = 'published', published_at = ?, archived_at = NULL, updated_at = ? WHERE id = ? AND seller_user_id = ?`,
       [ts, ts, params.id, user.sub]
     );
 
@@ -313,6 +352,59 @@ export async function handlePublishListing(req, res, user, params) {
     jsonResponse(res, 200, { listing: serializeListingRow(updated) });
   } catch (err) {
     console.error('[MARKETPLACE] Publish listing error:', err);
+    errorResponse(res, 500, 'Internal server error');
+  }
+}
+
+/**
+ * POST /api/marketplace/listings/:id/archive — owner archives a draft or
+ * published listing. Archived listings are never publicly visible.
+ * Idempotent: archiving an archived listing returns it unchanged.
+ */
+export async function handleArchiveListing(req, res, user, params) {
+  try {
+    const existing = findOwnedListing(params.id, user.sub);
+    if (!existing) return errorResponse(res, 404, 'Listing not found');
+
+    if (existing.status === 'archived') {
+      return jsonResponse(res, 200, { listing: serializeListingRow(existing) });
+    }
+
+    const ts = now();
+    execute(
+      `UPDATE marketplace_listings SET status = 'archived', archived_at = ?, updated_at = ? WHERE id = ? AND seller_user_id = ?`,
+      [ts, ts, params.id, user.sub]
+    );
+
+    const updated = findOwnedListing(params.id, user.sub);
+    jsonResponse(res, 200, { listing: serializeListingRow(updated) });
+  } catch (err) {
+    console.error('[MARKETPLACE] Archive listing error:', err);
+    errorResponse(res, 500, 'Internal server error');
+  }
+}
+
+/**
+ * GET /api/marketplace/my-listings — seller dashboard source. Returns ALL
+ * of the authenticated seller's listings (draft/published/archived) plus
+ * per-status counts. Ownership comes from user.sub only.
+ */
+export async function handleListOwnListings(req, res, user) {
+  try {
+    const rows = queryAll(
+      `${LISTING_SELECT} WHERE ml.seller_user_id = ? ORDER BY ml.updated_at DESC`,
+      [user.sub]
+    );
+    const listings = rows.map(serializeListingRow).filter(Boolean);
+    const counts = { total: listings.length, draft: 0, published: 0, archived: 0 };
+    for (const l of listings) {
+      if (l.status === 'draft') counts.draft += 1;
+      else if (l.status === 'published') counts.published += 1;
+      else if (l.status === 'archived') counts.archived += 1;
+    }
+    jsonResponse(res, 200, { listings, counts });
+  } catch (err) {
+    console.error('[MARKETPLACE] List own listings error:', err);
     errorResponse(res, 500, 'Internal server error');
   }
 }
@@ -494,6 +586,84 @@ export async function handleCheckPurchased(req, res, user, params) {
     jsonResponse(res, 200, { purchased: !!purchase });
   } catch (err) {
     console.error('[COINSHOP] Check purchased error:', err);
+    errorResponse(res, 500, 'Internal server error');
+  }
+}
+
+/**
+ * POST /api/coin-shop/install/:id — install a PURCHASED creator asset into
+ * the buyer's own profile-design state.
+ *
+ * CREATOR-04 boundary: only `profile_design` assets are installable, because
+ * only that type has a complete buyer-side contract (a buyer-owned draft
+ * design created through the existing validated design validator). The
+ * creator snapshot is never modified; the buyer publishes via the existing
+ * profile-design API. theme/background/sticker/decoration return 422 with a
+ * clear not-installable message — no fabricated behavior.
+ *
+ * Security: purchase ownership comes from user.sub; the asset row must exist
+ * and its immutable snapshot must re-validate. No ownership transfer via
+ * request parameters is possible.
+ */
+export async function handleInstallAsset(req, res, user, params) {
+  try {
+    const buyerId = user.sub;
+    const assetId = params.id;
+
+    const purchase = queryOne(
+      'SELECT id FROM purchased_assets WHERE buyer_user_id = ? AND asset_id = ?',
+      [buyerId, assetId]
+    );
+    if (!purchase) return errorResponse(res, 403, 'Asset not purchased by you');
+
+    const asset = queryOne(
+      'SELECT id, creator_user_id, name, asset_type, status, asset_data FROM creator_assets WHERE id = ?',
+      [assetId]
+    );
+    if (!asset) return errorResponse(res, 404, 'Asset not found');
+    if (asset.status !== 'published' && asset.status !== 'archived') {
+      return errorResponse(res, 404, 'Asset is not available');
+    }
+    if (asset.asset_type !== 'profile_design') {
+      return errorResponse(res, 422, `Asset type "${asset.asset_type}" cannot be installed yet`);
+    }
+
+    let snapshot = null;
+    try {
+      snapshot = JSON.parse(asset.asset_data || '{}');
+    } catch {
+      return errorResponse(res, 422, 'Asset snapshot is invalid');
+    }
+
+    const { errors, data } = validateDesignPayload(
+      { name: asset.name, layout: snapshot.layout, theme: snapshot.theme },
+      { partial: false }
+    );
+    if (errors.length > 0) return errorResponse(res, 422, errors.join('; '));
+
+    const id = generateId();
+    const ts = now();
+    const designName = `Installed: ${asset.name}`.slice(0, 100);
+    execute(
+      `INSERT INTO profile_designs (id, user_id, name, status, version, layout_config, theme_config, created_at, updated_at)
+       VALUES (?, ?, ?, 'draft', 1, ?, ?, ?, ?)`,
+      [id, buyerId, designName, JSON.stringify(data.layout), data.theme ? JSON.stringify(data.theme) : null, ts, ts]
+    );
+
+    const created = queryOne('SELECT * FROM profile_designs WHERE id = ? AND user_id = ?', [id, buyerId]);
+    let layout = null;
+    let theme = null;
+    try { layout = JSON.parse(created.layout_config || '{}'); } catch { layout = null; }
+    try { theme = created.theme_config ? JSON.parse(created.theme_config) : null; } catch { theme = null; }
+    jsonResponse(res, 201, {
+      design: {
+        id: created.id, name: created.name, status: created.status, version: 1,
+        layout, theme, created_at: created.created_at, updated_at: created.updated_at,
+      },
+      asset_id: assetId,
+    });
+  } catch (err) {
+    console.error('[COINSHOP] Install asset error:', err);
     errorResponse(res, 500, 'Internal server error');
   }
 }

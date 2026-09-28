@@ -1,0 +1,257 @@
+[PROFILE] Upload directory writable: D:\FILES\project\KomuniPH\uploads\profile
+[PROFILE] Background upload directory writable: D:\FILES\project\KomuniPH\uploads\backgrounds
+[GALLERY] Upload directory writable: D:\FILES\project\KomuniPH\uploads\gallery
+[GALLERY] Thumbnail directory writable: D:\FILES\project\KomuniPH\uploads\gallery\thumbnails
+[KomuniPH] Starting v1.0.0...
+[DB] Database initialized successfully
+[ADMIN-SEED] Dev admin promotion skipped: user not found
+[KomuniPH] Server running at http://127.0.0.1:19032
+[KomuniPH] Environment: development
+[KomuniPH] API: http://localhost:19032/api/health
+[ADMIN-SEED] Default admin user created (username: admin, password: admin)
+  ok   Ledger core ΓÇ║ creditCoins credits and writes a balanced ledger row
+  ok   Ledger core ΓÇ║ spend debit subtracts available balance
+  ok   Ledger core ΓÇ║ spend with insufficient balance is rejected atomically
+  ok   Ledger core ΓÇ║ freeze moves available coins into the frozen reserve
+  ok   Ledger core ΓÇ║ unfreeze restores the frozen coins
+  ok   Ledger core ΓÇ║ over-freeze beyond available is rejected
+  ok   Ledger core ΓÇ║ duplicate reference event cannot create a second ledger row
+  ok   Ledger core ΓÇ║ invalid ledger type, direction, and amounts are rejected
+  ok   Ledger core ΓÇ║ freeze with insufficient funds and cash_out above frozen reserve
+[ADMIN-SEED] Admin seed skipped: UNIQUE constraint failed: users.username
+[SERVER] Request error: ReferenceError: attachMarketplaceRoutes is not defined
+    at handleApi (file:///D:/FILES/project/KomuniPH/server/index.js:441:5)
+    at Server.handleRequest (file:///D:/FILES/project/KomuniPH/server/index.js:899:20)
+    at Server.emit (node:events:509:28)
+    at parserOnIncoming (node:_http_server:1282:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:125:17)
+  FAIL Wallet & history API ΓÇ║ wallet endpoint requires authentication ΓÇö expected 401, got 500
+[SERVER] Request error: ReferenceError: attachMarketplaceRoutes is not defined
+    at handleApi (file:///D:/FILES/project/KomuniPH/server/index.js:441:5)
+    at Server.handleRequest (file:///D:/FILES/project/KomuniPH/server/index.js:899:20)
+    at Server.emit (node:events:509:28)
+    at parserOnIncoming (node:_http_server:1282:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:125:17)
+  FAIL Wallet & history API ΓÇ║ wallet endpoint returns balance + exchange rate ΓÇö expected 200, got 500
+[SERVER] Request error: ReferenceError: attachMarketplaceRoutes is not defined
+    at handleApi (file:///D:/FILES/project/KomuniPH/server/index.js:441:5)
+    at Server.handleRequest (file:///D:/FILES/project/KomuniPH/server/index.js:899:20)
+    at Server.emit (node:events:509:28)
+    at parserOnIncoming (node:_http_server:1282:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:125:17)
+  FAIL Wallet & history API ΓÇ║ transaction history exposes direction/balance_before/balance_after ΓÇö expected 200, got 500
+[PAYMONGO] Webhook received: source.chargeable, source=src_credit, status=chargeable
+[PAYMONGO] Topup 15317c1c-dfee-4561-a530-c820332a0ff3 completed: 500 coins credited to user d6dac321-9068-4176-be7a-0bcfb921524d
+  ok   PayMongo webhook ΓÇ║ webhook credits coins once (valid signature)
+[PAYMONGO] Webhook received: source.chargeable, source=src_credit, status=chargeable
+  ok   PayMongo webhook ΓÇ║ webhook replay is ignored (no double credit)
+[PAYMONGO] Webhook signature verification failed
+  ok   PayMongo webhook ΓÇ║ webhook rejects a tampered signature
+[PAYMONGO] Webhook received: source.chargeable, source=src_amount, status=chargeable
+[PAYMONGO] Amount mismatch: source=9999 centavos, expected=5000 centavos for topup 13a9419b-6af7-4c55-b5ce-d53ccac300fb
+  ok   PayMongo webhook ΓÇ║ webhook amount mismatch does not credit
+[PAYMONGO] Webhook received: source.chargeable, source=src_ignored, status=pending
+  ok   PayMongo webhook ΓÇ║ non-chargeable events are ignored
+  ok   Identity verification reward ΓÇ║ first verified record awards exactly 15 coins once
+  ok   Identity verification reward ΓÇ║ reward shared between a second verified record cannot double-award
+  ok   Identity verification reward ΓÇ║ reward requires an actually verified record
+[SERVER] Request error: ReferenceError: attachMarketplaceRoutes is not defined
+    at handleApi (file:///D:/FILES/project/KomuniPH/server/index.js:441:5)
+    at Server.handleRequest (file:///D:/FILES/project/KomuniPH/server/index.js:899:20)
+    at Server.emit (node:events:509:28)
+    at parserOnIncoming (node:_http_server:1282:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:125:17)
+  FAIL Withdrawal lifecycle ΓÇ║ create withdrawal freezes exact available coins ΓÇö expected 201, got 500
+[SERVER] Request error: ReferenceError: attachMarketplaceRoutes is not defined
+    at handleApi (file:///D:/FILES/project/KomuniPH/server/index.js:441:5)
+    at Server.handleRequest (file:///D:/FILES/project/KomuniPH/server/index.js:899:20)
+    at Server.emit (node:events:509:28)
+    at parserOnIncoming (node:_http_server:1282:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:125:17)
+[SERVER] Request error: ReferenceError: attachMarketplaceRoutes is not defined
+    at handleApi (file:///D:/FILES/project/KomuniPH/server/index.js:441:5)
+    at Server.handleRequest (file:///D:/FILES/project/KomuniPH/server/index.js:899:20)
+    at Server.emit (node:events:509:28)
+    at parserOnIncoming (node:_http_server:1282:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:125:17)
+  FAIL Withdrawal lifecycle ΓÇ║ concurrent withdrawals cannot over-freeze the wallet ΓÇö expected one 201 + one 422, got 500,500
+[SERVER] Request error: ReferenceError: attachMarketplaceRoutes is not defined
+    at handleApi (file:///D:/FILES/project/KomuniPH/server/index.js:441:5)
+    at Server.handleRequest (file:///D:/FILES/project/KomuniPH/server/index.js:899:20)
+    at Server.emit (node:events:509:28)
+    at parserOnIncoming (node:_http_server:1282:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:125:17)
+  FAIL Withdrawal lifecycle ΓÇ║ withdrawal below minimum is rejected ΓÇö expected 422, got 500
+[SERVER] Request error: ReferenceError: attachMarketplaceRoutes is not defined
+    at handleApi (file:///D:/FILES/project/KomuniPH/server/index.js:441:5)
+    at Server.handleRequest (file:///D:/FILES/project/KomuniPH/server/index.js:899:20)
+    at Server.emit (node:events:509:28)
+    at parserOnIncoming (node:_http_server:1282:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:125:17)
+  FAIL Withdrawal lifecycle ΓÇ║ withdrawal approval settles the frozen coins (cash_out) ΓÇö withdrawal creation failed
+[SERVER] Request error: ReferenceError: attachMarketplaceRoutes is not defined
+    at handleApi (file:///D:/FILES/project/KomuniPH/server/index.js:441:5)
+    at Server.handleRequest (file:///D:/FILES/project/KomuniPH/server/index.js:899:20)
+    at Server.emit (node:events:509:28)
+    at parserOnIncoming (node:_http_server:1282:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:125:17)
+  FAIL Withdrawal lifecycle ΓÇ║ withdrawal rejection releases the frozen coins (unfreeze) ΓÇö Cannot read properties of undefined (reading 'id')
+[SERVER] Request error: ReferenceError: attachMarketplaceRoutes is not defined
+    at handleApi (file:///D:/FILES/project/KomuniPH/server/index.js:441:5)
+    at Server.handleRequest (file:///D:/FILES/project/KomuniPH/server/index.js:899:20)
+    at Server.emit (node:events:509:28)
+    at parserOnIncoming (node:_http_server:1282:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:125:17)
+  FAIL Withdrawal lifecycle ΓÇ║ non-admin cannot approve withdrawals ΓÇö Cannot read properties of undefined (reading 'id')
+[SERVER] Request error: ReferenceError: attachMarketplaceRoutes is not defined
+    at handleApi (file:///D:/FILES/project/KomuniPH/server/index.js:441:5)
+    at Server.handleRequest (file:///D:/FILES/project/KomuniPH/server/index.js:899:20)
+    at Server.emit (node:events:509:28)
+    at parserOnIncoming (node:_http_server:1282:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:125:17)
+  FAIL Admin coin management ΓÇ║ admin adjust credits and debits, with ledger trail ΓÇö credit expected 200, got 500
+[SERVER] Request error: ReferenceError: attachMarketplaceRoutes is not defined
+    at handleApi (file:///D:/FILES/project/KomuniPH/server/index.js:441:5)
+    at Server.handleRequest (file:///D:/FILES/project/KomuniPH/server/index.js:899:20)
+    at Server.emit (node:events:509:28)
+    at parserOnIncoming (node:_http_server:1282:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:125:17)
+  FAIL Admin coin management ΓÇ║ admin adjust cannot over-deduct the wallet ΓÇö expected 422, got 500
+[SERVER] Request error: ReferenceError: attachMarketplaceRoutes is not defined
+    at handleApi (file:///D:/FILES/project/KomuniPH/server/index.js:441:5)
+    at Server.handleRequest (file:///D:/FILES/project/KomuniPH/server/index.js:899:20)
+    at Server.emit (node:events:509:28)
+    at parserOnIncoming (node:_http_server:1282:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:125:17)
+  FAIL Admin coin management ΓÇ║ admin adjust validates payload and target ΓÇö unknown user expected 404, got 500
+[SERVER] Request error: ReferenceError: attachMarketplaceRoutes is not defined
+    at handleApi (file:///D:/FILES/project/KomuniPH/server/index.js:441:5)
+    at Server.handleRequest (file:///D:/FILES/project/KomuniPH/server/index.js:899:20)
+    at Server.emit (node:events:509:28)
+    at parserOnIncoming (node:_http_server:1282:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:125:17)
+  FAIL Admin coin management ΓÇ║ non-admin is forbidden from adjusting wallets ΓÇö expected 403, got 500
+[SERVER] Request error: ReferenceError: attachMarketplaceRoutes is not defined
+    at handleApi (file:///D:/FILES/project/KomuniPH/server/index.js:441:5)
+    at Server.handleRequest (file:///D:/FILES/project/KomuniPH/server/index.js:899:20)
+    at Server.emit (node:events:509:28)
+    at parserOnIncoming (node:_http_server:1282:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:125:17)
+  FAIL Admin coin management ΓÇ║ manual topup approval credits once and replays are rejected ΓÇö approve expected 200, got 500
+[SERVER] Request error: ReferenceError: attachMarketplaceRoutes is not defined
+    at handleApi (file:///D:/FILES/project/KomuniPH/server/index.js:441:5)
+    at Server.handleRequest (file:///D:/FILES/project/KomuniPH/server/index.js:899:20)
+    at Server.emit (node:events:509:28)
+    at parserOnIncoming (node:_http_server:1282:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:125:17)
+  FAIL Admin coin management ΓÇ║ admin summary reports platform totals ΓÇö summary expected 200, got 500
+  ok   Ledger invariant ΓÇ║ every affected wallet reconciles end-to-end
+
+ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
+COINS-01 TESTS: 18/33 passed
+
+FAILURES:
+  Γ£ù Wallet & history API ΓÇ║ wallet endpoint requires authentication
+    Error: expected 401, got 500
+    at check (file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:71:20)
+    at file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:326:3
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:60:7
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:714:26
+  Γ£ù Wallet & history API ΓÇ║ wallet endpoint returns balance + exchange rate
+    Error: expected 200, got 500
+    at check (file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:71:20)
+    at file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:333:3
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:60:7
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:714:26
+  Γ£ù Wallet & history API ΓÇ║ transaction history exposes direction/balance_before/balance_after
+    Error: expected 200, got 500
+    at check (file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:71:20)
+    at file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:343:3
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:60:7
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:714:26
+  Γ£ù Withdrawal lifecycle ΓÇ║ create withdrawal freezes exact available coins
+    Error: expected 201, got 500
+    at check (file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:71:20)
+    at file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:502:3
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:60:7
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:714:26
+  Γ£ù Withdrawal lifecycle ΓÇ║ concurrent withdrawals cannot over-freeze the wallet
+    Error: expected one 201 + one 422, got 500,500
+    at check (file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:71:20)
+    at file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:520:3
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:60:7
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:714:26
+  Γ£ù Withdrawal lifecycle ΓÇ║ withdrawal below minimum is rejected
+    Error: expected 422, got 500
+    at check (file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:71:20)
+    at file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:534:3
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:60:7
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:714:26
+  Γ£ù Withdrawal lifecycle ΓÇ║ withdrawal approval settles the frozen coins (cash_out)
+    Error: withdrawal creation failed
+    at check (file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:71:20)
+    at file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:548:3
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:60:7
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:714:26
+  Γ£ù Withdrawal lifecycle ΓÇ║ withdrawal rejection releases the frozen coins (unfreeze)
+    TypeError: Cannot read properties of undefined (reading 'id')
+    at file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:577:42
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:60:7
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:714:26
+  Γ£ù Withdrawal lifecycle ΓÇ║ non-admin cannot approve withdrawals
+    TypeError: Cannot read properties of undefined (reading 'id')
+    at file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:596:42
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:60:7
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:714:26
+  Γ£ù Admin coin management ΓÇ║ admin adjust credits and debits, with ledger trail
+    Error: credit expected 200, got 500
+    at check (file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:71:20)
+    at file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:615:3
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:60:7
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:714:26
+  Γ£ù Admin coin management ΓÇ║ admin adjust cannot over-deduct the wallet
+    Error: expected 422, got 500
+    at check (file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:71:20)
+    at file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:639:3
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:60:7
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:714:26
+  Γ£ù Admin coin management ΓÇ║ admin adjust validates payload and target
+    Error: unknown user expected 404, got 500
+    at check (file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:71:20)
+    at file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:646:3
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:60:7
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:714:26
+  Γ£ù Admin coin management ΓÇ║ non-admin is forbidden from adjusting wallets
+    Error: expected 403, got 500
+    at check (file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:71:20)
+    at file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:659:3
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:60:7
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:714:26
+  Γ£ù Admin coin management ΓÇ║ manual topup approval credits once and replays are rejected
+    Error: approve expected 200, got 500
+    at check (file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:71:20)
+    at file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:674:3
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:60:7
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:714:26
+  Γ£ù Admin coin management ΓÇ║ admin summary reports platform totals
+    Error: summary expected 200, got 500
+    at check (file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:71:20)
+    at file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:689:3
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:60:7
+    at async file:///D:/FILES/project/KomuniPH/tests/test_coins.mjs:714:26
+[DB] Database connection closed

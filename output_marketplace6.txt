@@ -1,0 +1,45 @@
+[PROFILE] Upload directory writable: D:\FILES\project\KomuniPH\uploads\profile
+[PROFILE] Background upload directory writable: D:\FILES\project\KomuniPH\uploads\backgrounds
+[GALLERY] Upload directory writable: D:\FILES\project\KomuniPH\uploads\gallery
+[GALLERY] Thumbnail directory writable: D:\FILES\project\KomuniPH\uploads\gallery\thumbnails
+[KomuniPH] Starting v1.0.0...
+[DB] Database initialized successfully
+[ADMIN-SEED] Dev admin promotion skipped: user not found
+[KomuniPH] Server running at http://127.0.0.1:20604
+[KomuniPH] Environment: development
+[KomuniPH] API: http://localhost:20604/api/health
+[ADMIN-SEED] Default admin user created (username: admin, password: admin)
+[ADMIN-SEED] Admin seed skipped: UNIQUE constraint failed: users.username
+  ok   Marketplace Asset Discovery ΓÇ║ list assets as unauthenticated returns 401
+  FAIL Marketplace Asset Discovery ΓÇ║ list assets as owner returns 200 with published assets ΓÇö FOREIGN KEY constraint failed
+  FAIL Marketplace Asset Discovery ΓÇ║ list assets search by name returns matching results ΓÇö FOREIGN KEY constraint failed
+  FAIL Marketplace Asset Discovery ΓÇ║ list assets pagination works correctly ΓÇö FOREIGN KEY constraint failed
+  FAIL Marketplace Asset Discovery ΓÇ║ only published assets are visible (drafts hidden) ΓÇö 12 values for 13 columns
+  FAIL Marketplace Asset Discovery ΓÇ║ get a single published asset detail ΓÇö FOREIGN KEY constraint failed
+  FAIL Marketplace Asset Discovery ΓÇ║ cross-user asset read returns 404 (ownership hidden) ΓÇö FOREIGN KEY constraint failed
+  FAIL Marketplace Asset Discovery ΓÇ║ price_coins is display metadata only (not purchaseable) ΓÇö FOREIGN KEY constraint failed
+  ok   Marketplace Security ΓÇ║ unauthenticated get asset detail returns 401
+  FAIL Marketplace Security ΓÇ║ list assets with no search returns all published ΓÇö FOREIGN KEY constraint failed
+
+Test call count: 10
+Queue length: 11
+Marketplace tests: 2/10 passed
+FAILURES:
+  Γ£ù Marketplace Asset Discovery ΓÇ║ list assets as owner returns 200 with published assets
+    FOREIGN KEY constraint failed
+  Γ£ù Marketplace Asset Discovery ΓÇ║ list assets search by name returns matching results
+    FOREIGN KEY constraint failed
+  Γ£ù Marketplace Asset Discovery ΓÇ║ list assets pagination works correctly
+    FOREIGN KEY constraint failed
+  Γ£ù Marketplace Asset Discovery ΓÇ║ only published assets are visible (drafts hidden)
+    12 values for 13 columns
+  Γ£ù Marketplace Asset Discovery ΓÇ║ get a single published asset detail
+    FOREIGN KEY constraint failed
+  Γ£ù Marketplace Asset Discovery ΓÇ║ cross-user asset read returns 404 (ownership hidden)
+    FOREIGN KEY constraint failed
+  Γ£ù Marketplace Asset Discovery ΓÇ║ price_coins is display metadata only (not purchaseable)
+    FOREIGN KEY constraint failed
+  Γ£ù Marketplace Security ΓÇ║ list assets with no search returns all published
+    FOREIGN KEY constraint failed
+[DB] Database connection closed
+Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 94

@@ -1,0 +1,14 @@
+[PROFILE] Upload directory writable: D:\FILES\project\KomuniPH\uploads\profile
+[PROFILE] Background upload directory writable: D:\FILES\project\KomuniPH\uploads\backgrounds
+[GALLERY] Upload directory writable: D:\FILES\project\KomuniPH\uploads\gallery
+[GALLERY] Thumbnail directory writable: D:\FILES\project\KomuniPH\uploads\gallery\thumbnails
+[KomuniPH] Starting v1.0.0...
+[DB] Database initialized successfully
+[ADMIN-SEED] Dev admin promotion skipped: user not found
+[KomuniPH] Server running at http://127.0.0.1:20600
+[KomuniPH] Environment: development
+[KomuniPH] API: http://localhost:20600/api/health
+[ADMIN-SEED] Default admin user created (username: admin, password: admin)
+[ADMIN-SEED] Admin seed skipped: UNIQUE constraint failed: users.username
+
+Marketplace tests: 0 passed, 0 failed

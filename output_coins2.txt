@@ -1,0 +1,56 @@
+[PROFILE] Upload directory writable: D:\FILES\project\KomuniPH\uploads\profile
+[PROFILE] Background upload directory writable: D:\FILES\project\KomuniPH\uploads\backgrounds
+[GALLERY] Upload directory writable: D:\FILES\project\KomuniPH\uploads\gallery
+[GALLERY] Thumbnail directory writable: D:\FILES\project\KomuniPH\uploads\gallery\thumbnails
+[KomuniPH] Starting v1.0.0...
+[DB] Database initialized successfully
+[ADMIN-SEED] Dev admin promotion skipped: user not found
+[KomuniPH] Server running at http://127.0.0.1:18048
+[KomuniPH] Environment: development
+[KomuniPH] API: http://localhost:18048/api/health
+[ADMIN-SEED] Default admin user created (username: admin, password: admin)
+  ok   Ledger core ΓÇ║ creditCoins credits and writes a balanced ledger row
+  ok   Ledger core ΓÇ║ spend debit subtracts available balance
+  ok   Ledger core ΓÇ║ spend with insufficient balance is rejected atomically
+  ok   Ledger core ΓÇ║ freeze moves available coins into the frozen reserve
+  ok   Ledger core ΓÇ║ unfreeze restores the frozen coins
+  ok   Ledger core ΓÇ║ over-freeze beyond available is rejected
+  ok   Ledger core ΓÇ║ duplicate reference event cannot create a second ledger row
+  ok   Ledger core ΓÇ║ invalid ledger type, direction, and amounts are rejected
+  ok   Ledger core ΓÇ║ freeze with insufficient funds and cash_out above frozen reserve
+[ADMIN-SEED] Admin seed skipped: UNIQUE constraint failed: users.username
+  ok   Wallet & history API ΓÇ║ wallet endpoint requires authentication
+  ok   Wallet & history API ΓÇ║ wallet endpoint returns balance + exchange rate
+  ok   Wallet & history API ΓÇ║ transaction history exposes direction/balance_before/balance_after
+[PAYMONGO] Webhook received: source.chargeable, source=src_credit, status=chargeable
+[PAYMONGO] Topup 0f29ecca-cc86-470a-89e9-5ebfa66eabe7 completed: 500 coins credited to user 0dbb6750-41e3-4732-9f8b-4fcb192e9975
+  ok   PayMongo webhook ΓÇ║ webhook credits coins once (valid signature)
+[PAYMONGO] Webhook received: source.chargeable, source=src_credit, status=chargeable
+  ok   PayMongo webhook ΓÇ║ webhook replay is ignored (no double credit)
+[PAYMONGO] Webhook signature verification failed
+  ok   PayMongo webhook ΓÇ║ webhook rejects a tampered signature
+[PAYMONGO] Webhook received: source.chargeable, source=src_amount, status=chargeable
+[PAYMONGO] Amount mismatch: source=9999 centavos, expected=5000 centavos for topup ca881441-bd1a-44c0-91c5-f33001822207
+  ok   PayMongo webhook ΓÇ║ webhook amount mismatch does not credit
+[PAYMONGO] Webhook received: source.chargeable, source=src_ignored, status=pending
+  ok   PayMongo webhook ΓÇ║ non-chargeable events are ignored
+  ok   Identity verification reward ΓÇ║ first verified record awards exactly 15 coins once
+  ok   Identity verification reward ΓÇ║ reward shared between a second verified record cannot double-award
+  ok   Identity verification reward ΓÇ║ reward requires an actually verified record
+  ok   Withdrawal lifecycle ΓÇ║ create withdrawal freezes exact available coins
+  ok   Withdrawal lifecycle ΓÇ║ concurrent withdrawals cannot over-freeze the wallet
+  ok   Withdrawal lifecycle ΓÇ║ withdrawal below minimum is rejected
+  ok   Withdrawal lifecycle ΓÇ║ withdrawal approval settles the frozen coins (cash_out)
+  ok   Withdrawal lifecycle ΓÇ║ withdrawal rejection releases the frozen coins (unfreeze)
+  ok   Withdrawal lifecycle ΓÇ║ non-admin cannot approve withdrawals
+  ok   Admin coin management ΓÇ║ admin adjust credits and debits, with ledger trail
+  ok   Admin coin management ΓÇ║ admin adjust cannot over-deduct the wallet
+  ok   Admin coin management ΓÇ║ admin adjust validates payload and target
+  ok   Admin coin management ΓÇ║ non-admin is forbidden from adjusting wallets
+  ok   Admin coin management ΓÇ║ manual topup approval credits once and replays are rejected
+  ok   Admin coin management ΓÇ║ admin summary reports platform totals
+  ok   Ledger invariant ΓÇ║ every affected wallet reconciles end-to-end
+
+ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
+COINS-01 TESTS: 33/33 passed
+[DB] Database connection closed

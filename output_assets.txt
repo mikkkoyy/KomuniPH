@@ -1,0 +1,54 @@
+[PROFILE] Upload directory writable: D:\FILES\project\KomuniPH\uploads\profile
+[PROFILE] Background upload directory writable: D:\FILES\project\KomuniPH\uploads\backgrounds
+[GALLERY] Upload directory writable: D:\FILES\project\KomuniPH\uploads\gallery
+[GALLERY] Thumbnail directory writable: D:\FILES\project\KomuniPH\uploads\gallery\thumbnails
+[KomuniPH] Starting v1.0.0...
+[DB] Database initialized successfully
+[ADMIN-SEED] Dev admin promotion skipped: user not found
+[KomuniPH] Server running at http://127.0.0.1:20780
+[KomuniPH] Environment: development
+[KomuniPH] API: http://localhost:20780/api/health
+[ADMIN-SEED] Default admin user created (username: admin, password: admin)
+[ADMIN-SEED] Admin seed skipped: UNIQUE constraint failed: users.username
+  ok   Asset create & defaults ΓÇ║ create a profile_design asset starts as a draft at version 1
+  ok   Asset create & defaults ΓÇ║ create an image-type asset validates + derives preview
+  ok   Asset create & defaults ΓÇ║ list returns only the authenticated creator assets
+  ok   Asset create & defaults ΓÇ║ name is required on create
+  ok   Asset create & defaults ΓÇ║ asset_data is required on create
+  ok   Asset create & defaults ΓÇ║ client-supplied version/status are ignored (server-derived)
+  ok   Asset update ΓÇ║ PATCH a draft asset updates fields and keeps version
+  ok   Asset update ΓÇ║ invalid PATCH payload returns 400 and leaves the draft unchanged
+  ok   Asset update ΓÇ║ PATCH with no updatable fields returns 400
+  ok   Asset update ΓÇ║ PATCH cannot change the asset type
+  ok   Asset update ΓÇ║ PATCH a submitted asset is rejected (409)
+  ok   Asset submit ΓÇ║ submit transitions a validated draft to submitted
+  ok   Asset submit ΓÇ║ submitting the same asset twice returns 409
+  ok   Asset submit ΓÇ║ an invalid stored asset can never be submitted (publish gate)
+  ok   Asset submit ΓÇ║ a source_design_id must reference one of the creator own designs
+  ok   Asset publish ΓÇ║ publish requires submitted state first
+  ok   Asset publish ΓÇ║ publish bumps version and stamps published_at
+  ok   Asset publish ΓÇ║ each publish creates a new version snapshot
+  ok   Asset publish ΓÇ║ a published asset is immutable (PATCH -> 409)
+  ok   Asset archive ΓÇ║ owner can archive their own asset
+  ok   Asset archive ΓÇ║ admin can archive another creator asset via existing requireAdmin
+  ok   Asset archive ΓÇ║ non-owner non-admin archive is denied
+  ok   Asset ownership ΓÇ║ read a foreign asset returns 404 (no cross-user draft exposure)
+  ok   Asset ownership ΓÇ║ foreign update/submit/publish all return 404
+  ok   Asset ownership ΓÇ║ unauthenticated requests return 401
+  ok   Asset validation & security ΓÇ║ unknown asset types are rejected
+  ok   Asset validation & security ΓÇ║ dangerous markup in name/description is rejected
+  ok   Asset validation & security ΓÇ║ unsafe image URLs are rejected (javascript:/data:)
+  ok   Asset validation & security ΓÇ║ invalid image fit is rejected
+  ok   Asset validation & security ΓÇ║ hidden embedded payloads inside asset_data are rejected
+  ok   Asset validation & security ΓÇ║ oversized asset payloads are rejected
+  ok   Asset validation & security ΓÇ║ price validation: negative/decimal/string/zero
+  ok   Asset validation & security ΓÇ║ NaN/Infinity prices are rejected at the validation layer
+  ok   Asset validation & security ΓÇ║ name length and markup are bounded
+  ok   Profile design integration ΓÇ║ a personal published design can be snapshotted as an asset
+  ok   Profile design integration ΓÇ║ the asset never replaces the personal profile design
+  ok   Profile design integration ΓÇ║ asset edits do not mutate the personal design snapshot source
+  ok   Profile design integration ΓÇ║ publishing the asset keeps the personal profile working
+
+ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
+CREATOR-02 ASSET TESTS: 38/38 passed
+[DB] Database connection closed

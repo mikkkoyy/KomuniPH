@@ -1,0 +1,60 @@
+[PROFILE] Upload directory writable: D:\FILES\project\KomuniPH\uploads\profile
+[PROFILE] Background upload directory writable: D:\FILES\project\KomuniPH\uploads\backgrounds
+[GALLERY] Upload directory writable: D:\FILES\project\KomuniPH\uploads\gallery
+[GALLERY] Thumbnail directory writable: D:\FILES\project\KomuniPH\uploads\gallery\thumbnails
+[KomuniPH] Starting v1.0.0...
+[DB] Database initialized successfully
+[ADMIN-SEED] Dev admin promotion skipped: user not found
+[KomuniPH] Server running at http://127.0.0.1:18524
+[KomuniPH] Environment: development
+[KomuniPH] API: http://localhost:18524/api/health
+[ADMIN-SEED] Default admin user created (username: admin, password: admin)
+[ADMIN-SEED] Admin seed skipped: UNIQUE constraint failed: users.username
+  ok   Validation & registry ΓÇ║ unknown component type is rejected
+  ok   Validation & registry ΓÇ║ future/unbuilt component types are rejected
+  ok   Validation & registry ΓÇ║ missing and invalid component ids are rejected
+  ok   Validation & registry ΓÇ║ duplicate component ids are rejected
+  ok   Validation & registry ΓÇ║ non-numeric and out-of-range geometry is rejected
+  ok   Validation & registry ΓÇ║ non-integer zIndex and non-boolean flags are rejected
+  ok   Validation & registry ΓÇ║ hostile HTML/script config is rejected
+  ok   Validation & registry ΓÇ║ non-object layout and component config are rejected
+  ok   Validation & registry ΓÇ║ component overflow (> 64) is rejected
+  ok   Validation & registry ΓÇ║ canvas dimensions outside bounds are rejected
+  ok   Validation & registry ΓÇ║ unknown layout_config fields are rejected
+  ok   Validation & registry ΓÇ║ invalid theme_config (bad hex + unknown field) is rejected
+  ok   Validation & registry ΓÇ║ missing or oversized name is rejected
+  ok   CRUD ΓÇ║ create stores a valid published-worthy design
+  ok   CRUD ΓÇ║ create without layout/theme uses safe defaults
+  ok   CRUD ΓÇ║ create ignores client-supplied status
+  ok   CRUD ΓÇ║ list returns the user designs newest-first
+  ok   CRUD ΓÇ║ get returns a single owned design
+  ok   CRUD ΓÇ║ update renames and re-lays-out the design
+  ok   CRUD ΓÇ║ update with an invalid layout is 400 and leaves the row unchanged
+  ok   CRUD ΓÇ║ updating a design owned by someone else is 404
+  ok   CRUD ΓÇ║ reading a design owned by someone else is 404
+  ok   CRUD ΓÇ║ a malformed JSON body is rejected with 400
+  ok   Publishing & versioning ΓÇ║ publish flips to published and bumps the version
+  ok   Publishing & versioning ΓÇ║ a second publish archives the first published design
+  ok   Publishing & versioning ΓÇ║ publishing a design you do not own is 404
+  ok   Publishing & versioning ΓÇ║ archiving a design takes it out of rotation
+  ok   Publishing & versioning ΓÇ║ an archived design can be re-published
+  ok   Publishing & versioning ΓÇ║ archiving someone else's design is 404
+  ok   Ownership & security ΓÇ║ client cannot assign an owner (user_id) to a design
+  ok   Ownership & security ΓÇ║ unauthenticated access to the design endpoints is 401
+  ok   Ownership & security ΓÇ║ raw script strings cannot survive validation into stored data
+  ok   Profile & theme compatibility ΓÇ║ a profile without a design still returns a working profile (design null)
+  ok   Profile & theme compatibility ΓÇ║ published design is attached to own and public profile responses
+  ok   Profile & theme compatibility ΓÇ║ draft designs are never exposed on profiles
+  ok   Profile & theme compatibility ΓÇ║ a published design survives across profile loads with its theme_config
+  ok   Profile & theme compatibility ΓÇ║ corrupt stored design JSON never breaks a profile
+  ok   Profile & theme compatibility ΓÇ║ structurally invalid stored design (unknown type) degrades to null
+  ok   Profile & theme compatibility ΓÇ║ registries expose the controlled contract for clients
+  ok   Content components ΓÇ║ text component with valid config round-trips
+  ok   Content components ΓÇ║ content config out-of-range values are rejected
+  ok   Content components ΓÇ║ image config requires an http(s) URL and valid fit
+  ok   Content components ΓÇ║ rotation outside 0-360 is rejected
+  ok   Content components ΓÇ║ card component requires a heading and allows body
+
+ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
+CREATOR-01A TESTS: 44/44 passed
+[DB] Database connection closed

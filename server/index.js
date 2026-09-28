@@ -17,6 +17,7 @@ import { handleGetSettings, handleUpdateSettings } from './settings.js';
 import { handleGetProfile, handleGetPublicProfile, handleUpdateProfile, handleUploadPhoto, handleUpdateTheme, handleUploadBackground } from './profile.js';
 import { handleListDesigns, handleCreateDesign, handleGetDesign, handleUpdateDesign, handlePublishDesign, handleArchiveDesign } from './profileDesign.js';
 import { handleListAssets, handleCreateAsset, handleGetAsset, handleUpdateAsset, handleSubmitAsset, handlePublishAsset, handleArchiveAsset } from './creatorAssets.js';
+import { handleListMarketplaceAssets, handleGetMarketplaceAsset, handleListMarketplaceListings, handleCreateListing, handleGetListing, handleUpdateListing, handlePublishListing, handleGetCoinShopProduct, handleBuyAsset, handleListPurchasedAssets, handleCheckPurchased } from './marketplace.js';
 import { handleGetTestimonials, handleCreateTestimonial, handleDeleteTestimonial, handleGetUserTestimonials } from './testimonials.js';
 import { handleGetPhotos, handleUploadPhoto as handleGalleryUploadPhoto, handleDeletePhoto, handleGetOwnPhotos } from './gallery.js';
 import { getAllLocations, getCountries, getCities, getBarangays } from './locations.js';
@@ -434,6 +435,73 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
       const user = requireAuth(req, res);
       if (!user) return;
       return handleArchiveAsset(req, res, user, creatorAssetArchiveMatch);
+    }
+
+    // CREATOR-03 Marketplace asset discovery (Coin Shop catalog).
+    // List requires auth; single-asset detail is PUBLIC so shared links
+    // (#/coin-shop/product/:id) open the exact product for logged-out
+    // visitors. Drafts/archived are never exposed (published-only).
+    if (method === 'GET' && path === '/api/marketplace/assets') {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleListMarketplaceAssets(req, res, user);
+    }
+    const marketplaceAssetMatch = matchRoute('/api/marketplace/assets/:id', path);
+    if (method === 'GET' && marketplaceAssetMatch) {
+      return handleGetMarketplaceAsset(req, res, null, marketplaceAssetMatch);
+    }
+
+    // CREATOR-03 Coin Shop product detail is PUBLIC for share links.
+    // Buy action below still requires authentication.
+    const coinShopProductMatch = matchRoute('/api/coin-shop/products/:id', path);
+    if (method === 'GET' && coinShopProductMatch) {
+      return handleGetCoinShopProduct(req, res, null, coinShopProductMatch);
+    }
+    const coinShopBuyMatch = matchRoute('/api/coin-shop/buy/:id', path);
+    if (method === 'POST' && coinShopBuyMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleBuyAsset(req, res, user, coinShopBuyMatch);
+    }
+
+    // CREATOR-03 Purchased assets (buyer ownership).
+    if (method === 'GET' && path === '/api/coin-shop/purchases') {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleListPurchasedAssets(req, res, user);
+    }
+    const purchasedCheckMatch = matchRoute('/api/coin-shop/purchased/:id', path);
+    if (method === 'GET' && purchasedCheckMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleCheckPurchased(req, res, user, purchasedCheckMatch);
+    }
+
+    // CREATOR-03 Normal Marketplace listings.
+    if (method === 'GET' && path === '/api/marketplace/listings') {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleListMarketplaceListings(req, res, user);
+    }
+    if (method === 'POST' && path === '/api/marketplace/listings') {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleCreateListing(req, res, user);
+    }
+    const listingMatch = matchRoute('/api/marketplace/listings/:id', path);
+    if (method === 'GET' && listingMatch) {
+      return handleGetListing(req, res, null, listingMatch);
+    }
+    if (method === 'PATCH' && listingMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleUpdateListing(req, res, user, listingMatch);
+    }
+    const listingPublishMatch = matchRoute('/api/marketplace/listings/:id/publish', path);
+    if (method === 'POST' && listingPublishMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handlePublishListing(req, res, user, listingPublishMatch);
     }
 
     // Public profile by username

@@ -5304,3 +5304,512 @@ select:focus {
   word-break: break-word;
   overflow-wrap: anywhere;
 }
+
+/* ─── Marketplace Page ──────────────────────────────────── */
+
+.marketplace-page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+.marketplace-header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.marketplace-header h1 {
+  font-family: 'Fredoka', system-ui, sans-serif;
+  font-size: 2.25rem;
+  color: var(--kp-teal);
+}
+
+.marketplace-header p {
+  color: var(--kp-ink-soft);
+  font-size: 1rem;
+}
+
+.marketplace-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2rem;
+}
+
+.marketplace-search {
+  display: flex;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 250px;
+}
+
+.marketplace-search-input {
+  flex: 1;
+  padding: 0.625rem 1rem;
+  border: 1px solid var(--kp-border);
+  border-radius: var(--kp-control-radius);
+  background: var(--kp-cream);
+  font-size: 1rem;
+}
+
+.marketplace-search-button {
+  padding: 0.625rem 1.25rem;
+  border: none;
+  border-radius: var(--kp-control-radius);
+  background: var(--kp-teal);
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.marketplace-categories {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.marketplace-catalog {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1.5rem;
+}
+
+.marketplace-empty {
+  text-align: center;
+  padding: 3rem;
+  color: var(--kp-ink-soft);
+}
+
+.marketplace-pagination {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  align-items: center;
+  margin-top: 2rem;
+}
+
+.marketplace-user-controls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* ─── Listing Card ──────────────────────────────────────── */
+
+.listing-card {
+  background: rgba(255, 247, 236, 0.95);
+  border: 1px solid rgba(255,255,255,0.4);
+  border-radius: var(--kp-card-radius);
+  box-shadow: var(--kp-card-shadow);
+  overflow: hidden;
+  transition: transform 0.2s;
+}
+
+.listing-card:hover {
+  transform: translateY(-2px);
+}
+
+.listing-card-media {
+  position: relative;
+  height: 180px;
+  background: var(--kp-cream);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.listing-card-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.listing-card-no-image {
+  font-size: 3rem;
+  color: var(--kp-ink-soft);
+}
+
+.listing-category-badge {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  background: rgba(14, 110, 110, 0.9);
+  color: white;
+  padding: 0.25rem 0.75rem;
+  border-radius: 1rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.listing-card-body {
+  padding: 1.25rem;
+}
+
+.listing-card-title {
+  font-family: 'Fredoka', system-ui, sans-serif;
+  font-size: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.listing-card-desc {
+  color: var(--kp-ink-soft);
+  font-size: 0.875rem;
+  margin-bottom: 0.75rem;
+}
+
+.listing-card-meta {
+  margin-bottom: 1rem;
+}
+
+.listing-price {
+  font-weight: 700;
+  color: var(--kp-teal);
+  font-size: 1.1rem;
+}
+
+.listing-card-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* ─── Product Detail Page ──────────────────────────────── */
+
+.product-detail-page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+.product-detail-gallery {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.product-detail-image {
+  width: 100%;
+  max-height: 400px;
+  object-fit: cover;
+  border-radius: var(--kp-card-radius);
+}
+
+.product-detail-no-image {
+  height: 300px;
+  background: var(--kp-cream);
+  border-radius: var(--kp-card-radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 4rem;
+}
+
+.product-detail-info h1 {
+  font-family: 'Fredoka', system-ui, sans-serif;
+  font-size: 2rem;
+  margin-bottom: 1rem;
+}
+
+.product-detail-meta {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.product-category {
+  background: var(--kp-teal);
+  color: white;
+  padding: 0.25rem 0.75rem;
+  border-radius: 1rem;
+  font-size: 0.8rem;
+  text-transform: capitalize;
+}
+
+.product-price {
+  font-weight: 700;
+  color: var(--kp-teal);
+  font-size: 1.25rem;
+}
+
+.product-detail-description {
+  margin-bottom: 1.5rem;
+  line-height: 1.6;
+}
+
+.product-detail-seller {
+  margin-bottom: 1.5rem;
+}
+
+.product-detail-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+/* ─── Coin Shop Page ──────────────────────────────────── */
+
+.coin-shop-page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+.coin-shop-header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.coin-shop-header h1 {
+  font-family: 'Fredoka', system-ui, sans-serif;
+  font-size: 2.25rem;
+  color: var(--kp-ube);
+}
+
+.coin-shop-header p {
+  color: var(--kp-ink-soft);
+}
+
+.coin-shop-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2rem;
+}
+
+.coin-shop-categories {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.coin-shop-catalog {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1.5rem;
+}
+
+/* ─── Coin Card ───────────────────────────────────────── */
+
+.coin-card {
+  background: rgba(255, 247, 236, 0.95);
+  border: 1px solid rgba(255,255,255,0.4);
+  border-radius: var(--kp-card-radius);
+  box-shadow: var(--kp-card-shadow);
+  overflow: hidden;
+  transition: transform 0.2s;
+}
+
+.coin-card:hover {
+  transform: translateY(-2px);
+}
+
+.coin-card-media {
+  position: relative;
+  height: 180px;
+  background: var(--kp-cream);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.coin-card-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.coin-card-no-image {
+  font-size: 3rem;
+  color: var(--kp-ink-soft);
+}
+
+.coin-category-badge {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  background: rgba(123, 90, 166, 0.9);
+  color: white;
+  padding: 0.25rem 0.75rem;
+  border-radius: 1rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.coin-card-body {
+  padding: 1.25rem;
+}
+
+.coin-card-title {
+  font-family: 'Fredoka', system-ui, sans-serif;
+  font-size: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.coin-card-desc {
+  color: var(--kp-ink-soft);
+  font-size: 0.875rem;
+  margin-bottom: 0.75rem;
+}
+
+.coin-card-meta {
+  margin-bottom: 1rem;
+}
+
+.coin-price {
+  font-weight: 700;
+  color: var(--kp-ube);
+  font-size: 1.1rem;
+}
+
+.coin-card-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.coin-price-large {
+  font-weight: 700;
+  color: var(--kp-ube);
+  font-size: 1.5rem;
+}
+
+/* ─── Buy Status ──────────────────────────────────────── */
+
+.buy-success {
+  background: #d1fae5;
+  color: #065f46;
+  padding: 0.75rem 1rem;
+  border-radius: var(--kp-control-radius);
+  margin-top: 1rem;
+  font-weight: 600;
+}
+
+.buy-error {
+  background: var(--kp-error-soft);
+  color: var(--kp-error);
+  padding: 0.75rem 1rem;
+  border-radius: var(--kp-control-radius);
+  margin-top: 1rem;
+  font-weight: 600;
+}
+
+.buy-info {
+  background: #eff6ff;
+  color: #1e40af;
+  padding: 0.75rem 1rem;
+  border-radius: var(--kp-control-radius);
+  margin-top: 1rem;
+  font-weight: 600;
+}
+
+/* ─── Loading ──────────────────────────────────────────── */
+
+.loading {
+  text-align: center;
+  padding: 3rem;
+  color: var(--kp-ink-soft);
+  font-size: 1.2rem;
+}
+
+/* ─── Not Found ─────────────────────────────────────────── */
+
+.not-found-page {
+  text-align: center;
+  padding: 4rem 2rem;
+}
+
+.not-found-page h1 {
+  font-family: 'Fredoka', system-ui, sans-serif;
+  font-size: 2rem;
+  margin-bottom: 1rem;
+}
+
+/* ─── Coin Shop Product Detail ────────────────────────── */
+
+.coin-shop-product .product-detail-meta .coin-price-large {
+  font-size: 1.5rem;
+}
+
+/* ─── Share Button ────────────────────────────────────── */
+
+.share-btn {
+  cursor: pointer;
+}
+
+/* ─── Marketplace Listing Create ──────────────────────── */
+
+.listing-create-form {
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.listing-create-form .form-group {
+  margin-bottom: 1.25rem;
+}
+
+.listing-create-form .form-label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.375rem;
+  color: var(--kp-ink);
+}
+
+.listing-create-form .form-input,
+.listing-create-form .form-select,
+.listing-create-form .form-textarea {
+  width: 100%;
+  padding: 0.625rem 1rem;
+  border: 1px solid var(--kp-border);
+  border-radius: var(--kp-control-radius);
+  background: var(--kp-cream);
+  font-size: 1rem;
+  font-family: inherit;
+}
+
+.listing-create-form .form-textarea {
+  min-height: 150px;
+  resize: vertical;
+}
+
+.listing-create-form .form-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+/* ─── Responsive ──────────────────────────────────────── */
+
+@media (max-width: 640px) {
+  .marketplace-toolbar,
+  .coin-shop-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .marketplace-catalog,
+  .coin-shop-catalog {
+    grid-template-columns: 1fr;
+  }
+  
+  .listing-card-actions,
+  .coin-card-actions,
+  .product-detail-actions {
+    flex-direction: column;
+  }
+  
+  .listing-card-actions .btn,
+  .coin-card-actions .btn,
+  .product-detail-actions .btn {
+    text-align: center;
+  }
+}

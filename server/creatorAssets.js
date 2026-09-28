@@ -294,7 +294,7 @@ function resolveSourceDesignId(userId, assetType, data, errors) {
  * Serialize a persisted row into the API shape, parsing JSON columns and
  * re-running write-time validation so stored data can never be served broken.
  */
-function serializeAssetRow(row) {
+export function serializeAssetRow(row) {
   if (!row) return null;
   if (typeof row.created_at !== 'string') return null;
   let assetData = null;

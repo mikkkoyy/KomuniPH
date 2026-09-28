@@ -3,7 +3,7 @@
  * Router and app initialization
  */
 
-import { isAuthenticated, clearTokens, initAuth, restoreTokens } from './api.js';
+import { isAuthenticated, clearTokens, initAuth, restoreTokens, apiRequest } from './api.js';
 import { renderLoginPage, renderRegisterPage, renderVerifyEmailPage, renderForgotPasswordPage, renderResetPasswordPage, renderResetPasswordSuccessPage, initLoginForm, initRegisterForm, initForgotPasswordForm, initResetPasswordForm } from './auth.js';
 import { renderHomePage, initHomePage, renderPlaceholderPage, initPlaceholderPage } from './feed.js';
 import { renderProfilePage, initProfilePage } from './profile.js';
@@ -16,6 +16,7 @@ import { renderMessagesPage, initMessagesPage, destroyMessagesPage } from './mes
 import { renderCommunityPage, initCommunityPage, renderCommunityDetailPage, initCommunityDetailPage } from './communities.js';
 import { renderWalletPage, initWalletPage } from './coins.js';
 import { renderAdminPage, initAdminPage } from './admin.js';
+import { renderMarketplacePage, initMarketplacePage, renderCoinShopPage, initCoinShopPage, initShareButtons, renderMarketplaceProductDetail, renderCoinShopProductDetailPage } from './marketplace.js';
 
 const app = document.getElementById('app');
 
@@ -139,8 +140,16 @@ function render() {
         navigate('/login');
         return;
       }
-      html = renderPlaceholderPage('Marketplace', 'Discover products and listings from the KomuniPH community.', '🛍️', 'marketplace');
-      initFn = initPlaceholderPage;
+      html = renderMarketplacePage();
+      initFn = initMarketplacePage;
+      break;
+    case '/coin-shop':
+      if (!isAuthenticated()) {
+        navigate('/login');
+        return;
+      }
+      html = renderCoinShopPage();
+      initFn = initCoinShopPage;
       break;
     case '/wallet':
       if (!isAuthenticated()) {
@@ -173,9 +182,21 @@ function render() {
         initFn = initAdminPage;
         break;
       }
-      // GALLERY-ROUTES-01: gallery + album hash routes MUST be matched before
-      // the public-profile catch-all below, because `(.+)` also matches "/"
-      // and would otherwise swallow /profile/:user/photos[/:albumId].
+      // MARKETPLACE-01: stable public product URLs. Must be matched before
+      // the public-profile catch-all since `([^/]+)` would otherwise swallow
+      // "marketplace" as a username.
+      const marketplaceProductMatch = route.match(/^\/marketplace\/product\/([^/?#]+)/);
+      if (marketplaceProductMatch) {
+        html = '<section class="product-detail-page"><div class="loading">Loading product...</div></section>';
+        initFn = () => loadProductDetail(marketplaceProductMatch[1], 'marketplace');
+        break;
+      }
+      const coinShopProductMatch = route.match(/^\/coin-shop\/product\/([^/?#]+)/);
+      if (coinShopProductMatch) {
+        html = '<section class="product-detail-page"><div class="loading">Loading product...</div></section>';
+        initFn = () => loadProductDetail(coinShopProductMatch[1], 'coin-shop');
+        break;
+      }
       const communityDetailMatch = route.match(/^\/community\/([^/]+)$/);
       if (communityDetailMatch) {
         html = renderCommunityDetailPage(communityDetailMatch[1]);
@@ -246,3 +267,70 @@ initAuth().then(() => {
     render();
   }
 });
+
+/**
+ * Load a product detail (Marketplace listing or Coin Shop asset) into #app.
+ * Uses the stable share URLs: #/marketplace/product/:id and
+ * #/coin-shop/product/:id. Product fetches are public so logged-out
+ * visitors opening a shared link see the exact product.
+ */
+async function loadProductDetail(id, type) {
+  const container = document.getElementById('app');
+  try {
+    if (type === 'marketplace') {
+      const res = await apiRequest(`/marketplace/listings/${id}`);
+      if (res && res.listing) {
+        container.innerHTML = renderMarketplaceProductDetail(res.listing);
+        initShareButtons();
+      } else {
+        container.innerHTML = '<section class="not-found-page"><h1>Product Not Found</h1><p>The product you are looking for does not exist or is not publicly available.</p><a href="#/marketplace" class="btn btn-primary">Browse Marketplace</a></section>';
+      }
+    } else {
+      const res = await apiRequest(`/coin-shop/products/${id}`);
+      if (res && res.product) {
+        container.innerHTML = renderCoinShopProductDetailPage(res.product);
+        initShareButtons();
+        const buyBtn = container.querySelector('.buy-btn');
+        if (buyBtn) {
+          buyBtn.addEventListener('click', async () => {
+            const assetId = buyBtn.dataset.assetId;
+            const name = buyBtn.dataset.name;
+            const price = parseInt(buyBtn.dataset.price, 10);
+            if (!confirm(`Buy "${name}" for ${price} coins?`)) return;
+            try {
+              await apiRequest(`/coin-shop/buy/${assetId}`, { method: 'POST' });
+              buyBtn.disabled = true;
+              buyBtn.textContent = 'Purchased ✓';
+              const statusEl = document.getElementById('buy-status');
+              if (statusEl) statusEl.innerHTML = '<div class="buy-success">Successfully purchased!</div>';
+            } catch (err) {
+              const statusEl = document.getElementById('buy-status');
+              if (statusEl) {
+                if (err.status === 402) statusEl.innerHTML = '<div class="buy-error">Insufficient coins.</div>';
+                else if (err.status === 409) statusEl.innerHTML = '<div class="buy-info">You already own this asset.</div>';
+                else statusEl.innerHTML = '<div class="buy-error">Purchase failed.</div>';
+              }
+            }
+          });
+        }
+      } else {
+        container.innerHTML = '<section class="not-found-page"><h1>Product Not Found</h1><p>The product you are looking for does not exist or is not publicly available.</p><a href="#/coin-shop" class="btn btn-primary">Browse Coin Shop</a></section>';
+      }
+    }
+  } catch {
+    container.innerHTML = '<section class="not-found-page"><h1>Product Not Found</h1><p>The product you are looking for does not exist or is not publicly available.</p></section>';
+  }
+}
+
+/**
+ * Escape HTML special characters to prevent XSS.
+ */
+function escapeHtml(text) {
+  if (text == null) return '';
+  return String(text)
+    .replace(/&/g, '&')
+    .replace(/</g, '<')
+    .replace(/>/g, '>')
+    .replace(/"/g, '"')
+    .replace(/'/g, '&#039;');
+}

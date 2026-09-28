@@ -1129,6 +1129,66 @@ export function initDatabase() {
     `);
   } catch (err) { /* safe no-op */ }
 
+// CREATOR-03: Normal Marketplace listings table.
+// Sellers create product listings (physical, digital, services, etc.)
+// Lifecycle: draft -> published -> archived. Only published listings
+// are publicly visible. Seller identity always comes from authenticated user.
+try {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS marketplace_listings (
+      id TEXT PRIMARY KEY,
+      seller_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL CHECK (length(title) >= 1 AND length(title) <= 200),
+      description TEXT NOT NULL DEFAULT '',
+      category TEXT NOT NULL CHECK (category IN ('products','services','digital','local','all')),
+      price_display TEXT NOT NULL DEFAULT '0',
+      images TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','published','archived')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      published_at TEXT,
+      archived_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_marketplace_listings_seller_status ON marketplace_listings(seller_user_id, status);
+    CREATE INDEX IF NOT EXISTS idx_marketplace_listings_category_status ON marketplace_listings(category, status);
+    CREATE INDEX IF NOT EXISTS idx_marketplace_listings_status ON marketplace_listings(status);
+    CREATE INDEX IF NOT EXISTS idx_marketplace_listings_created ON marketplace_listings(created_at DESC);
+  `);
+} catch (err) { /* safe no-op */ }
+
+// CREATOR-03: Purchased assets table for Coin Shop digital asset delivery.
+// Tracks buyer ownership of purchased creator assets. Prevents duplicate
+// purchases and supports purchase history/viewing purchased assets.
+try {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS purchased_assets (
+      id TEXT PRIMARY KEY,
+      buyer_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      asset_id TEXT NOT NULL REFERENCES creator_assets(id) ON DELETE CASCADE,
+      price_coins INTEGER NOT NULL,
+      purchased_at TEXT NOT NULL DEFAULT (datetime('now')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(buyer_user_id, asset_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_purchased_assets_buyer ON purchased_assets(buyer_user_id);
+    CREATE INDEX IF NOT EXISTS idx_purchased_assets_asset ON purchased_assets(asset_id);
+  `);
+} catch (err) { /* safe no-op */ }
+
+// CREATOR-03: Marketplace listing images table for normalized image storage.
+try {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS marketplace_listing_images (
+      id TEXT PRIMARY KEY,
+      listing_id TEXT NOT NULL REFERENCES marketplace_listings(id) ON DELETE CASCADE,
+      image_url TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_listing_images_listing ON marketplace_listing_images(listing_id);
+  `);
+} catch (err) { /* safe no-op */ }
+
   // ADMIN-SEED: Create default admin user (admin/admin) if no admin exists.
   // Note: actual seeding is done async via seedAdminUser() called from index.js startup.
   // Table creation here ensures the schema is ready.

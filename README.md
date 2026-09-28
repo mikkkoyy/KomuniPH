@@ -30,6 +30,24 @@ KomuniPH is a community-first social networking platform for the Philippines, bu
 - **Creator Assets** (CREATOR-02A) — reusable creator-product foundation. A separate `creator_assets` table stores validated, versioned snapshots that are independent of the user's personal profile design. Supports asset type `profile_design` (the only fully supported type in this milestone). Lifecycle: `draft → submitted → published → archived`. Published assets contain their own immutable snapshot — editing the personal profile design later does not affect published assets. Ownership always derives from the authenticated `user.sub`; cross-user access is denied (404). Price metadata (`price_coins`) is stored but no coin movement, purchases, or payouts are implemented — `price_coins` is metadata only, Marketplace purchases are not yet built. Supported asset type: `profile_design`. Asset validation is server-side, reusing the existing profile design validator. Creator Studio includes "Save as Creator Asset" modal.
 
   - `npm run test:assets` runs the CREATOR-02A test suite
+
+- **Marketplace & Coin Shop** (CREATOR-03) — two distinct marketplace experiences:
+  - **Normal Marketplace** — Shopee/Lazada-style discovery marketplace for physical products, services, digital goods, and local items. Features: product listings with images, search/filter by category, pagination, product detail pages. Primary actions: **Message Seller**, **Visit Profile**, **Share Link**. No cart, checkout, or Buy Now. External sales are supported — buyers and sellers arrange transactions themselves via KomuniPH messaging, Facebook, Shopee, Lazada, GCash/Maya, or offline.
+  - **Creator Coin Shop** — Dedicated section for purchasing creator digital assets (themes, backgrounds, animations, stickers, decorations, profile designs) using KomuniPH Coins. Features: asset browsing with category filters, search, single-product **Buy** action using the existing atomic wallet/ledger system. Primary actions: **Buy**, **Visit Profile**, **Message Creator**, **Share Link**. Duplicate-purchase prevention via `purchased_assets` table.
+
+  Key APIs:
+  - `GET /api/marketplace/listings` — list normal marketplace listings (auth required)
+  - `POST /api/marketplace/listings` — create a listing (draft status)
+  - `GET /api/marketplace/listings/:id` — view a published listing (public)
+  - `PATCH /api/marketplace/listings/:id` — edit draft listing
+  - `POST /api/marketplace/listings/:id/publish` — publish listing
+  - `GET /api/marketplace/assets` — list published creator assets for Coin Shop (auth required)
+  - `GET /api/coin-shop/products/:id` — view a single product (public)
+  - `POST /api/coin-shop/buy/:id` — purchase a creator asset (auth, coins required)
+  - `GET /api/coin-shop/purchases` — list buyer's purchased assets
+  - `GET /api/coin-shop/purchased/:id` — check if buyer owns asset
+
+  - `npm run test:marketplace` runs the CREATOR-03 test suite
 - **Creator Studio** — in-app visual editor (`#/creator-studio`) for profile designs: drag/resize/rotate components on a WYSIWYG canvas, snap-to-guides, eight-way handles, an elements panel, a live properties panel (geometry, appearance, per-type content), a layers panel with z-order operations (front/back/forward/backward, hide, lock, duplicate, delete, z-index field), undo/redo, zoom, and a preview mode; drafts are saved per design (Save Draft) and publishing (`designApi.publishDesign`) makes the design live on the owner's profile; the studio only edits the stored model through the existing validated API and never bypasses server checks
 
 ## Getting Started
@@ -77,6 +95,12 @@ Creator Asset foundation suite (CREATOR-02A) — self-contained (temp DB, runs o
 
 ```bash
 npm run test:assets
+```
+
+Marketplace & Coin Shop suite (CREATOR-03) — self-contained (temp DB, runs offline):
+
+```bash
+npm run test:marketplace
 ```
 
 BUGFIX regression suite (requires the server running on port 3000):

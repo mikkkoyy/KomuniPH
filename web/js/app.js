@@ -17,6 +17,7 @@ import { renderCommunityPage, initCommunityPage, renderCommunityDetailPage, init
 import { renderWalletPage, initWalletPage } from './coins.js';
 import { renderAdminPage, initAdminPage } from './admin.js';
 import { renderMarketplacePage, initMarketplacePage, renderCoinShopPage, initCoinShopPage, initShareButtons, renderMarketplaceProductDetail, renderCoinShopProductDetailPage, renderManagePage, initManagePage, renderLibraryPage, initLibraryPage } from './marketplace.js';
+import { renderCoinShopManagerPage, initCoinShopManagerPage } from './coinShopManager.js';
 
 const app = document.getElementById('app');
 
@@ -146,6 +147,23 @@ function render() {
       }
       html = renderMarketplacePage();
       initFn = initMarketplacePage;
+      break;
+    case '/creator-studio/coin-shop':
+      if (!isAuthenticated()) {
+        navigate('/login');
+        return;
+      }
+      html = renderCoinShopManagerPage();
+      initFn = initCoinShopManagerPage;
+      break;
+    case '/marketplace/seller':
+    case '/marketplace/manage':
+      if (!isAuthenticated()) {
+        navigate('/login');
+        return;
+      }
+      html = renderManagePage();
+      initFn = initManagePage;
       break;
     case '/coin-shop':
       if (!isAuthenticated()) {

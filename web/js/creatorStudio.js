@@ -190,10 +190,11 @@ export function renderCreatorStudioPage() {
         </label>
         <span class="studio-toolbar-sep" aria-hidden="true"></span>
         <span class="studio-spacer" aria-hidden="true"></span>
+        <button id="studio-coin-shop" class="btn btn-secondary" type="button" title="Manage the digital assets you sell for KomuniPH Coins">My Coin Shop</button>
         <button id="studio-open-profile" class="btn btn-secondary" type="button" title="Open your published profile in a new tab">Open Profile↗</button>
         <button id="studio-save" class="btn btn-primary" type="button">Save Draft</button>
         <button id="studio-publish" class="btn btn-cta" type="button">Publish</button>
-        <button id="studio-save-asset" class="btn btn-secondary" type="button" title="Create a reusable marketplace asset from this design">Save as Asset</button>
+        <button id="studio-save-asset" class="btn btn-secondary" type="button" title="Create a Coin Shop asset from this design">Save as Asset</button>
       </div>
       <div class="studio-layout">
         <aside id="studio-elements" class="studio-panel" aria-label="Elements">
@@ -1193,18 +1194,20 @@ function openSaveAssetModal() {
   overlay.innerHTML = `
     <div class="studio-modal" role="dialog" aria-modal="true" aria-labelledby="studio-asset-title">
       <button type="button" class="studio-modal-close" data-close aria-label="Close">&times;</button>
-      <h2 id="studio-asset-title">Save as Creator Asset</h2>
-      <p class="studio-modal-note">Create a reusable marketplace product from this design. Your live
-      profile design and drafts are not changed — an asset is an independent snapshot.</p>
+      <h2 id="studio-asset-title">Save as Coin Shop Asset</h2>
+      <p class="studio-modal-note">Create a Coin Shop product from this design. Your live
+      profile design and drafts are not changed — a published asset keeps its own immutable
+      snapshot, so later design edits never change the Coin Shop product. Publish it to make
+      it publicly discoverable and buyable with KomuniPH Coins.</p>
       <label class="studio-field"><span>Asset name</span>
         <input id="studio-asset-name" type="text" maxlength="100" required></label>
       <label class="studio-field"><span>Description</span>
         <textarea id="studio-asset-desc" rows="3" maxlength="2000"></textarea></label>
       <label class="studio-field"><span>Asset type</span>
         <select id="studio-asset-type">${Object.entries(ASSET_TYPE_LABELS).map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}</select></label>
-      <label class="studio-field"><span>Price (coins)</span>
-        <input id="studio-asset-price" type="number" min="0" step="1" value="0">
-        <small class="studio-modal-hint">Store price only — marketplace payments are not implemented yet.</small></label>
+      <label class="studio-field"><span>Price (Coins)</span>
+        <input id="studio-asset-price" type="number" min="1" step="1" value="100">
+        <small class="studio-modal-hint">Positive whole Coins. Buyers purchase with their KomuniPH Coin wallet; a 0-coin asset cannot be bought.</small></label>
       <div id="studio-asset-image-fields" class="studio-field-group" hidden>
         <label class="studio-field"><span>Image URL</span>
           <input id="studio-asset-image-url" type="text" placeholder="https://example.com/image.png"></label>
@@ -1271,7 +1274,9 @@ function renderAssetResult(message) {
     <p class="studio-modal-status"><strong>${asset.name}</strong> — ${asset.status} (v${asset.version}). ${message || ''}</p>
     <div class="studio-modal-actions">
       ${asset.status === 'draft' ? '<button type="button" class="btn btn-primary" id="studio-asset-submit">Submit</button>' : ''}
-      ${asset.status === 'submitted' ? '<button type="button" class="btn btn-cta" id="studio-asset-publish">Publish</button>' : ''}
+      ${asset.status === 'submitted' ? '<button type="button" class="btn btn-cta" id="studio-asset-publish">Publish to Coin Shop</button>' : ''}
+      ${asset.status === 'published' ? `<a href="#/coin-shop/product/${asset.id}" class="btn btn-secondary">View in Coin Shop</a>` : ''}
+      <a href="#/creator-studio/coin-shop" class="btn btn-secondary">Manage in Coin Shop</a>
       <button type="button" class="btn btn-secondary" data-close>Done</button>
     </div>`;
   const submit = box.querySelector('#studio-asset-submit');
@@ -1403,6 +1408,7 @@ function attachEvents() {
   root.querySelector('#studio-save-asset').addEventListener('click', openSaveAssetModal);
   root.querySelector('#studio-new-design').addEventListener('click', createNewDesign);
   root.querySelector('#studio-open-profile').addEventListener('click', () => navigate('/profile'));
+  root.querySelector('#studio-coin-shop').addEventListener('click', () => navigate('/creator-studio/coin-shop'));
 
   root.querySelector('#studio-preview-toggle').addEventListener('click', () => {
     previewMode = !previewMode;

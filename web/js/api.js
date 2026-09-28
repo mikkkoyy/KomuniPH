@@ -334,8 +334,9 @@ export const designApi = {
 };
 
 /**
- * Creator Assets API (CREATOR-02). Publishing foundation only — no purchases,
- * payments or coin movement exist yet; price_coins is stored metadata.
+ * Creator Assets API (CREATOR-02+). Creator-owned versioned snapshots that
+ * feed the Coin Shop: price_coins is the Coin Shop price, and published
+ * assets can be purchased with KomuniPH Coins (see the coin-shop APIs).
  */
 export const creatorAssetsApi = {
   async listAssets() {

@@ -17,7 +17,7 @@ import { handleGetSettings, handleUpdateSettings } from './settings.js';
 import { handleGetProfile, handleGetPublicProfile, handleUpdateProfile, handleUploadPhoto, handleUpdateTheme, handleUploadBackground } from './profile.js';
 import { handleListDesigns, handleCreateDesign, handleGetDesign, handleUpdateDesign, handlePublishDesign, handleArchiveDesign } from './profileDesign.js';
 import { handleListAssets, handleCreateAsset, handleGetAsset, handleUpdateAsset, handleSubmitAsset, handlePublishAsset, handleArchiveAsset } from './creatorAssets.js';
-import { handleListMarketplaceAssets, handleGetMarketplaceAsset, handleListMarketplaceListings, handleCreateListing, handleGetListing, handleUpdateListing, handlePublishListing, handleArchiveListing, handleListOwnListings, handleGetCoinShopProduct, handleBuyAsset, handleInstallAsset, handleListPurchasedAssets, handleCheckPurchased } from './marketplace.js';
+import { handleListMarketplaceAssets, handleGetMarketplaceAsset, handleListMarketplaceListings, handleCreateListing, handleGetListing, handleUpdateListing, handlePublishListing, handleArchiveListing, handleListOwnListings, handleCreatorSalesSummary, handleGetCoinShopProduct, handleBuyAsset, handleInstallAsset, handleListPurchasedAssets, handleCheckPurchased } from './marketplace.js';
 import { handleGetTestimonials, handleCreateTestimonial, handleDeleteTestimonial, handleGetUserTestimonials } from './testimonials.js';
 import { handleGetPhotos, handleUploadPhoto as handleGalleryUploadPhoto, handleDeletePhoto, handleGetOwnPhotos } from './gallery.js';
 import { getAllLocations, getCountries, getCities, getBarangays } from './locations.js';
@@ -392,6 +392,15 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
       const user = requireAuth(req, res);
       if (!user) return;
       return handleArchiveDesign(req, res, user, designArchiveMatch);
+    }
+
+    // CREATOR-05: real purchase statistics for the authenticated creator.
+    // Registered before the generic /api/creator/assets/:id route, which
+    // would otherwise match "sales" as an asset id (same segment count).
+    if (method === 'GET' && path === '/api/creator/assets/sales') {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleCreatorSalesSummary(req, res, user);
     }
 
     // CREATOR-02 creator assets (auth required). Ownership is derived from the

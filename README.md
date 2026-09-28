@@ -57,6 +57,14 @@ KomuniPH is a community-first social networking platform for the Philippines, bu
 
   - `npm run test:marketplace-manage` runs the CREATOR-04 seller-management suite
   - `npm run test:coin-library` runs the CREATOR-04 buyer-library suite
+
+- **Marketplace Seller Center & Coin Shop Manager** (CREATOR-05) — two separate selling systems:
+  - **Seller Center** (`#/marketplace/seller`, alias `#/marketplace/manage`) — header with the seller's real profile identity (display name, not username), factual counts (All/Published/Drafts/Archived — no sales/revenue invention), server-authoritative search/status/category/sort over `GET /api/marketplace/my-listings`, draft preview modal, published dates, external-sale indicators, and Share on every status. Lifecycle unchanged: draft (edit/preview/publish/share) → published (view/archive/share) → archived (view/republish/share-link-stable). External URLs stay http(s)-only with `noopener noreferrer nofollow`; no cart/checkout/orders/payments.
+  - **Coin Shop Manager** (`#/creator-studio/coin-shop`, linked from Creator Studio as "My Coin Shop") — built only on `creator_assets` (no duplicate table): per-status counts plus real sales/earned-Coins totals from `GET /api/creator/assets/sales` (sourced from `purchased_assets`, zero fabrication). Create flow per supported type (Profile Design snapshots from own designs, Theme color config, image URL + fit), positive-integer Coin pricing, realistic preview with a disabled Buy button, and an explicit "Publish to Coin Shop" confirmation. Published snapshots stay immutable; archived assets cannot be republished, matching the server contract. The Studio "Save as Asset" modal now targets Coin Shop sales with corrected copy and Coin Shop links.
+  - Card alignment preserved from the CREATOR-04 UI fix (flex-column cards, balanced descriptions, bottom-anchored actions).
+
+  - `npm run test:seller-center` runs the CREATOR-05 Seller Center suite
+  - `npm run test:coin-shop-manager` runs the CREATOR-05 Coin Shop Manager suite
 - **Creator Studio** — in-app visual editor (`#/creator-studio`) for profile designs: drag/resize/rotate components on a WYSIWYG canvas, snap-to-guides, eight-way handles, an elements panel, a live properties panel (geometry, appearance, per-type content), a layers panel with z-order operations (front/back/forward/backward, hide, lock, duplicate, delete, z-index field), undo/redo, zoom, and a preview mode; drafts are saved per design (Save Draft) and publishing (`designApi.publishDesign`) makes the design live on the owner's profile; the studio only edits the stored model through the existing validated API and never bypasses server checks
 
 ## Getting Started
@@ -122,6 +130,18 @@ Coin Shop buyer-library suite (CREATOR-04) — self-contained (temp DB, runs off
 
 ```bash
 npm run test:coin-library
+```
+
+Marketplace Seller Center suite (CREATOR-05) — self-contained (temp DB, runs offline):
+
+```bash
+npm run test:seller-center
+```
+
+Creator Studio Coin Shop Manager suite (CREATOR-05) — self-contained (temp DB, runs offline):
+
+```bash
+npm run test:coin-shop-manager
 ```
 
 BUGFIX regression suite (requires the server running on port 3000):

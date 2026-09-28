@@ -388,27 +388,56 @@ async function handleBuy(e) {
   }
 }
 
-// ─── Seller Management Dashboard ─────────────────────────────
-// Route: #/marketplace/manage
+// ─── Seller Center ─────────────────────────────────────────────
+// Primary route: #/marketplace/seller
+// Compatibility alias: #/marketplace/manage
 
 export function renderManagePage() {
   return `
     <section class="marketplace-page manage-page">
       <header class="marketplace-header">
-        <h1>Seller Dashboard</h1>
-        <p>Manage your Marketplace listings</p>
+        <h1>Marketplace Seller Center</h1>
+        <p>Manage your Marketplace products and listings.</p>
       </header>
+
+      <div id="seller-identity" class="seller-identity-strip">
+        <div class="loading">Loading seller profile...</div>
+      </div>
 
       <div class="manage-stats" id="manage-stats">
         <div class="loading">Loading dashboard...</div>
       </div>
 
       <div class="manage-actions">
-        <button id="manage-new-btn" class="btn btn-primary">+ Create Listing</button>
+        <button id="manage-new-btn" class="btn btn-primary">+ Create Product</button>
         <a href="#/marketplace" class="btn btn-outline">View Marketplace</a>
+        <a href="#/profile" class="btn btn-outline">My Profile</a>
+      </div>
+
+      <div class="manage-filters" id="manage-filters">
+        <input type="text" id="manage-search" class="form-input" placeholder="Search my products..." aria-label="Search my products">
+        <select id="manage-status" class="form-input" aria-label="Filter by status">
+          <option value="">All statuses</option>
+          <option value="draft">Drafts</option>
+          <option value="published">Published</option>
+          <option value="archived">Archived</option>
+        </select>
+        <select id="manage-category" class="form-input" aria-label="Filter by category">
+          <option value="">All categories</option>
+          <option value="products">Products</option>
+          <option value="services">Services</option>
+          <option value="digital">Digital</option>
+          <option value="local">Local</option>
+        </select>
+        <select id="manage-sort" class="form-input" aria-label="Sort products">
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+          <option value="title">Title A–Z</option>
+        </select>
       </div>
 
       <div id="listing-form-wrap"></div>
+      <h2 class="manage-section-title" id="manage-list-title">My Products</h2>
       <div id="manage-listings" class="manage-listings"></div>
     </section>
   `;
@@ -417,27 +446,68 @@ export function renderManagePage() {
 export function initManagePage() {
   const newBtn = document.getElementById('manage-new-btn');
   if (newBtn) newBtn.addEventListener('click', () => renderListingForm(null));
+  for (const id of ['manage-search', 'manage-status', 'manage-category', 'manage-sort']) {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener(id === 'manage-search' ? 'input' : 'change', () => loadManageDashboard());
+  }
+  loadSellerIdentity();
   loadManageDashboard();
+}
+
+async function loadSellerIdentity() {
+  const el = document.getElementById('seller-identity');
+  if (!el) return;
+  try {
+    const profile = await apiRequest('/profile');
+    const displayName = profile.display_name || profile.username || 'Seller';
+    const username = profile.username || '';
+    const avatar = profile.profile_photo_url
+      ? `<img src="${escapeHtml(profile.profile_photo_url)}" alt="" class="seller-identity-avatar">`
+      : `<div class="seller-identity-avatar seller-identity-initial">${escapeHtml(displayName.charAt(0).toUpperCase())}</div>`;
+    el.innerHTML = `
+      ${avatar}
+      <div class="seller-identity-info">
+        <strong>${escapeHtml(displayName)}</strong>
+        <span class="seller-identity-username">@${escapeHtml(username)}</span>
+      </div>
+      <a href="#/profile/${escapeHtml(username)}" class="btn btn-sm btn-outline">View Public Profile</a>`;
+  } catch {
+    el.innerHTML = '';
+  }
+}
+
+function manageFilterParams() {
+  const search = (document.getElementById('manage-search') || {}).value || '';
+  const status = (document.getElementById('manage-status') || {}).value || '';
+  const category = (document.getElementById('manage-category') || {}).value || '';
+  const sort = (document.getElementById('manage-sort') || {}).value || 'newest';
+  const q = new URLSearchParams();
+  if (search.trim()) q.set('search', search.trim());
+  if (status) q.set('status', status);
+  if (category) q.set('category', category);
+  if (sort) q.set('sort', sort);
+  const s = q.toString();
+  return s ? `?${s}` : '';
 }
 
 async function loadManageDashboard() {
   const statsEl = document.getElementById('manage-stats');
   const listEl = document.getElementById('manage-listings');
   try {
-    const data = await apiRequest('/marketplace/my-listings');
+    const data = await apiRequest(`/marketplace/my-listings${manageFilterParams()}`);
     const counts = data.counts || { total: 0, draft: 0, published: 0, archived: 0 };
     if (statsEl) {
       statsEl.innerHTML = `
-        <div class="stat-card"><span class="stat-num">${counts.total}</span><span class="stat-label">Total</span></div>
-        <div class="stat-card"><span class="stat-num">${counts.draft}</span><span class="stat-label">Drafts</span></div>
+        <div class="stat-card"><span class="stat-num">${counts.total}</span><span class="stat-label">All Products</span></div>
         <div class="stat-card"><span class="stat-num">${counts.published}</span><span class="stat-label">Published</span></div>
+        <div class="stat-card"><span class="stat-num">${counts.draft}</span><span class="stat-label">Drafts</span></div>
         <div class="stat-card"><span class="stat-num">${counts.archived}</span><span class="stat-label">Archived</span></div>`;
     }
     if (listEl) {
       const listings = data.listings || [];
       listEl.innerHTML = listings.length > 0
         ? listings.map(renderManageCard).join('')
-        : '<div class="marketplace-empty"><p>No listings yet. Create your first listing to get started.</p></div>';
+        : '<div class="marketplace-empty"><p>No products match. Create a product or clear the filters.</p></div>';
       wireManageCards();
       initShareButtons();
     }
@@ -465,14 +535,14 @@ function renderManageCard(listing) {
           <span class="listing-price">${escapeHtml(listing.price_display)}</span>
           <span class="status-badge status-${escapeHtml(listing.status)}">${escapeHtml(listing.status)}</span>
         </div>
-        <p class="manage-dates">Created ${escapeHtml(created)} · Updated ${escapeHtml(updated)}</p>
+        <p class="manage-dates">Created ${escapeHtml(created)} · Updated ${escapeHtml(updated)}${listing.published_at ? ` · Published ${escapeHtml(listing.published_at.slice(0, 10))}` : ''}</p>
         ${external}
         <div class="manage-card-actions">
-          ${listing.status === 'published' ? `<a href="#/marketplace/product/${escapeHtml(listing.id)}" class="btn btn-sm btn-secondary">View</a>` : ''}
+          ${listing.status === 'published' ? `<a href="#/marketplace/product/${escapeHtml(listing.id)}" class="btn btn-sm btn-secondary">View</a>` : `<button class="btn btn-sm btn-secondary manage-preview" data-id="${escapeHtml(listing.id)}">Preview</button>`}
           ${listing.status === 'draft' ? `<button class="btn btn-sm btn-outline manage-edit" data-id="${escapeHtml(listing.id)}">Edit</button>` : ''}
-          ${(listing.status === 'draft' || listing.status === 'archived') ? `<button class="btn btn-sm btn-primary manage-publish" data-id="${escapeHtml(listing.id)}">Publish</button>` : ''}
+          ${(listing.status === 'draft' || listing.status === 'archived') ? `<button class="btn btn-sm btn-primary manage-publish" data-id="${escapeHtml(listing.id)}">${listing.status === 'archived' ? 'Republish' : 'Publish'}</button>` : ''}
           ${listing.status !== 'archived' ? `<button class="btn btn-sm btn-outline manage-archive" data-id="${escapeHtml(listing.id)}">Archive</button>` : ''}
-          ${listing.status === 'published' ? `<button class="btn btn-sm btn-outline share-btn" data-url="#/marketplace/product/${escapeHtml(listing.id)}" data-title="${escapeHtml(listing.title)}">Share</button>` : ''}
+          <button class="btn btn-sm btn-outline share-btn" data-url="#/marketplace/product/${escapeHtml(listing.id)}" data-title="${escapeHtml(listing.title)}">Share</button>
         </div>
       </div>
     </article>
@@ -482,6 +552,9 @@ function renderManageCard(listing) {
 function wireManageCards() {
   document.querySelectorAll('.manage-edit').forEach(btn => {
     btn.addEventListener('click', () => renderListingForm(btn.dataset.id));
+  });
+  document.querySelectorAll('.manage-preview').forEach(btn => {
+    btn.addEventListener('click', () => previewListing(btn.dataset.id));
   });
   document.querySelectorAll('.manage-publish').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -504,6 +577,56 @@ function wireManageCards() {
       }
     });
   });
+}
+
+/**
+ * Draft/archived preview: renders the listing exactly like the public
+ * product card layout with a "not public" banner. No new route needed and
+ * nothing is exposed publicly.
+ */
+async function previewListing(id) {
+  try {
+    const data = await apiRequest('/marketplace/my-listings');
+    const listing = (data.listings || []).find(l => l.id === id);
+    if (!listing) return;
+    closePreview();
+    const images = listing.images && listing.images.length > 0
+      ? listing.images.map(img => `<img src="${escapeHtml(img)}" alt="" class="product-detail-image">`).join('')
+      : `<div class="product-detail-no-image"><span>📦</span></div>`;
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'listing-preview-overlay';
+    overlay.innerHTML = `
+      <div class="modal-box" role="dialog" aria-modal="true" aria-label="Product preview">
+        <button type="button" class="modal-close" aria-label="Close">×</button>
+        <p class="preview-banner">DRAFT PREVIEW — not publicly visible</p>
+        <div class="product-detail-gallery">${images}</div>
+        <h2>${escapeHtml(listing.title)}</h2>
+        <div class="product-detail-meta">
+          <span class="product-category">${escapeHtml(listing.category)}</span>
+          <span class="product-price">${escapeHtml(listing.price_display)}</span>
+          <span class="status-badge status-${escapeHtml(listing.status)}">${escapeHtml(listing.status)}</span>
+        </div>
+        <div class="product-detail-description">${escapeHtml(listing.description || 'No description provided.')}</div>
+        ${listing.external_url ? `<p><a href="${escapeHtml(listing.external_url)}" target="_blank" rel="noopener noreferrer nofollow" class="external-link">↗ External sales page</a></p>` : ''}
+        ${listing.contact_info ? `<p class="manage-dates">Contact: ${escapeHtml(listing.contact_info)}</p>` : ''}
+      </div>`;
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay || e.target.classList.contains('modal-close')) closePreview();
+    });
+    document.addEventListener('keydown', closePreviewOnEscape);
+    document.body.appendChild(overlay);
+  } catch { /* preview is best-effort */ }
+}
+
+function closePreview() {
+  const overlay = document.getElementById('listing-preview-overlay');
+  if (overlay) overlay.remove();
+  document.removeEventListener('keydown', closePreviewOnEscape);
+}
+
+function closePreviewOnEscape(e) {
+  if (e.key === 'Escape') closePreview();
 }
 
 // ─── Listing Create/Edit Form ──────────────────────────────────

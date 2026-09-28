@@ -385,26 +385,99 @@ export async function handleArchiveListing(req, res, user, params) {
 }
 
 /**
- * GET /api/marketplace/my-listings — seller dashboard source. Returns ALL
- * of the authenticated seller's listings (draft/published/archived) plus
- * per-status counts. Ownership comes from user.sub only.
+ * GET /api/marketplace/my-listings — seller dashboard source. Returns the
+ * authenticated seller's listings (all statuses) plus global per-status
+ * counts. Supports server-authoritative ?search= (title), ?status=
+ * (draft|published|archived), ?category=, and ?sort=
+ * (newest|oldest|title). Counts always reflect the full inventory, not the
+ * filtered view. Ownership comes from user.sub only.
  */
 export async function handleListOwnListings(req, res, user) {
   try {
-    const rows = queryAll(
+    const url = req.url || '';
+    const queryString = url.split('?')[1] || '';
+    const params = new URLSearchParams(queryString);
+    const search = params.get('search') || '';
+    const status = params.get('status') || '';
+    const category = params.get('category') || '';
+    const sort = params.get('sort') || 'newest';
+
+    const allRows = queryAll(
       `${LISTING_SELECT} WHERE ml.seller_user_id = ? ORDER BY ml.updated_at DESC`,
       [user.sub]
     );
-    const listings = rows.map(serializeListingRow).filter(Boolean);
-    const counts = { total: listings.length, draft: 0, published: 0, archived: 0 };
-    for (const l of listings) {
+    const all = allRows.map(serializeListingRow).filter(Boolean);
+    const counts = { total: all.length, draft: 0, published: 0, archived: 0 };
+    for (const l of all) {
       if (l.status === 'draft') counts.draft += 1;
       else if (l.status === 'published') counts.published += 1;
       else if (l.status === 'archived') counts.archived += 1;
     }
-    jsonResponse(res, 200, { listings, counts });
+
+    let listings = all;
+    if (status && ['draft', 'published', 'archived'].includes(status)) {
+      listings = listings.filter(l => l.status === status);
+    }
+    if (category && category !== 'all') {
+      listings = listings.filter(l => l.category === category);
+    }
+    if (search) {
+      const q = search.toLowerCase();
+      listings = listings.filter(l =>
+        (l.title || '').toLowerCase().includes(q) ||
+        (l.description || '').toLowerCase().includes(q)
+      );
+    }
+    if (sort === 'oldest') {
+      listings = [...listings].sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
+    } else if (sort === 'title') {
+      listings = [...listings].sort((a, b) => (a.title || '').localeCompare(b.title || '', undefined, { sensitivity: 'base' }));
+    } else {
+      listings = [...listings].sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
+    }
+
+    jsonResponse(res, 200, { listings, counts, search, status, category, sort });
   } catch (err) {
     console.error('[MARKETPLACE] List own listings error:', err);
+    errorResponse(res, 500, 'Internal server error');
+  }
+}
+
+/**
+ * GET /api/creator/assets/sales — real purchase statistics for the
+ * authenticated creator's own assets. Source of truth is purchased_assets;
+ * only genuinely recorded purchases are counted. No revenue is fabricated:
+ * earned_coins is the sum of actual purchase prices.
+ */
+export async function handleCreatorSalesSummary(req, res, user) {
+  try {
+    const rows = queryAll(
+      `SELECT ca.id AS asset_id, ca.name AS asset_name, ca.asset_type, ca.status, ca.price_coins,
+              COUNT(pa.id) AS sales, COALESCE(SUM(pa.price_coins), 0) AS earned_coins
+       FROM creator_assets ca
+       LEFT JOIN purchased_assets pa ON pa.asset_id = ca.id
+       WHERE ca.creator_user_id = ?
+       GROUP BY ca.id
+       ORDER BY sales DESC, ca.created_at DESC`,
+      [user.sub]
+    );
+    const assets = rows.map(r => ({
+      asset_id: r.asset_id,
+      asset_name: r.asset_name,
+      asset_type: r.asset_type,
+      status: r.status,
+      price_coins: Number(r.price_coins) || 0,
+      sales: Number(r.sales) || 0,
+      earned_coins: Number(r.earned_coins) || 0,
+    }));
+    const totals = {
+      assets: assets.length,
+      sales: assets.reduce((n, a) => n + a.sales, 0),
+      earned_coins: assets.reduce((n, a) => n + a.earned_coins, 0),
+    };
+    jsonResponse(res, 200, { assets, totals });
+  } catch (err) {
+    console.error('[COINSHOP] Sales summary error:', err);
     errorResponse(res, 500, 'Internal server error');
   }
 }

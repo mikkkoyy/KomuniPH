@@ -107,6 +107,7 @@ const TX_TYPE_LABELS = {
   freeze: 'Frozen',
   unfreeze: 'Unfrozen',
   gift: 'Gift',
+  verification_reward: 'Verification Reward',
 };
 
 const TX_TYPE_COLORS = {
@@ -119,6 +120,7 @@ const TX_TYPE_COLORS = {
   freeze: '#f97316',
   unfreeze: '#06b6d4',
   gift: '#ec4899',
+  verification_reward: '#0e6e6e',
 };
 
 /**
@@ -130,9 +132,11 @@ export function renderWalletPage() {
       <h2 style="font-family:'Fredoka',sans-serif;font-size:1.5rem;margin-bottom:1rem;">My Wallet</h2>
 
       <div id="wallet-balance-card" style="background:linear-gradient(135deg,#0e6e6e,#14b8a6);color:#fff;border-radius:1rem;padding:1.5rem;margin-bottom:1.5rem;">
-        <div style="font-size:0.875rem;opacity:0.85;">Available Balance</div>
+        <div style="font-size:0.875rem;opacity:0.85;">Total Coins</div>
         <div id="wallet-balance" style="font-size:2.25rem;font-weight:700;font-family:'Fredoka',sans-serif;">...</div>
-        <div id="wallet-frozen" style="font-size:0.8rem;opacity:0.7;margin-top:0.25rem;"></div>
+        <div id="wallet-transferable" style="font-size:0.85rem;opacity:0.9;margin-top:0.25rem;"></div>
+        <div id="wallet-locked" style="font-size:0.8rem;opacity:0.7;margin-top:0.15rem;"></div>
+        <div id="wallet-frozen" style="font-size:0.8rem;opacity:0.7;margin-top:0.15rem;"></div>
       </div>
 
       <div style="display:flex;gap:0.75rem;margin-bottom:1.5rem;flex-wrap:wrap;">
@@ -177,13 +181,24 @@ async function loadWalletBalance() {
   try {
     const data = await coinsApi.getWallet();
     const w = data.wallet;
+    const locked = w.locked_reward_balance || 0;
+    const transferable = (w.transferable_available !== undefined && w.transferable_available !== null)
+      ? w.transferable_available
+      : (w.balance - (w.frozen_balance || 0) - locked);
     document.getElementById('wallet-balance').textContent = formatCoins(w.balance) + ' coins';
+    document.getElementById('wallet-transferable').textContent =
+      `${formatCoins(transferable)} transferable (giftable + withdrawable)`;
+    document.getElementById('wallet-locked').textContent = locked > 0
+      ? `${formatCoins(locked)} locked reward coins (spendable, not transferable)`
+      : '';
     document.getElementById('wallet-frozen').textContent = w.frozen_balance > 0
       ? `${formatCoins(w.frozen_balance)} coins frozen`
       : '';
+    return w;
   } catch (err) {
     console.error('[WALLET] Failed to load balance:', err);
     document.getElementById('wallet-balance').textContent = 'Error loading balance';
+    return null;
   }
 }
 
@@ -532,11 +547,20 @@ async function continueGiftToConfirm() {
     return;
   }
   let balance = null;
+  let transferable = null;
   try {
     const data = await coinsApi.getWallet();
     balance = data.wallet.balance;
+    const locked = data.wallet.locked_reward_balance || 0;
+    transferable = (data.wallet.transferable_available !== undefined && data.wallet.transferable_available !== null)
+      ? data.wallet.transferable_available
+      : (balance - (data.wallet.frozen_balance || 0) - locked);
   } catch (err) {
     errEl.textContent = 'Could not load your balance. Please try again.';
+    return;
+  }
+  if (amount > transferable) {
+    errEl.textContent = `Insufficient transferable balance. You can gift up to ${formatCoins(transferable)} Coins (locked reward Coins cannot be gifted).`;
     return;
   }
 
@@ -547,8 +571,8 @@ async function continueGiftToConfirm() {
       <div style="font-size:0.9rem;color:#374151;display:flex;flex-direction:column;gap:0.375rem;margin-bottom:1rem;">
         <div><span style="color:#6b7280;">Recipient:</span> <strong>${escapeHtml(giftRecipient.display_name)} (@${escapeHtml(giftRecipient.username)})</strong></div>
         <div><span style="color:#6b7280;">Amount:</span> <strong>${formatCoins(amount)} Coins</strong></div>
-        <div><span style="color:#6b7280;">Current balance:</span> <strong>${formatCoins(balance)} Coins</strong></div>
-        <div><span style="color:#6b7280;">Balance after:</span> <strong>${formatCoins(balance - amount)} Coins</strong></div>
+        <div><span style="color:#6b7280;">Transferable balance:</span> <strong>${formatCoins(transferable)} Coins</strong></div>
+        <div><span style="color:#6b7280;">Balance after:</span> <strong>${formatCoins(transferable - amount)} Coins transferable</strong></div>
       </div>
       <div id="gift-error" style="color:#ef4444;font-size:0.85rem;margin-bottom:0.75rem;"></div>
       <div style="display:flex;gap:0.5rem;">

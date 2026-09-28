@@ -25,6 +25,8 @@ KomuniPH is a community-first social networking platform for the Philippines, bu
 - **Media** — image URLs shared in community posts, listed per community
 - **Settings** — per-community toggles (`allow_member_posts`, `allow_member_comments`, `allow_events`, `allow_media`, `moderation_enabled`)
 - **Coins & Wallet** — one wallet per user (`.balance`, `.frozen_balance`, available = balance − frozen); an atomic, source-idempotent transaction ledger (`coin_transactions`) records every credit/debit/freeze/unfreeze with running balances; GCash/Maya top-ups via PayMongo webhooks (`/api/coins/paymongo/webhook`); withdrawals freeze coins on request and cash them out on admin approval; a one-time 15-coin reward on identity verification; admin adjust `/api/admin/coins/adjust` with full audit trail
+- **Locked reward Coins** (COINS-02A) — accounting model: `user_wallets` carries `locked_reward_balance` next to `balance`/`frozen_balance` (single mutable row, no drift); `transferable = balance − frozen − locked`. KomuniPH-issued rewards (identity verification: exactly 15 Coins once, via the existing `reward_awarded` flow and a reusable `awardLockedRewardCoins` helper) are personally spendable but permanently non-transferable: gifts and withdrawals/freeze may only consume transferable coins, while personal spending (Coin Shop `spend`) consumes locked rewards first and received gifts stay transferable. The `verification_reward` ledger type (plus `gift`) keeps every class auditable in the existing `coin_transactions` ledger. Live databases migrate safely: all rows/balances preserved, previously issued identity rewards classified as locked (capped at coins still held, never re-awarded)
+  - `npm run test:coin-rewards` runs the COINS-02A test suite
 - **Gift Coins** (COINS-02) — user-to-user transfers from the Coins page (`Cash In | Cash Out | Gift`): recipient search (`GET /api/users/search`, public fields only), explicit selection, positive-integer amount, and a confirmation showing current/after balances. `POST /api/coins/gift` resolves the recipient server-side, rejects self-gifts, and settles debit + credit + receiver notification atomically in one transaction (sender `Gift Sent` debit, receiver `Gift Received` credit, `gift` ledger type). The receiver gets an unread `coin_gift` notification ("You received 100 Coins from John Doe (@johndoe).") linking to `#/wallet`, with a sidebar badge and a `#/notifications` inbox (mark read / mark all read). Client idempotency keys make replays settle exactly once; frozen funds are respected; no negative balances
   - `npm run test:coin-gift` runs the COINS-02 test suite
 - **Profile designs** — server-validated profile layout engine (`/api/profile/design` CRUD + publish/archive): a controlled component registry (profile photo, name, alias, bio, personal info, gallery, testimonials, communities) plus four user-content components (text, image, card, sticker), strict JSON layout validation (geometry/rotation/z-index bounds, style field limits, per-type config contracts, http(s)-only image URLs, 64-component cap, canvas bounds, markup/script rejection), exactly one published design per user (publishing archives the previous one, each publish bumps `version`); published designs are attached to own and public profile responses as `profile.design`, while drafts and archived designs are never exposed and invalid stored designs safely degrade to a default profile
@@ -102,6 +104,12 @@ Coin gifting suite (COINS-02) — self-contained (temp DB, runs offline):
 
 ```bash
 npm run test:coin-gift
+```
+
+Locked reward accounting suite (COINS-02A) — self-contained (temp DB, runs offline):
+
+```bash
+npm run test:coin-rewards
 ```
 
 Profile design engine suite (CREATOR-01A) — self-contained (temp DB, runs offline):

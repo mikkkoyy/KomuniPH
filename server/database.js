@@ -823,12 +823,18 @@ export function initDatabase() {
   }
 
   // COINS-01: Double-entry ledger coin economy with GCash/Maya cash in/out.
+  // COINS-02A: locked_reward_balance tracks KomuniPH-issued reward Coins
+  // (identity verification, and future referral/achievement/promo rewards).
+  // Locked rewards are personally spendable but permanently
+  // non-transferable: gifts, withdrawals (freeze), and cash-outs may only
+  // touch transferable = balance - frozen_balance - locked_reward_balance.
   try {
     database.exec(`
       CREATE TABLE IF NOT EXISTS user_wallets (
         user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
         balance INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0),
         frozen_balance INTEGER NOT NULL DEFAULT 0 CHECK (frozen_balance >= 0),
+        locked_reward_balance INTEGER NOT NULL DEFAULT 0 CHECK (locked_reward_balance >= 0),
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
     `);
@@ -1121,6 +1127,46 @@ export function initDatabase() {
         WHERE reference_id IS NOT NULL
     `);
   } catch (err) { /* safe no-op */ }
+
+  // COINS-02A: locked_reward_balance column for existing wallets.
+  try {
+    database.exec('ALTER TABLE user_wallets ADD COLUMN locked_reward_balance INTEGER NOT NULL DEFAULT 0 CHECK (locked_reward_balance >= 0)');
+  } catch (err) { /* column already exists — safe no-op */ }
+
+  // COINS-02A: Backfill locked classification for previously issued identity
+  // verification rewards WITHOUT awarding new Coins. For each user, the owed
+  // locked amount is 15 × (awarded verification records), capped at what the
+  // wallet still holds (balance − frozen) so already-spent rewards do not
+  // lock unrelated Coins. Only wallets with locked = 0 are touched, making
+  // this idempotent across restarts.
+  try {
+    const owed = database.prepare(`
+      SELECT user_id, COUNT(*) AS n FROM (
+        SELECT user_id, id FROM identity_verifications WHERE reward_awarded = 1
+        UNION
+        SELECT user_id, reference_id AS id FROM coin_transactions
+        WHERE type = 'verification_reward' AND reference_id IS NOT NULL
+      ) GROUP BY user_id
+    `).all();
+    for (const row of owed) {
+      const wallet = database.prepare(
+        'SELECT balance, frozen_balance, locked_reward_balance FROM user_wallets WHERE user_id = ?'
+      ).get(row.user_id);
+      if (!wallet || (wallet.locked_reward_balance ?? 0) !== 0) continue;
+      const held = Math.max(0, (wallet.balance ?? 0) - (wallet.frozen_balance ?? 0));
+      const locked = Math.min(row.n * 15, held);
+      if (locked > 0) {
+        database.prepare(
+          "UPDATE user_wallets SET locked_reward_balance = ?, updated_at = datetime('now') WHERE user_id = ?"
+        ).run(locked, row.user_id);
+      }
+    }
+    if (owed.length > 0) {
+      console.log(`[COINS-02A] Classified locked rewards for ${owed.length} user(s)`);
+    }
+  } catch (err) {
+    console.log('[COINS-02A] Locked reward backfill skipped:', err.message);
+  }
 
   // COINS-01: Create wallets for existing users who don't have one yet.
   try {

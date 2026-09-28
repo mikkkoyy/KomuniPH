@@ -34,22 +34,41 @@ function assertValidLedgerArgs(amount, direction, type) {
 function ensureWallet(userId) {
   let wallet = queryOne('SELECT * FROM user_wallets WHERE user_id = ?', [userId]);
   if (!wallet) {
-    execute('INSERT INTO user_wallets (user_id, balance, frozen_balance) VALUES (?, 0, 0)', [userId]);
+    execute('INSERT INTO user_wallets (user_id, balance, frozen_balance, locked_reward_balance) VALUES (?, 0, 0, 0)', [userId]);
     wallet = queryOne('SELECT * FROM user_wallets WHERE user_id = ?', [userId]);
+  }
+  // Pre-COINS-02A rows always carry the migrated column, but tolerate a
+  // missing value defensively so balance math can never produce NaN.
+  if (wallet.locked_reward_balance === null || wallet.locked_reward_balance === undefined) {
+    wallet.locked_reward_balance = 0;
   }
   return wallet;
 }
 
 /**
+ * Transferable coins: the portion of the wallet the user may gift or cash
+ * out. Locked KomuniPH reward Coins are excluded.
+ */
+export function getTransferableAvailable(wallet) {
+  const balance = Number(wallet.balance) || 0;
+  const frozen = Number(wallet.frozen_balance) || 0;
+  const locked = Number(wallet.locked_reward_balance) || 0;
+  return Math.max(0, balance - frozen - locked);
+}
+
+/**
  * Read the user's current wallet position (coins are integer units only).
- * @returns {{ balance: number, frozen_balance: number, available_balance: number, updated_at: string }}
+ * @returns {{ balance: number, frozen_balance: number, locked_reward_balance: number, available_balance: number, transferable_available: number, updated_at: string }}
  */
 export function getCoinBalance(userId) {
   const wallet = ensureWallet(userId);
+  const locked = Number(wallet.locked_reward_balance) || 0;
   return {
     balance: wallet.balance,
     frozen_balance: wallet.frozen_balance,
+    locked_reward_balance: locked,
     available_balance: wallet.balance - wallet.frozen_balance,
+    transferable_available: getTransferableAvailable(wallet),
     updated_at: wallet.updated_at,
   };
 }
@@ -67,6 +86,21 @@ export function getCoinBalance(userId) {
  *  - spend   (debit)  checks available balance (no frozen coins).
  *  - All other debits check available; all credits raise available.
  *
+ * COINS-02A locked-reward model (single mutable wallet row — no drift):
+ *  - transferable = balance - frozen_balance - locked_reward_balance.
+ *  - Transfer-class debits (gift, freeze) may only consume transferable
+ *    coins; locked rewards are never giftable, freezable, or cash-outable.
+ *  - Personal-spending debits (spend, admin_adjust) consume locked reward
+ *    Coins FIRST (locked-first order), then transferable.
+ *  - cash_out draws only from the frozen reserve, which by construction
+ *    never contains locked Coins (freeze is transferable-only).
+ *  - Reward credits (verification_reward, or opts.locked for future
+ *    KomuniPH-issued rewards) raise both balance and locked_reward_balance.
+ *  - All other credits (cash_in, creator_payout, earn, gift, unfreeze,
+ *    admin_adjust) are transferable and leave locked untouched.
+ *  - Every mutation asserts 0 <= locked <= balance - frozen; violations
+ *    throw and roll the transaction back.
+ *
  * The function is self-atomic: it always runs inside a transaction (nested calls
  * become SQLite savepoints), so it is safe both standalone and when composed with
  * the caller's own transaction() block. A source event can only ever produce one
@@ -80,22 +114,32 @@ export function getCoinBalance(userId) {
  * @param {string} description - Human-readable description
  * @param {string} referenceType - e.g. 'coin_topup', 'withdrawal_request'
  * @param {string} referenceId - The ID of the referencing record
+ * @param {object} opts - Optional flags: { locked: true } marks a
+ *   KomuniPH-issued reward credit as permanently non-transferable
  * @returns {string} The transaction ID
  */
-export function recordTransaction(userId, amount, direction, type, description, referenceType, referenceId) {
+export function recordTransaction(userId, amount, direction, type, description, referenceType, referenceId, opts = {}) {
   assertValidLedgerArgs(amount, direction, type);
   return transaction(() => {
     const wallet = ensureWallet(userId);
+    const lockedBefore = Number(wallet.locked_reward_balance) || 0;
     const availableBefore = wallet.balance - wallet.frozen_balance;
+    const transferableBefore = availableBefore - lockedBefore;
     let balance = wallet.balance;
     let frozen = wallet.frozen_balance;
+    let locked = lockedBefore;
 
     if (type === 'freeze') {
       if (direction !== 'debit') throw markError(new Error('freeze must be recorded as a debit'), 'INVALID_LEDGER_DIRECTION');
-      if (availableBefore < amount) {
-        throw markError(new Error(`Insufficient available balance: ${availableBefore}`), 'INSUFFICIENT_BALANCE');
+      if (transferableBefore < amount) {
+        throw markError(new Error(`Insufficient transferable balance: ${transferableBefore}`), 'INSUFFICIENT_BALANCE');
       }
       frozen += amount;
+    } else if (type === 'gift' && direction === 'debit') {
+      if (transferableBefore < amount) {
+        throw markError(new Error(`Insufficient transferable balance: ${transferableBefore}`), 'INSUFFICIENT_BALANCE');
+      }
+      balance -= amount;
     } else if (type === 'unfreeze') {
       if (direction !== 'credit') throw markError(new Error('unfreeze must be recorded as a credit'), 'INVALID_LEDGER_DIRECTION');
       if (wallet.frozen_balance < amount) throw new Error('Cannot unfreeze more than the frozen balance');
@@ -110,11 +154,21 @@ export function recordTransaction(userId, amount, direction, type, description, 
         throw markError(new Error(`Insufficient available balance: ${availableBefore}`), 'INSUFFICIENT_BALANCE');
       }
       balance -= amount;
+      // Personal spending consumes locked reward Coins first (locked-first
+      // order): spent locked Coins simply disappear from the locked reserve
+      // and can never become giftable or cash-out eligible afterwards.
+      locked = Math.max(0, locked - amount);
+    } else if (type === 'verification_reward' || opts.locked === true) {
+      balance += amount;
+      locked += amount;
     } else {
       balance += amount;
     }
 
     const availableAfter = balance - frozen;
+    if (locked < 0 || availableAfter < locked) {
+      throw new Error(`Locked reward accounting invariant violated for user ${userId}`);
+    }
     const txId = generateId();
     execute(
       `INSERT INTO coin_transactions (id, user_id, amount, direction, type, reference_type, reference_id, description, balance_before, balance_after, created_at)
@@ -122,8 +176,8 @@ export function recordTransaction(userId, amount, direction, type, description, 
       [txId, userId, amount, direction, type, referenceType || null, referenceId || null, description || null, availableBefore, availableAfter]
     );
     execute(
-      "UPDATE user_wallets SET balance = ?, frozen_balance = ?, updated_at = datetime('now') WHERE user_id = ?",
-      [balance, frozen, userId]
+      "UPDATE user_wallets SET balance = ?, frozen_balance = ?, locked_reward_balance = ?, updated_at = datetime('now') WHERE user_id = ?",
+      [balance, frozen, locked, userId]
     );
     return txId;
   });
@@ -162,7 +216,46 @@ export function unfreezeCoins({ userId, amount, description, referenceType, refe
 }
 
 /**
+ * Award KomuniPH-issued reward Coins with locked accounting (COINS-02A).
+ *
+ * Generalized helper for current and future reward sources (identity
+ * verification today; referrals, achievements, promos later). Atomically:
+ *   1. credits the wallet,
+ *   2. increases locked_reward_balance (personally spendable, permanently
+ *      non-transferable),
+ *   3. writes the Coin ledger entry,
+ *   4. enforces source/reference idempotency (one source event yields one
+ *      reward, retried calls return awarded:false with no new Coins).
+ *
+ * The server — never the client — decides the accounting class: callers
+ * cannot mark arbitrary credits transferable through this helper.
+ *
+ * @param {{ userId: string, amount: number, type: string, description: string, referenceType: string, referenceId: string }} args
+ * @returns {{ awarded: boolean, newBalance: number }}
+ */
+export function awardLockedRewardCoins({ userId, amount, type, description, referenceType, referenceId }) {
+  if (!userId) throw new Error('Reward recipient is required');
+  if (!Number.isInteger(amount) || amount <= 0) throw new Error(`Invalid reward amount: ${amount}`);
+  if (!LEDGER_TYPES.has(type)) throw new Error(`Invalid ledger type: ${type}`);
+  if (!referenceType || !referenceId) throw new Error('Reward reference is required for idempotency');
+  return transaction(() => {
+    const existing = queryOne(
+      'SELECT id FROM coin_transactions WHERE user_id = ? AND reference_type = ? AND reference_id = ? AND type = ?',
+      [userId, referenceType, referenceId, type]
+    );
+    if (existing) {
+      return { awarded: false, newBalance: getCoinBalance(userId).balance };
+    }
+    recordTransaction(userId, amount, 'credit', type, description, referenceType, referenceId, { locked: true });
+    return { awarded: true, newBalance: getCoinBalance(userId).balance };
+  });
+}
+
+/**
  * Award the one-time identity verification reward (15 Coins).
+ *
+ * COINS-02A: the reward is issued as LOCKED reward Coins — personally
+ * spendable, permanently non-transferable (no gifting, no cash-out).
  *
  * Server-authoritative and idempotent:
  *  - Only fires against an actual 'verified' identity_verifications record.
@@ -170,7 +263,7 @@ export function unfreezeCoins({ userId, amount, description, referenceType, refe
  *  - A conditional UPDATE claims the reward (WHERE reward_awarded = 0) which only
  *    one "winner" can win even under concurrent calls, and the ledger write is
  *    guarded by the partial unique index on the (identity_verification) reference.
- *  - The whole reward — claim + ledger entry — commits atomically or not at all.
+ *  - The whole reward — claim + locked ledger entry — commits atomically or not at all.
  *
  * @param {string} userId - The user ID
  * @returns {{ awarded: boolean, newBalance: number, message: string }}
@@ -203,15 +296,17 @@ export function awardVerificationReward(userId) {
       return { awarded: false, newBalance: getCoinBalance(userId).balance, message: 'Verification reward already awarded' };
     }
 
-    recordTransaction(
+    const reward = awardLockedRewardCoins({
       userId,
-      FIRST_VERIFICATION_REWARD_COINS,
-      'credit',
-      'verification_reward',
-      'First identity verification reward',
-      'identity_verification',
-      record.id
-    );
+      amount: FIRST_VERIFICATION_REWARD_COINS,
+      type: 'verification_reward',
+      description: 'First identity verification reward',
+      referenceType: 'identity_verification',
+      referenceId: record.id,
+    });
+    if (!reward.awarded) {
+      return { awarded: false, newBalance: reward.newBalance, message: 'Verification reward already awarded' };
+    }
 
     const newBalance = getCoinBalance(userId).balance;
     return { awarded: true, newBalance, message: `₱${(FIRST_VERIFICATION_REWARD_COINS / COINS_PER_PHP).toFixed(2)} cash-in equivalent credited` };
@@ -230,7 +325,9 @@ export function handleGetWallet(req, res, user) {
       wallet: {
         balance: wallet.balance,
         frozen_balance: wallet.frozen_balance,
+        locked_reward_balance: Number(wallet.locked_reward_balance) || 0,
         available_balance: wallet.balance - wallet.frozen_balance,
+        transferable_available: getTransferableAvailable(wallet),
         updated_at: wallet.updated_at,
       },
       exchange_rate: {
@@ -586,10 +683,11 @@ export async function handleCreateWithdrawal(req, res, user) {
     }
 
     const wallet = ensureWallet(user.sub);
-    const available = wallet.balance - wallet.frozen_balance;
+    // COINS-02A: locked KomuniPH reward Coins are never withdrawal-eligible.
+    const transferable = getTransferableAvailable(wallet);
 
-    if (coins_amount > available) {
-      return errorResponse(res, 422, `Insufficient balance. Available: ${available} coins`);
+    if (coins_amount > transferable) {
+      return errorResponse(res, 422, `Insufficient transferable balance. Transferable: ${transferable} coins (locked reward Coins cannot be withdrawn)`);
     }
 
     const phpAmount = coins_amount * PHP_PER_COIN;

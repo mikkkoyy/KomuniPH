@@ -538,36 +538,44 @@ export async function handleBuyAsset(req, res, user, params) {
       return errorResponse(res, 400, 'This asset is not for sale');
     }
 
-    // Atomic wallet check and coin movement
+    // Atomic wallet check and coin movement.
+    // COINS-02A: Coin Shop purchases are eligible personal spending, so
+    // locked KomuniPH reward Coins may be spent — consumed FIRST
+    // (locked-first order), with the remainder from transferable coins.
+    // Frozen coins are never spendable. Spent locked Coins disappear from
+    // the locked reserve and can never become giftable/cash-out eligible.
     const result = transaction(() => {
       // Get buyer wallet (missing wallet = 0 balance = insufficient)
-      let wallet = queryOne('SELECT balance FROM user_wallets WHERE user_id = ?', [buyerId]);
+      let wallet = queryOne('SELECT balance, frozen_balance, locked_reward_balance FROM user_wallets WHERE user_id = ?', [buyerId]);
       if (!wallet) {
-        execute('INSERT INTO user_wallets (user_id, balance, frozen_balance) VALUES (?, 0, 0)', [buyerId]);
-        wallet = { balance: 0 };
+        execute('INSERT INTO user_wallets (user_id, balance, frozen_balance, locked_reward_balance) VALUES (?, 0, 0, 0)', [buyerId]);
+        wallet = { balance: 0, frozen_balance: 0, locked_reward_balance: 0 };
       }
-      if (wallet.balance < price) {
+      const locked = Number(wallet.locked_reward_balance) || 0;
+      const availableBefore = wallet.balance - wallet.frozen_balance;
+      if (availableBefore < price) {
         throw new Error('Insufficient coins');
       }
+      const lockedAfter = Math.max(0, locked - price);
 
       // Get seller wallet (ensure it exists)
       let sellerWallet = queryOne('SELECT user_id FROM user_wallets WHERE user_id = ?', [asset.creator_user_id]);
       if (!sellerWallet) {
-        execute('INSERT INTO user_wallets (user_id, balance, frozen_balance) VALUES (?, 0, 0)', [asset.creator_user_id]);
+        execute('INSERT INTO user_wallets (user_id, balance, frozen_balance, locked_reward_balance) VALUES (?, 0, 0, 0)', [asset.creator_user_id]);
       }
 
       const ts = now();
       const purchaseId = generateId();
 
-      // Debit buyer
+      // Debit buyer (locked-first consumption)
       execute(
-        'UPDATE user_wallets SET balance = balance - ?, updated_at = ? WHERE user_id = ?',
-        [price, ts, buyerId]
+        'UPDATE user_wallets SET balance = balance - ?, locked_reward_balance = ?, updated_at = ? WHERE user_id = ?',
+        [price, lockedAfter, ts, buyerId]
       );
       execute(
         'INSERT INTO coin_transactions (id, user_id, amount, direction, type, reference_type, reference_id, description, balance_before, balance_after, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [generateId(), buyerId, price, 'debit', 'spend', 'purchased_asset', purchaseId,
-         `Purchased ${asset.name}`, wallet.balance, wallet.balance - price, ts]
+         `Purchased ${asset.name}`, availableBefore, availableBefore - price, ts]
       );
 
       // Credit seller (creator_payout)

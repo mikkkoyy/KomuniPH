@@ -18,6 +18,7 @@ import { renderWalletPage, initWalletPage } from './coins.js';
 import { renderAdminPage, initAdminPage } from './admin.js';
 import { renderMarketplacePage, initMarketplacePage, renderCoinShopPage, initCoinShopPage, initShareButtons, renderMarketplaceProductDetail, renderCoinShopProductDetailPage, renderManagePage, initManagePage, renderLibraryPage, initLibraryPage } from './marketplace.js';
 import { renderCoinShopManagerPage, initCoinShopManagerPage } from './coinShopManager.js';
+import { renderNotificationsPage, initNotificationsPage, refreshNotificationBadge } from './notifications.js';
 
 const app = document.getElementById('app');
 
@@ -131,6 +132,14 @@ function render() {
       }
       html = renderMessagesPage();
       initFn = initMessagesPage;
+      break;
+    case '/notifications':
+      if (!isAuthenticated()) {
+        navigate('/login');
+        return;
+      }
+      html = renderNotificationsPage();
+      initFn = initNotificationsPage;
       break;
     case '/creator-studio':
       if (!isAuthenticated()) {
@@ -270,6 +279,12 @@ function render() {
     requestAnimationFrame(() => {
       initFn();
     });
+  }
+
+  // COINS-02: keep the notification badge fresh on every navigation.
+  // Best-effort and authenticated-only; never blocks rendering.
+  if (isAuthenticated()) {
+    refreshNotificationBadge();
   }
 }
 

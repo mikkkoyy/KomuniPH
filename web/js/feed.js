@@ -75,8 +75,8 @@ export function getSidebarHtml(activeRoute = 'home') {
   const navItems = [
     { route: 'home', label: 'Home', href: '#/home', isButton: false },
     { route: 'profile', label: 'Profile', href: '#/profile', isButton: false },
-    { route: 'messages', label: 'Messages', href: '#/messages', isButton: false, hasBadge: true },
-    { route: 'notifications', label: 'Notifications', href: null, isButton: false, comingSoon: true },
+    { route: 'messages', label: 'Messages', href: '#/messages', isButton: false, hasBadge: true, badgeId: 'sidebar-messages-badge' },
+    { route: 'notifications', label: 'Notifications', href: '#/notifications', isButton: false, hasBadge: true, badgeId: 'sidebar-notifications-badge' },
     { route: 'saved', label: 'Saved', href: null, isButton: false, comingSoon: true },
     { route: 'divider-1', label: null, href: null, isDivider: true },
     { route: 'community', label: 'Communities', href: '#/community', isButton: false },
@@ -98,7 +98,7 @@ export function getSidebarHtml(activeRoute = 'home') {
     const isActive = activeRoute === item.route;
     const activeClass = isActive ? ' active' : '';
     const badge = item.hasBadge
-      ? '<span id="sidebar-messages-badge" class="sidebar-nav-badge" style="display:none"></span>'
+      ? `<span id="${item.badgeId || 'sidebar-messages-badge'}" class="sidebar-nav-badge" style="display:none"></span>`
       : '';
     const tag = item.isButton ? 'button' : 'a';
     const attrs = item.isButton

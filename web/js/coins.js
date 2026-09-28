@@ -60,6 +60,21 @@ export const coinsApi = {
   async getWithdrawals(limit = 50, offset = 0) {
     return apiRequest(`/coins/withdrawals?limit=${limit}&offset=${offset}`);
   },
+
+  async searchUsers(query) {
+    return apiRequest(`/users/search?q=${encodeURIComponent(query)}`);
+  },
+
+  async sendGift(recipient, amount, idempotencyKey) {
+    return apiRequest('/coins/gift', {
+      method: 'POST',
+      body: {
+        recipient,
+        amount,
+        idempotency_key: idempotencyKey,
+      },
+    });
+  },
 };
 
 function formatCoins(n) {
@@ -91,6 +106,7 @@ const TX_TYPE_LABELS = {
   admin_adjust: 'Admin Adjustment',
   freeze: 'Frozen',
   unfreeze: 'Unfrozen',
+  gift: 'Gift',
 };
 
 const TX_TYPE_COLORS = {
@@ -102,6 +118,7 @@ const TX_TYPE_COLORS = {
   admin_adjust: '#6b7280',
   freeze: '#f97316',
   unfreeze: '#06b6d4',
+  gift: '#ec4899',
 };
 
 /**
@@ -121,6 +138,7 @@ export function renderWalletPage() {
       <div style="display:flex;gap:0.75rem;margin-bottom:1.5rem;flex-wrap:wrap;">
         <button id="btn-cashin" style="flex:1;min-width:120px;padding:0.75rem;border:none;border-radius:0.75rem;background:#3b82f6;color:#fff;font-weight:600;cursor:pointer;font-size:0.95rem;">Cash In</button>
         <button id="btn-cashout" style="flex:1;min-width:120px;padding:0.75rem;border:none;border-radius:0.75rem;background:#f59e0b;color:#fff;font-weight:600;cursor:pointer;font-size:0.95rem;">Cash Out</button>
+        <button id="btn-gift" style="flex:1;min-width:120px;padding:0.75rem;border:none;border-radius:0.75rem;background:#ec4899;color:#fff;font-weight:600;cursor:pointer;font-size:0.95rem;">Gift</button>
         <button id="btn-history" style="flex:1;min-width:120px;padding:0.75rem;border:none;border-radius:0.75rem;background:#6366f1;color:#fff;font-weight:600;cursor:pointer;font-size:0.95rem;">History</button>
       </div>
 
@@ -151,6 +169,7 @@ export async function initWalletPage() {
 
   document.getElementById('btn-cashin')?.addEventListener('click', showCashInForm);
   document.getElementById('btn-cashout')?.addEventListener('click', showCashOutForm);
+  document.getElementById('btn-gift')?.addEventListener('click', showGiftForm);
   document.getElementById('btn-history')?.addEventListener('click', showTransactions);
 }
 
@@ -369,8 +388,214 @@ function showCashOutForm() {
   });
 }
 
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+/**
+ * Gift Coins flow (COINS-02): search → select recipient → amount →
+ * confirm → send. One idempotency key per form session so retries and
+ * double-clicks settle into a single transfer server-side.
+ */
+let giftRecipient = null;
+let giftIdempotencyKey = null;
+let giftSearchSeq = 0;
+
+function showGiftForm() {
+  setActiveBtn('btn-gift');
+  giftRecipient = null;
+  giftIdempotencyKey = (window.crypto && window.crypto.randomUUID)
+    ? window.crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  const section = document.getElementById('wallet-section');
+  section.innerHTML = `
+    <div style="background:#fff;border-radius:0.75rem;padding:1.25rem;border:1px solid #e5e7eb;">
+      <h3 style="font-family:'Fredoka',sans-serif;font-size:1.1rem;margin-bottom:0.25rem;">Gift Coins</h3>
+      <p style="font-size:0.85rem;color:#6b7280;margin-bottom:1rem;">Send Coins to another KomuniPH user.</p>
+      <div style="margin-bottom:1rem;">
+        <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.25rem;color:#374151;">Gift To</label>
+        <div id="gift-recipient-box">
+          <input type="text" id="gift-search" placeholder="Search username or name..." autocomplete="off"
+            style="width:100%;padding:0.6rem;border:1px solid #d1d5db;border-radius:0.5rem;font-size:0.95rem;">
+          <div id="gift-results" style="margin-top:0.5rem;display:flex;flex-direction:column;gap:0.375rem;"></div>
+        </div>
+      </div>
+      <div style="margin-bottom:1rem;">
+        <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.25rem;color:#374151;">Amount</label>
+        <input type="number" id="gift-amount" min="1" step="1" required placeholder="Enter Coins"
+          style="width:100%;padding:0.6rem;border:1px solid #d1d5db;border-radius:0.5rem;font-size:0.95rem;">
+      </div>
+      <div id="gift-error" style="color:#ef4444;font-size:0.85rem;margin-bottom:0.75rem;"></div>
+      <div style="display:flex;gap:0.5rem;">
+        <button id="gift-cancel" style="flex:1;padding:0.75rem;border:1px solid #d1d5db;border-radius:0.5rem;background:#fff;color:#374151;font-weight:600;cursor:pointer;font-size:0.95rem;">Cancel</button>
+        <button id="gift-continue" style="flex:1;padding:0.75rem;border:none;border-radius:0.5rem;background:#ec4899;color:#fff;font-weight:600;cursor:pointer;font-size:0.95rem;">Continue</button>
+      </div>
+    </div>
+  `;
+
+  const searchInput = document.getElementById('gift-search');
+  let debounce = null;
+  searchInput.addEventListener('input', () => {
+    clearTimeout(debounce);
+    debounce = setTimeout(() => searchGiftRecipients(searchInput.value.trim()), 300);
+  });
+
+  document.getElementById('gift-cancel').addEventListener('click', showTransactions);
+  document.getElementById('gift-continue').addEventListener('click', continueGiftToConfirm);
+}
+
+async function searchGiftRecipients(query) {
+  const box = document.getElementById('gift-results');
+  if (!box) return;
+  if (query.length < 2) {
+    box.innerHTML = '';
+    return;
+  }
+  const seq = ++giftSearchSeq;
+  box.innerHTML = '<p style="font-size:0.8rem;color:#9ca3af;">Searching...</p>';
+  try {
+    const data = await coinsApi.searchUsers(query);
+    if (seq !== giftSearchSeq || !document.getElementById('gift-results')) return;
+    const users = data.users || [];
+    if (!users.length) {
+      box.innerHTML = '<p style="font-size:0.8rem;color:#9ca3af;">No users found.</p>';
+      return;
+    }
+    box.innerHTML = users.map(u => `
+      <button type="button" data-user-id="${escapeHtml(u.id)}" data-username="${escapeHtml(u.username)}"
+        data-display="${escapeHtml(u.display_name)}" ${u.is_self ? 'disabled' : ''}
+        class="gift-result-btn"
+        style="display:flex;align-items:center;gap:0.625rem;padding:0.5rem;border:1px solid #e5e7eb;border-radius:0.5rem;background:#fff;cursor:${u.is_self ? 'not-allowed' : 'pointer'};opacity:${u.is_self ? '0.55' : '1'};text-align:left;width:100%;">
+        ${u.profile_photo_url
+          ? `<img src="${escapeHtml(u.profile_photo_url)}" alt="" style="width:2rem;height:2rem;border-radius:50%;object-fit:cover;">`
+          : `<span style="width:2rem;height:2rem;border-radius:50%;background:#0e6e6e;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-weight:700;">${escapeHtml((u.display_name || u.username || '?').charAt(0).toUpperCase())}</span>`}
+        <span>
+          <span style="display:block;font-weight:600;font-size:0.9rem;color:#1f2937;">${escapeHtml(u.display_name)}${u.is_self ? ' (you)' : ''}</span>
+          <span style="display:block;font-size:0.78rem;color:#6b7280;">@${escapeHtml(u.username)}</span>
+        </span>
+      </button>
+    `).join('');
+    box.querySelectorAll('.gift-result-btn:not([disabled])').forEach(btn => {
+      btn.addEventListener('click', () => selectGiftRecipient({
+        id: btn.dataset.userId,
+        username: btn.dataset.username,
+        display_name: btn.dataset.display,
+      }));
+    });
+  } catch (err) {
+    if (seq !== giftSearchSeq) return;
+    box.innerHTML = '<p style="font-size:0.8rem;color:#ef4444;">Search failed. Try again.</p>';
+  }
+}
+
+function selectGiftRecipient(user) {
+  giftRecipient = user;
+  const box = document.getElementById('gift-recipient-box');
+  box.innerHTML = `
+    <div style="display:flex;align-items:center;gap:0.625rem;padding:0.625rem;border:1px solid #ec4899;border-radius:0.5rem;background:#fdf2f8;">
+      <span style="flex:1;">
+        <span style="display:block;font-weight:600;font-size:0.9rem;color:#1f2937;">${escapeHtml(user.display_name)}</span>
+        <span style="display:block;font-size:0.78rem;color:#6b7280;">@${escapeHtml(user.username)}</span>
+      </span>
+      <button type="button" id="gift-change" style="border:none;background:none;color:#ec4899;font-weight:600;cursor:pointer;font-size:0.85rem;">Change recipient</button>
+    </div>
+    <div id="gift-results" style="margin-top:0.5rem;"></div>
+  `;
+  document.getElementById('gift-change').addEventListener('click', () => {
+    const amountInput = document.getElementById('gift-amount');
+    const previousAmount = amountInput ? amountInput.value : '';
+    giftRecipient = null;
+    showGiftForm();
+    const restored = document.getElementById('gift-amount');
+    if (restored) restored.value = previousAmount;
+  });
+}
+
+async function continueGiftToConfirm() {
+  const errEl = document.getElementById('gift-error');
+  errEl.textContent = '';
+  if (!giftRecipient) {
+    errEl.textContent = 'Please search and select a recipient first.';
+    return;
+  }
+  const rawAmount = document.getElementById('gift-amount').value;
+  const amount = Number(rawAmount);
+  if (!Number.isInteger(amount) || amount <= 0) {
+    errEl.textContent = 'Please enter a positive whole number of Coins.';
+    return;
+  }
+  let balance = null;
+  try {
+    const data = await coinsApi.getWallet();
+    balance = data.wallet.balance;
+  } catch (err) {
+    errEl.textContent = 'Could not load your balance. Please try again.';
+    return;
+  }
+
+  const section = document.getElementById('wallet-section');
+  section.innerHTML = `
+    <div style="background:#fff;border-radius:0.75rem;padding:1.25rem;border:1px solid #e5e7eb;">
+      <h3 style="font-family:'Fredoka',sans-serif;font-size:1.1rem;margin-bottom:1rem;">Confirm Gift</h3>
+      <div style="font-size:0.9rem;color:#374151;display:flex;flex-direction:column;gap:0.375rem;margin-bottom:1rem;">
+        <div><span style="color:#6b7280;">Recipient:</span> <strong>${escapeHtml(giftRecipient.display_name)} (@${escapeHtml(giftRecipient.username)})</strong></div>
+        <div><span style="color:#6b7280;">Amount:</span> <strong>${formatCoins(amount)} Coins</strong></div>
+        <div><span style="color:#6b7280;">Current balance:</span> <strong>${formatCoins(balance)} Coins</strong></div>
+        <div><span style="color:#6b7280;">Balance after:</span> <strong>${formatCoins(balance - amount)} Coins</strong></div>
+      </div>
+      <div id="gift-error" style="color:#ef4444;font-size:0.85rem;margin-bottom:0.75rem;"></div>
+      <div style="display:flex;gap:0.5rem;">
+        <button id="gift-back" style="flex:1;padding:0.75rem;border:1px solid #d1d5db;border-radius:0.5rem;background:#fff;color:#374151;font-weight:600;cursor:pointer;font-size:0.95rem;">Cancel</button>
+        <button id="gift-confirm" style="flex:1;padding:0.75rem;border:none;border-radius:0.5rem;background:#ec4899;color:#fff;font-weight:600;cursor:pointer;font-size:0.95rem;">Confirm Gift</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('gift-back').addEventListener('click', () => {
+    const previousRecipient = giftRecipient;
+    showGiftForm();
+    if (previousRecipient) selectGiftRecipient(previousRecipient);
+  });
+  document.getElementById('gift-confirm').addEventListener('click', () => submitGift(amount));
+}
+
+async function submitGift(amount) {
+  const errEl = document.getElementById('gift-error');
+  const btn = document.getElementById('gift-confirm');
+  errEl.textContent = '';
+  btn.disabled = true;
+  btn.textContent = 'Sending...';
+  try {
+    const result = await coinsApi.sendGift(giftRecipient.username, amount, giftIdempotencyKey);
+    const g = result.gift;
+    const section = document.getElementById('wallet-section');
+    section.innerHTML = `
+      <div style="background:#fff;border-radius:0.75rem;padding:1.25rem;border:1px solid #e5e7eb;text-align:center;">
+        <div style="font-size:2.5rem;margin-bottom:0.75rem;">&#127873;</div>
+        <h3 style="font-family:'Fredoka',sans-serif;font-size:1.1rem;margin-bottom:0.5rem;">Gift Sent Successfully</h3>
+        <p style="font-size:0.9rem;color:#374151;margin-bottom:1rem;">
+          ${formatCoins(g.amount)} Coins sent to ${escapeHtml(g.recipient.display_name)} (@${escapeHtml(g.recipient.username)}).
+        </p>
+        <p style="font-size:0.8rem;color:#6b7280;margin-bottom:1rem;">They have been notified.</p>
+        <button id="gift-done" style="padding:0.6rem 1.5rem;border:none;border-radius:0.5rem;background:#0e6e6e;color:#fff;font-weight:600;cursor:pointer;">Back to Wallet</button>
+      </div>
+    `;
+    document.getElementById('gift-done').addEventListener('click', showTransactions);
+    await loadWalletBalance();
+  } catch (err) {
+    errEl.textContent = err.message || 'Failed to send gift.';
+    btn.disabled = false;
+    btn.textContent = 'Confirm Gift';
+  }
+}
 function setActiveBtn(activeId) {
-  ['btn-cashin', 'btn-cashout', 'btn-history'].forEach(id => {
+  ['btn-cashin', 'btn-cashout', 'btn-gift', 'btn-history'].forEach(id => {
     const btn = document.getElementById(id);
     if (!btn) return;
     if (id === activeId) {

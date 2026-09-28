@@ -105,7 +105,15 @@ import {
   handleAdminCompleteWithdrawal,
   handleAdminCoinSummary,
   handleAdminAdjust,
+  handleGiftCoins,
 } from './coins.js';
+import {
+  handleListNotifications,
+  handleGetUnreadNotificationCount,
+  handleMarkNotificationRead,
+  handleMarkAllNotificationsRead,
+} from './notifications.js';
+import { handleSearchUsers } from './users.js';
 import { jsonResponse, errorResponse, matchRoute, parseQuery } from './utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -886,6 +894,42 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
     const user = requireAuth(req, res);
     if (!user) return;
     return handleGetWithdrawals(req, res, user);
+  }
+  // COINS-02: Gift Coins (user-to-user transfer + receiver notification)
+  if (method === 'POST' && path === '/api/coins/gift') {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleGiftCoins(req, res, user);
+  }
+
+  // COINS-02: Notifications (receiver inbox for gift + future events)
+  if (method === 'GET' && path === '/api/notifications/unread-count') {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleGetUnreadNotificationCount(req, res, user);
+  }
+  if (method === 'GET' && path === '/api/notifications') {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleListNotifications(req, res, user);
+  }
+  if (method === 'POST' && path === '/api/notifications/read-all') {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleMarkAllNotificationsRead(req, res, user);
+  }
+  const notificationReadMatch = matchRoute('/api/notifications/:id/read', path);
+  if (method === 'POST' && notificationReadMatch) {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleMarkNotificationRead(req, res, user, notificationReadMatch);
+  }
+
+  // COINS-02: Recipient search for gifting (public profile fields only)
+  if (method === 'GET' && path === '/api/users/search') {
+    const user = requireAuth(req, res);
+    if (!user) return;
+    return handleSearchUsers(req, res, user);
   }
 
   // Admin settings routes (admin only)

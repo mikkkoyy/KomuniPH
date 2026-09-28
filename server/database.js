@@ -860,7 +860,7 @@ export function initDatabase() {
           user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
           amount INTEGER NOT NULL,
           direction TEXT NOT NULL DEFAULT 'credit' CHECK (direction IN ('credit','debit')),
-          type TEXT NOT NULL CHECK (type IN ('earn','spend','cash_in','cash_out','creator_payout','admin_adjust','freeze','unfreeze','verification_reward')),
+          type TEXT NOT NULL CHECK (type IN ('earn','spend','cash_in','cash_out','creator_payout','admin_adjust','freeze','unfreeze','verification_reward','gift')),
           reference_type TEXT,
           reference_id TEXT,
           description TEXT,
@@ -879,7 +879,7 @@ export function initDatabase() {
           user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
           amount INTEGER NOT NULL,
           direction TEXT NOT NULL DEFAULT 'credit' CHECK (direction IN ('credit','debit')),
-          type TEXT NOT NULL CHECK (type IN ('earn','spend','cash_in','cash_out','creator_payout','admin_adjust','freeze','unfreeze','verification_reward')),
+          type TEXT NOT NULL CHECK (type IN ('earn','spend','cash_in','cash_out','creator_payout','admin_adjust','freeze','unfreeze','verification_reward','gift')),
           reference_type TEXT,
           reference_id TEXT,
           description TEXT,
@@ -1040,6 +1040,87 @@ export function initDatabase() {
       database.exec('CREATE INDEX IF NOT EXISTS idx_coin_topups_status ON coin_topups(status)');
     }
   } catch (recreateErr) { /* table doesn't exist yet — safe no-op */ }
+
+  // COINS-02: Extend the ledger CHECK constraint with the 'gift' type.
+  // SQLite cannot ALTER a CHECK constraint, so when the live table's CHECK
+  // does not mention 'gift' the table is recreated with the FULL current
+  // schema — preserving every existing row, column, and index. Idempotent.
+  try {
+    const ledgerSql = (database.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'coin_transactions'"
+    ).get() || {}).sql || '';
+    if (ledgerSql && !ledgerSql.includes("'gift'")) {
+      database.exec(`
+        CREATE TABLE coin_transactions_new (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          amount INTEGER NOT NULL,
+          direction TEXT NOT NULL DEFAULT 'credit' CHECK (direction IN ('credit','debit')),
+          type TEXT NOT NULL CHECK (type IN ('earn','spend','cash_in','cash_out','creator_payout','admin_adjust','freeze','unfreeze','verification_reward','gift')),
+          reference_type TEXT,
+          reference_id TEXT,
+          description TEXT,
+          balance_before INTEGER NOT NULL DEFAULT 0,
+          balance_after INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+      `);
+      database.exec(`
+        INSERT INTO coin_transactions_new (id, user_id, amount, direction, type, reference_type, reference_id, description, balance_before, balance_after, created_at)
+        SELECT id, user_id, amount, direction, type, reference_type, reference_id, description, balance_before, balance_after, created_at
+        FROM coin_transactions
+      `);
+      database.exec('DROP TABLE coin_transactions');
+      database.exec('ALTER TABLE coin_transactions_new RENAME TO coin_transactions');
+      database.exec('CREATE INDEX IF NOT EXISTS idx_coin_transactions_user_id ON coin_transactions(user_id)');
+      database.exec('CREATE INDEX IF NOT EXISTS idx_coin_transactions_type ON coin_transactions(type)');
+      database.exec('CREATE INDEX IF NOT EXISTS idx_coin_transactions_created_at ON coin_transactions(created_at DESC)');
+      database.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_coin_transactions_reference_unique
+          ON coin_transactions(reference_type, reference_id, type)
+          WHERE reference_id IS NOT NULL
+      `);
+      console.log('[COINS-02] Upgraded coin_transactions ledger with gift type');
+    }
+  } catch (err) {
+    console.log('[COINS-02] coin_transactions gift migration skipped:', err.message);
+  }
+
+  // COINS-02: Receiver notifications (first notification system in KomuniPH —
+  // no prior notifications table/API/UI exists to reuse). Minimal schema
+  // following existing conventions; gift notifications are one type of many.
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        type TEXT NOT NULL DEFAULT 'general',
+        title TEXT NOT NULL DEFAULT '',
+        body TEXT NOT NULL DEFAULT '',
+        reference_type TEXT,
+        reference_id TEXT,
+        link TEXT,
+        is_read INTEGER NOT NULL DEFAULT 0 CHECK (is_read IN (0, 1)),
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        read_at TEXT
+      );
+    `);
+  } catch (err) { /* safe no-op */ }
+  try {
+    database.exec('CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id)');
+  } catch (err) { /* safe no-op */ }
+  try {
+    database.exec('CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(user_id, is_read)');
+  } catch (err) { /* safe no-op */ }
+  try {
+    // One notification per source event per recipient: a retried gift can
+    // never notify twice.
+    database.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_source_unique
+        ON notifications(user_id, reference_type, reference_id)
+        WHERE reference_id IS NOT NULL
+    `);
+  } catch (err) { /* safe no-op */ }
 
   // COINS-01: Create wallets for existing users who don't have one yet.
   try {

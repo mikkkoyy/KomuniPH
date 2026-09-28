@@ -8,13 +8,14 @@ import { generateId, now, jsonResponse, errorResponse, parseBody } from './utils
 import config from './config.js';
 import { createSource, getSource, verifyWebhookSignature } from './paymongo.js';
 import { FIRST_VERIFICATION_REWARD_COINS, getVerifiedRecordForUser } from './identity.js';
+import { createNotification } from './notifications.js';
 
 const COINS_PER_PHP = 10;
 const PHP_PER_COIN = 1 / COINS_PER_PHP;
 
-const CREDIT_TYPES = new Set(['earn', 'cash_in', 'creator_payout', 'admin_adjust', 'verification_reward']);
-const DEBIT_TYPES = new Set(['spend', 'cash_out', 'freeze', 'admin_adjust']);
-const LEDGER_TYPES = new Set(['earn', 'spend', 'cash_in', 'cash_out', 'creator_payout', 'admin_adjust', 'freeze', 'unfreeze', 'verification_reward']);
+const CREDIT_TYPES = new Set(['earn', 'cash_in', 'creator_payout', 'admin_adjust', 'verification_reward', 'gift']);
+const DEBIT_TYPES = new Set(['spend', 'cash_out', 'freeze', 'admin_adjust', 'gift']);
+const LEDGER_TYPES = new Set(['earn', 'spend', 'cash_in', 'cash_out', 'creator_payout', 'admin_adjust', 'freeze', 'unfreeze', 'verification_reward', 'gift']);
 
 function markError(error, code) {
   if (error && typeof error === 'object') error.code = code;
@@ -1045,6 +1046,164 @@ export function handleGetWithdrawals(req, res, user) {
     });
   } catch (err) {
     console.error('[COINS] Get withdrawals error:', err);
+    errorResponse(res, 500, 'Internal server error');
+  }
+}
+
+/**
+ * Handle POST /api/coins/gift (COINS-02)
+ * Transfers Coins from the authenticated sender to another user and
+ * notifies the receiver — atomically.
+ *
+ * Body: { recipient, amount, idempotency_key? }
+ *   - recipient: username or user id (resolved + validated server-side)
+ *   - amount: positive integer coins
+ *   - idempotency_key: client-generated UUID per gift attempt; replays
+ *     return the original result without moving coins or notifying twice
+ *     (backed by the COINS-01 partial unique index on
+ *     (reference_type, reference_id, type) plus the notification source
+ *     guard).
+ *
+ * Atomic sequence inside one better-sqlite3 transaction:
+ *   validate → debit sender (gift) → credit receiver (gift) →
+ *   receiver notification. Any failure rolls everything back: no partial
+ *   debit, no orphan ledger rows, no notification without transfer.
+ */
+export async function handleGiftCoins(req, res, user) {
+  try {
+    const body = await parseBody(req);
+    const senderId = user.sub;
+
+    const amount = body.amount;
+    if (amount === undefined || amount === null) {
+      return errorResponse(res, 422, 'amount is required');
+    }
+    if (!Number.isInteger(amount) || amount <= 0) {
+      return errorResponse(res, 422, 'amount must be a positive integer (in coins)');
+    }
+
+    const recipientRaw = body.recipient;
+    if (!recipientRaw || typeof recipientRaw !== 'string' || !recipientRaw.trim()) {
+      return errorResponse(res, 422, 'recipient is required');
+    }
+    const recipientKey = recipientRaw.trim();
+
+    // Resolve recipient server-side: exact id first, then username.
+    // Never trust a client-provided identity beyond this lookup.
+    let recipient = queryOne(
+      `SELECT u.id, u.username, u.account_status, p.display_name
+       FROM users u LEFT JOIN profiles p ON p.user_id = u.id
+       WHERE u.id = ?`,
+      [recipientKey]
+    );
+    if (!recipient) {
+      recipient = queryOne(
+        `SELECT u.id, u.username, u.account_status, p.display_name
+         FROM users u LEFT JOIN profiles p ON p.user_id = u.id
+         WHERE u.username = ? COLLATE NOCASE`,
+        [recipientKey]
+      );
+    }
+    if (!recipient) {
+      return errorResponse(res, 404, 'Recipient not found');
+    }
+    if (recipient.id === senderId) {
+      return errorResponse(res, 422, 'You cannot gift Coins to yourself');
+    }
+    if (recipient.account_status !== 'active') {
+      return errorResponse(res, 422, 'Recipient cannot receive Coins');
+    }
+
+    const senderProfile = queryOne(
+      `SELECT u.username, p.display_name FROM users u
+       LEFT JOIN profiles p ON p.user_id = u.id WHERE u.id = ?`,
+      [senderId]
+    );
+    const senderUsername = senderProfile ? senderProfile.username : 'unknown';
+    const senderDisplay = (senderProfile && senderProfile.display_name) || senderUsername;
+    const recipientDisplay = recipient.display_name || recipient.username;
+
+    const idempotencyKey = (typeof body.idempotency_key === 'string' && body.idempotency_key.trim())
+      ? body.idempotency_key.trim().slice(0, 100)
+      : generateId();
+    // One idempotent operation, two ledger legs. The COINS-01 unique guard
+    // is global on (reference_type, reference_id, type) — not per user —
+    // so each leg gets its own reference id; the notification references
+    // the operation as a whole.
+    const debitReferenceId = `gift:${idempotencyKey}:out`;
+    const creditReferenceId = `gift:${idempotencyKey}:in`;
+    const notificationReferenceId = `gift:${idempotencyKey}`;
+
+    // Idempotent replay: this exact gift already completed — return the
+    // original result without touching wallets, ledger, or notifications.
+    const priorSenderTx = queryOne(
+      `SELECT amount FROM coin_transactions
+       WHERE user_id = ? AND reference_type = 'coin_gift' AND reference_id = ? AND type = 'gift' AND direction = 'debit'`,
+      [senderId, debitReferenceId]
+    );
+    if (priorSenderTx) {
+      const priorReceiverTx = queryOne(
+        `SELECT user_id FROM coin_transactions
+         WHERE reference_type = 'coin_gift' AND reference_id = ? AND type = 'gift' AND direction = 'credit'`,
+        [creditReferenceId]
+      );
+      const priorRecipient = priorReceiverTx
+        ? queryOne(
+          `SELECT u.username, p.display_name FROM users u
+           LEFT JOIN profiles p ON p.user_id = u.id WHERE u.id = ?`,
+          [priorReceiverTx.user_id]
+        )
+        : null;
+      return jsonResponse(res, 200, {
+        gift: {
+          amount: priorSenderTx.amount,
+          idempotency_key: idempotencyKey,
+          duplicate: true,
+          recipient: {
+            username: priorRecipient ? priorRecipient.username : recipient.username,
+            display_name: (priorRecipient && priorRecipient.display_name) || (priorRecipient ? priorRecipient.username : recipientDisplay),
+          },
+        },
+        wallet: getCoinBalance(senderId),
+      });
+    }
+
+    const senderDesc = `Gift Sent - ${amount} Coins to ${recipientDisplay} (@${recipient.username})`;
+    const receiverDesc = `Gift Received - ${amount} Coins from ${senderDisplay} (@${senderUsername})`;
+    const notificationBody = `You received ${amount} Coins from ${senderDisplay} (@${senderUsername}).`;
+
+    try {
+      transaction(() => {
+        recordTransaction(senderId, amount, 'debit', 'gift', senderDesc, 'coin_gift', debitReferenceId);
+        recordTransaction(recipient.id, amount, 'credit', 'gift', receiverDesc, 'coin_gift', creditReferenceId);
+        createNotification({
+          userId: recipient.id,
+          type: 'coin_gift',
+          title: 'Coin Gift Received',
+          body: notificationBody,
+          referenceType: 'coin_gift',
+          referenceId: notificationReferenceId,
+          link: '#/wallet',
+        });
+      });
+    } catch (txErr) {
+      if (txErr.code === 'INSUFFICIENT_BALANCE') {
+        return errorResponse(res, 422, 'Insufficient available balance');
+      }
+      throw txErr;
+    }
+
+    jsonResponse(res, 200, {
+      gift: {
+        amount,
+        idempotency_key: idempotencyKey,
+        duplicate: false,
+        recipient: { username: recipient.username, display_name: recipientDisplay },
+      },
+      wallet: getCoinBalance(senderId),
+    });
+  } catch (err) {
+    console.error('[COINS] Gift error:', err);
     errorResponse(res, 500, 'Internal server error');
   }
 }

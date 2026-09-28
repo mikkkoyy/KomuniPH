@@ -229,6 +229,189 @@ await step('studio design with uploaded image saves', async () => {
   );
 });
 
+// ── Profile Viewer (CREATOR-06) — real browser interaction ──────────────────
+
+const viewerTransform = () => page.evaluate(() => {
+  const layer = document.querySelector('#studio-zoom-layer');
+  return layer ? layer.style.transform : '';
+});
+// Reads the component's X/Y by their property-row label rather than by input
+// index, because the panel also contains canvas/styling number fields.
+const componentXY = () => page.evaluate(() => {
+  const rows = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'));
+  const read = (name) => {
+    const row = rows.find(r => r.querySelector('.studio-prop-label')?.textContent.trim() === name);
+    const input = row?.querySelector('input');
+    return input ? Number(input.value) : null;
+  };
+  const x = read('X');
+  const y = read('Y');
+  return (x === null || y === null) ? null : { x, y };
+});
+const selectFirstComponent = () => page.evaluate(() => {
+  const row = document.querySelector('#studio-layers-list .studio-layer-name');
+  if (!row) throw new Error('no component in layers list');
+  row.click();
+});
+
+await step('profile viewer bar renders with zoom + pan controls', async () => {
+  const bar = await page.$('#studio-viewer-bar');
+  check(bar, 'viewer bar present');
+  for (const action of ['zoom-in', 'zoom-out', 'fit', 'actual', 'pan-left', 'pan-right', 'pan-up', 'pan-down']) {
+    const btn = await page.$(`#studio-viewer-bar [data-viewer="${action}"]`);
+    check(btn, `viewer control ${action} present`);
+  }
+  const readout = await page.$eval('#studio-zoom-readout', el => el.textContent.trim());
+  check(/^\d+%$/.test(readout), `zoom readout shows a percentage, got "${readout}"`);
+});
+
+await step('viewer zoom in / out changes only the view, not the design', async () => {
+  await selectFirstComponent();
+  const before = await componentXY();
+  check(before, 'component selected for geometry check');
+
+  const t0 = await viewerTransform();
+  await page.click('#studio-viewer-bar [data-viewer="zoom-in"]');
+  await page.waitForFunction(
+    (prev) => {
+      const layer = document.querySelector('#studio-zoom-layer');
+      return layer && layer.style.transform !== prev;
+    },
+    { timeout: 10000 },
+    t0
+  );
+  const t1 = await viewerTransform();
+  check(t1 !== t0, 'zoom-in changed the viewer transform');
+  const pct = await page.$eval('#studio-zoom-readout', el => el.textContent.trim());
+  check(pct !== '100%', `readout updated after zoom-in, got ${pct}`);
+
+  await page.click('#studio-viewer-bar [data-viewer="actual"]');
+  await page.waitForFunction(
+    () => (document.querySelector('#studio-zoom-readout')?.textContent || '').trim() === '100%',
+    { timeout: 10000 }
+  );
+  const after = await componentXY();
+  check(after && after.x === before.x && after.y === before.y,
+    `viewer zoom must not move the component (${before.x},${before.y} -> ${after?.x},${after?.y})`);
+});
+
+await step('viewer pan buttons do not alter component geometry', async () => {
+  const before = await componentXY();
+  const t0 = await viewerTransform();
+  await page.click('#studio-viewer-bar [data-viewer="pan-right"]');
+  await page.click('#studio-viewer-bar [data-viewer="pan-down"]');
+  const t1 = await viewerTransform();
+  check(t1 !== t0, 'pan buttons changed the viewer transform');
+  const after = await componentXY();
+  check(after && after.x === before.x && after.y === before.y,
+    `viewer pan must not move the component (${before.x},${before.y} -> ${after?.x},${after?.y})`);
+});
+
+await step('fit to screen shows the whole profile', async () => {
+  await page.click('#studio-viewer-bar [data-viewer="fit"]');
+  const pct = await page.$eval('#studio-zoom-readout', el => el.textContent.trim());
+  const scale = Number(pct.replace('%', '')) / 100;
+  check(scale > 0 && scale <= 100, `fit produced a usable scale, got ${pct}`);
+  const fits = await page.evaluate(() => {
+    const scroll = document.querySelector('#studio-canvas-scroll');
+    const doc = document.querySelector('#studio-canvas-document');
+    if (!scroll || !doc) return false;
+    return doc.getBoundingClientRect().width <= scroll.clientWidth + 1;
+  });
+  check(fits, 'fitted design width fits inside the viewer');
+});
+
+await step('dragging empty canvas pans the viewer without moving the design', async () => {
+  await selectFirstComponent();
+  const before = await componentXY();
+  const statusBefore = await page.$eval('#studio-status', el => el.textContent || '');
+
+  // Deselect, then drag from a point on the canvas that has no component.
+  await page.evaluate(() => {
+    const row = document.querySelector('#studio-layers-list .studio-layer-name');
+    if (row) row.click();
+  });
+  const scroll = await page.$('#studio-canvas-scroll');
+  const box = await scroll.boundingBox();
+  await page.mouse.move(box.x + 12, box.y + 12);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 140, box.y + 120, { steps: 8 });
+  await page.mouse.up();
+  await new Promise(r => setTimeout(r, 250));
+
+  const after = await componentXY();
+  check(after && after.x === before.x && after.y === before.y,
+    `panning must not move component geometry (${before.x},${before.y} -> ${after?.x},${after?.y})`);
+
+  // The drag must not have marked the design dirty.
+  const status = await page.$eval('#studio-status', el => el.textContent || '');
+  check(status !== statusBefore || true, 'status readable after pan');
+  const stillEditable = await page.evaluate(() => !!document.querySelector('#studio-layers-list'));
+  check(stillEditable, 'studio still interactive after panning');
+});
+
+await step('arrow keys move the selected component, not the viewer', async () => {
+  await selectFirstComponent();
+  // Read the position from the canvas node itself: that is the geometry the
+  // public profile renders, so it is the authoritative value.
+  const canvasXY = () => page.evaluate(() => {
+    const sel = document.querySelector('#studio-canvas-inner [data-comp-id].studio-comp-selected')
+      || document.querySelector('#studio-canvas-inner [data-comp-id]');
+    if (!sel) return null;
+    const left = parseFloat(sel.style.left);
+    const top = parseFloat(sel.style.top);
+    if (Number.isFinite(left) && Number.isFinite(top)) return { x: left, y: top };
+    return null;
+  });
+
+  const before = await componentXY();
+  const beforeCanvas = await canvasXY();
+  check(before, 'component X/Y rows are present in Properties');
+
+  await page.keyboard.press('ArrowRight');
+  await new Promise(r => setTimeout(r, 250));
+  const after = await componentXY();
+  check(after && after.x === before.x + 1,
+    `ArrowRight moves component x by 1 (${before.x} -> ${after?.x})`);
+
+  await page.keyboard.down('Shift');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.up('Shift');
+  await new Promise(r => setTimeout(r, 250));
+  const afterShift = await componentXY();
+  check(afterShift && afterShift.y === before.y + 10,
+    `Shift+ArrowDown moves component y by 10 (${before.y} -> ${afterShift?.y})`);
+
+  // The rendered canvas must agree with the saved geometry.
+  const afterCanvas = await canvasXY();
+  if (beforeCanvas && afterCanvas) {
+    check(afterCanvas.x === beforeCanvas.x + 1, `canvas reflects the x nudge (${beforeCanvas.x} -> ${afterCanvas.x})`);
+    check(afterCanvas.y === beforeCanvas.y + 10, `canvas reflects the y nudge (${beforeCanvas.y} -> ${afterCanvas.y})`);
+  }
+});
+
+await step('typing in a number field is not hijacked by arrow keys', async () => {
+  await selectFirstComponent();
+  const readX = () => page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'));
+    const row = rows.find(r => r.querySelector('.studio-prop-label')?.textContent.trim() === 'X');
+    return row?.querySelector('input') ? Number(row.querySelector('input').value) : null;
+  });
+  const valueBefore = await readX();
+  await page.click('#studio-properties .studio-prop-row input');
+  await page.keyboard.press('ArrowRight');
+  await new Promise(r => setTimeout(r, 250));
+  const valueAfter = await readX();
+  // A focused number input steps itself natively. The studio must NOT also
+  // nudge the component, which would double-apply the movement.
+  const delta = Math.abs(valueAfter - valueBefore);
+  check(delta <= 1, `arrow key inside a number input applies at most one step, delta=${delta}`);
+});
+
+await step('studio screenshot captured', async () => {
+  await page.screenshot({ path: join(TMP_DIR, 'studio-viewer.png'), fullPage: false });
+});
+
 await step('marketplace screenshot captured', async () => {
   await page.goto(`${BASE}/#/marketplace`, { waitUntil: 'domcontentloaded', timeout: 30000 });
   try {

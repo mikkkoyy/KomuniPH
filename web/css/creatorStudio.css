@@ -80,8 +80,7 @@
   margin: 0 0.2rem;
 }
 .studio-spacer { flex: 1 1 auto; }
-.studio-design-select,
-.studio-zoom-label {
+.studio-design-select {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
@@ -148,6 +147,7 @@
   gap: 1rem;
   align-items: stretch;
 }
+.studio-layout > * { gap: 0.75rem; }
 .studio-panel {
   background: var(--studio-cp-panel);
   border: 1px solid var(--studio-line);
@@ -245,11 +245,14 @@
 #studio-stage {
   position: relative;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 #studio-canvas-scroll {
   overflow: auto;
+  flex: 1 1 auto;
   max-height: calc(100vh - 170px);
-  min-height: 480px;
+  min-height: 560px;
   background:
     radial-gradient(circle at 1px 1px, rgba(148, 163, 184, 0.16) 1px, transparent 1.5px);
   background-size: 20px 20px;
@@ -257,6 +260,79 @@
   border: 1px solid var(--studio-line);
   border-radius: var(--studio-radius);
   padding: 1.25rem;
+}
+/* ── Profile Viewer controls (CREATOR-06 follow-up) ─────────────────────────
+   Viewer-only bar: zoom −/+, Fit, 100%, and a pan pad. These never touch the
+   saved design — they only change how the canvas is viewed. */
+.studio-viewer-bar {
+  position: absolute;
+  top: 0.6rem;
+  left: 0.6rem;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  background: rgba(20, 29, 46, 0.92);
+  border: 1px solid var(--studio-line);
+  border-radius: 10px;
+  padding: 0.35rem 0.5rem;
+  box-shadow: 0 8px 24px -12px rgba(0, 0, 0, 0.7);
+  max-width: calc(100% - 1.2rem);
+}
+.studio-viewer-bar .studio-viewer-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--studio-muted);
+  margin-right: 0.15rem;
+}
+.studio-viewer-btn {
+  background: var(--studio-bg-3);
+  color: var(--studio-text);
+  border: 1px solid var(--studio-line);
+  border-radius: 7px;
+  min-width: 1.9rem;
+  height: 1.9rem;
+  padding: 0 0.45rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+}
+.studio-viewer-btn:hover {
+  border-color: var(--studio-accent);
+  color: var(--studio-accent);
+}
+.studio-viewer-zoom-readout {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--studio-text);
+  min-width: 3.2rem;
+  text-align: center;
+}
+.studio-viewer-sep {
+  width: 1px;
+  height: 1.3rem;
+  background: var(--studio-line);
+  margin: 0 0.15rem;
+}
+/* The viewer bar floats over the canvas, so it must never swallow a drag that
+   begins on empty canvas below it. */
+.studio-viewer-bar .studio-viewer-btn:active { transform: translateY(1px); }
+.studio-viewer-bar button:focus-visible {
+  outline: 2px solid var(--studio-accent);
+  outline-offset: 1px;
+}
+@media (max-width: 760px) {
+  .studio-viewer-bar {
+    position: static;
+    max-width: none;
+    margin-bottom: 0.6rem;
+  }
+  #studio-canvas-scroll { min-height: 420px; }
 }
 #studio-canvas-inner {
   min-width: 360px;
@@ -376,12 +452,22 @@
   display: none;
 }
 
-/* ── Layers panel ──────────────────────────────────────────────────────────── */
+/* ── Layers panel ────────────────────────────────────────────────────────────
+   Compact lower panel (CREATOR-06 follow-up): the bottom Layers section must
+   not steal vertical space from the Profile Viewer. The side editor panels
+   keep their useful 480px editing height via .studio-panel; only this lower
+   panel is compact and scrollable. */
+#studio-layers.studio-panel {
+  min-height: 0;
+  max-height: none;
+  padding: 0.7rem 1.1rem;
+  margin-top: 1rem;
+}
 #studio-layers-list {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  max-height: 320px;
+  max-height: 180px;
   overflow-y: auto;
   padding-right: 0.25rem;
 }

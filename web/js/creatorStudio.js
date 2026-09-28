@@ -21,6 +21,16 @@ import {
   applyGeometryToElement,
   applyCommonStyleToElement,
 } from './profileDesign.js';
+import {
+  clampZoom,
+  stepZoom,
+  stepPan,
+  fitZoom,
+  clampPan,
+  viewerTransform,
+  zoomPercent,
+  designPoint,
+} from './studioViewer.js';
 
 // ── Component catalog (mirrors the server registries) ────────────────────────
 const CONTROLLED_SECTIONS = [
@@ -58,7 +68,6 @@ const SECTION_ICONS = {
 const DEFAULT_CANVAS = { width: 960, minHeight: 1200 };
 const SNAP = 6;
 const MIN_SIZE = 8;
-const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 const HANDLE_DIRS = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
 
 // ── Module state ─────────────────────────────────────────────────────────────
@@ -66,7 +75,10 @@ let root = null;
 let currentDesign = null;
 let designs = [];
 let selectedId = null;
+// CREATOR-06: `zoom` and `viewerPan` are VIEWER coordinates. They describe how
+// the editor looks at the design and are never written to the design itself.
 let zoom = 1;
+let viewerPan = { x: 0, y: 0 };
 let dirty = false;
 let busy = false;
 let previewMode = false;
@@ -185,10 +197,6 @@ export function renderCreatorStudioPage() {
         <button id="studio-redo" class="btn btn-secondary" type="button" title="Redo (Ctrl+Y)" disabled>↷ Redo</button>
         <button id="studio-preview-toggle" class="btn btn-secondary" type="button">Preview</button>
         <span class="studio-toolbar-sep" aria-hidden="true"></span>
-        <label class="studio-zoom-label">Zoom
-          <select id="studio-zoom" aria-label="Canvas zoom"></select>
-        </label>
-        <span class="studio-toolbar-sep" aria-hidden="true"></span>
         <span class="studio-spacer" aria-hidden="true"></span>
         <button id="studio-coin-shop" class="btn btn-secondary" type="button" title="Manage the digital assets you sell for KomuniPH Coins">My Coin Shop</button>
         <button id="studio-open-profile" class="btn btn-secondary" type="button" title="Open your published profile in a new tab">Open Profile↗</button>
@@ -206,6 +214,20 @@ export function renderCreatorStudioPage() {
           <div id="studio-content-list" class="studio-element-list"></div>
         </aside>
         <div id="studio-stage">
+          <div class="studio-viewer-bar" id="studio-viewer-bar" role="toolbar" aria-label="Profile Viewer controls">
+            <span class="studio-viewer-label">Profile Viewer</span>
+            <button type="button" class="studio-viewer-btn" data-viewer="zoom-out" title="Zoom out" aria-label="Zoom out">&minus;</button>
+            <span class="studio-viewer-zoom-readout" id="studio-zoom-readout" aria-live="polite">100%</span>
+            <button type="button" class="studio-viewer-btn" data-viewer="zoom-in" title="Zoom in" aria-label="Zoom in">+</button>
+            <span class="studio-viewer-sep" aria-hidden="true"></span>
+            <button type="button" class="studio-viewer-btn" data-viewer="fit" title="Fit the whole profile on screen">Fit</button>
+            <button type="button" class="studio-viewer-btn" data-viewer="actual" title="Show at 100% actual size">100%</button>
+            <span class="studio-viewer-sep" aria-hidden="true"></span>
+            <button type="button" class="studio-viewer-btn" data-viewer="pan-left" title="Pan left" aria-label="Pan left">&larr;</button>
+            <button type="button" class="studio-viewer-btn" data-viewer="pan-up" title="Pan up" aria-label="Pan up">&uarr;</button>
+            <button type="button" class="studio-viewer-btn" data-viewer="pan-down" title="Pan down" aria-label="Pan down">&darr;</button>
+            <button type="button" class="studio-viewer-btn" data-viewer="pan-right" title="Pan right" aria-label="Pan right">&rarr;</button>
+          </div>
           <div id="studio-canvas-scroll">
             <div id="studio-canvas-inner"></div>
           </div>
@@ -253,17 +275,86 @@ function renderDesignSelect() {
   else if (previous && designs.some(d => d.id === previous)) select.value = previous;
 }
 
-function renderZoomSelect() {
-  const select = root?.querySelector('#studio-zoom');
-  if (!select) return;
-  select.replaceChildren();
-  ZOOMS.forEach(value => {
-    const option = document.createElement('option');
-    option.value = String(value);
-    option.textContent = `${Math.round(value * 100)}%`;
-    select.appendChild(option);
-  });
-  select.value = String(zoom);
+// ── Profile Viewer (CREATOR-06) ───────────────────────────────────────────────
+// Viewer-only controls. Nothing in this section may touch the design layout.
+
+/** Current viewer viewport size in screen px (0 when the stage is not laid out). */
+function viewerViewport() {
+  const scroll = root?.querySelector('#studio-canvas-scroll');
+  if (!scroll) return { w: 0, h: 0 };
+  return { w: scroll.clientWidth, h: scroll.clientHeight };
+}
+
+/** Scaled on-screen size of the design document. */
+function scaledCanvasSize() {
+  const c = canvas();
+  return { w: c.width * zoom, h: c.minHeight * zoom };
+}
+
+function renderViewerReadout() {
+  const readout = root?.querySelector('#studio-zoom-readout');
+  if (readout) readout.textContent = zoomPercent(zoom);
+}
+
+/** Apply a new zoom (and optional pan reset). Viewer-only. */
+function setZoom(value, { resetPan = false } = {}) {
+  zoom = clampZoom(value);
+  if (resetPan) viewerPan = { x: 0, y: 0 };
+  clampViewerPan();
+  renderCanvas();
+  renderViewerReadout();
+}
+
+/** Keep the pan inside the reachable range. Viewer-only. */
+function clampViewerPan() {
+  const { w, h } = viewerViewport();
+  if (!(w > 0) || !(h > 0)) return;
+  const scaled = scaledCanvasSize();
+  viewerPan = clampPan({ panX: viewerPan.x, panY: viewerPan.y, viewportW: w, viewportH: h, contentW: scaled.w, contentH: scaled.h });
+}
+
+/** Nudge the viewer by one step. Viewer-only. */
+function panViewer(direction) {
+  const next = stepPan(viewerPan, direction);
+  const { w, h } = viewerViewport();
+  const scaled = scaledCanvasSize();
+  viewerPan = clampPan({ panX: next.x, panY: next.y, viewportW: w, viewportH: h, contentW: scaled.w, contentH: scaled.h });
+  renderCanvas();
+  renderViewerReadout();
+}
+
+/** Zoom so the whole profile is visible, and centre it. Viewer-only. */
+function fitViewer() {
+  const { w, h } = viewerViewport();
+  if (!(w > 0) || !(h > 0)) return;
+  const c = canvas();
+  zoom = fitZoom({ viewportW: w, viewportH: h, canvasW: c.width, canvasH: c.minHeight });
+  const scaled = scaledCanvasSize();
+  viewerPan = clampPan({ panX: 0, panY: 0, viewportW: w, viewportH: h, contentW: scaled.w, contentH: scaled.h });
+  renderCanvas();
+  renderViewerReadout();
+  setStatus(`Fit to screen at ${zoomPercent(zoom)}.`);
+}
+
+/** Reset the viewer to 100% actual size. Viewer-only. */
+function actualSizeViewer() {
+  setZoom(1, { resetPan: true });
+  setStatus('Viewer at 100% actual size.');
+}
+
+function onViewerBarClick(event) {
+  const button = event.target.closest('[data-viewer]');
+  if (!button) return;
+  event.preventDefault();
+  const action = button.dataset.viewer;
+  if (action === 'zoom-in') setZoom(stepZoom(zoom, 1));
+  else if (action === 'zoom-out') setZoom(stepZoom(zoom, -1));
+  else if (action === 'fit') fitViewer();
+  else if (action === 'actual') actualSizeViewer();
+  else if (action === 'pan-left') panViewer('left');
+  else if (action === 'pan-up') panViewer('up');
+  else if (action === 'pan-down') panViewer('down');
+  else if (action === 'pan-right') panViewer('right');
 }
 
 function buildContentNode(el, comp) {
@@ -363,7 +454,7 @@ function renderCanvas() {
 
   const zoomLayer = document.createElement('div');
   zoomLayer.id = 'studio-zoom-layer';
-  zoomLayer.style.transform = `scale(${zoom})`;
+  zoomLayer.style.transform = viewerTransform({ zoom, panX: viewerPan.x, panY: viewerPan.y });
   zoomLayer.appendChild(doc);
   inner.replaceChildren(zoomLayer);
 }
@@ -859,6 +950,7 @@ function renderAll() {
   renderCanvas();
   renderLayers();
   renderProperties();
+  renderViewerReadout();
   updateToolbar();
 }
 
@@ -1023,8 +1115,7 @@ function snapMove(comp, x, y) {
 function toDesignPoint(event) {
   const doc = root?.querySelector('#studio-canvas-document');
   if (!doc) return { x: 0, y: 0 };
-  const rect = doc.getBoundingClientRect();
-  return { x: (event.clientX - rect.left) / zoom, y: (event.clientY - rect.top) / zoom };
+  return designPoint({ clientX: event.clientX, clientY: event.clientY, rect: doc.getBoundingClientRect(), zoom });
 }
 
 function startMove(comp, event) {
@@ -1058,8 +1149,38 @@ function startResize(comp, dir, event) {
   setStatus('Resizing — release to finish.');
 }
 
+function startPan(event) {
+  drag = {
+    mode: 'pan',
+    id: null,
+    pointerClientX: event.clientX,
+    pointerClientY: event.clientY,
+    startPanX: viewerPan.x,
+    startPanY: viewerPan.y,
+  };
+  setStatus('Panning the viewer — the design itself is unchanged.');
+}
+
 function onPointerMove(event) {
   if (!drag || !currentDesign) return;
+
+  // Viewer pan: measured in screen pixels, so it is independent of zoom.
+  if (drag.mode === 'pan') {
+    const scaled = scaledCanvasSize();
+    const { w, h } = viewerViewport();
+    viewerPan = clampPan({
+      panX: drag.startPanX + (event.clientX - drag.pointerClientX),
+      panY: drag.startPanY + (event.clientY - drag.pointerClientY),
+      viewportW: w,
+      viewportH: h,
+      contentW: scaled.w,
+      contentH: scaled.h,
+    });
+    renderCanvas();
+    renderViewerReadout();
+    return;
+  }
+
   const point = toDesignPoint(event);
   const comp = findComp(drag.id);
   if (!comp) return;
@@ -1107,9 +1228,15 @@ function onPointerMove(event) {
 
 function onPointerUp() {
   if (!drag) return;
+  const wasPan = drag.mode === 'pan';
   drag = null;
-  dirty = true;
   clearGuides();
+  // Panning the viewer is NOT an edit: it must not mark the design dirty.
+  if (wasPan) {
+    setStatus('Viewer moved. The saved design is unchanged.');
+    return;
+  }
+  dirty = true;
   renderCanvas();
   renderLayers();
   updateToolbar();
@@ -1160,6 +1287,9 @@ function onStagePointerDown(event) {
     selectedId = null;
     renderAll();
   }
+  // CREATOR-06: dragging empty canvas pans the viewer. Component dragging is
+  // handled above, so the two gestures never compete for the same pointer.
+  startPan(event);
 }
 
 // ── Events ───────────────────────────────────────────────────────────────────
@@ -1212,8 +1342,20 @@ function onKey(event) {
       dirty = true;
       renderCanvas();
       renderLayers();
+      // CREATOR-06: the X/Y fields must reflect the nudge immediately,
+      // otherwise arrow-key movement looks like it did nothing.
+      renderProperties();
       updateToolbar();
     }
+    return;
+  }
+
+  // CREATOR-06: nothing selected — arrows pan the viewer instead. This only
+  // moves the view; it never edits the design.
+  const viewerArrows = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };
+  if (viewerArrows[event.key]) {
+    event.preventDefault();
+    panViewer(viewerArrows[event.key]);
   }
 }
 
@@ -1606,10 +1748,7 @@ function attachEvents() {
       : 'Back to editing.');
   });
 
-  root.querySelector('#studio-zoom').addEventListener('change', () => {
-    zoom = parseFloat(root.querySelector('#studio-zoom').value) || 1;
-    renderCanvas();
-  });
+  root.querySelector('#studio-viewer-bar')?.addEventListener('click', onViewerBarClick);
 
   root.querySelector('#studio-design-select').addEventListener('change', () => {
     switchDesign(root.querySelector('#studio-design-select').value);
@@ -1624,7 +1763,7 @@ export async function initCreatorStudioPage() {
   window.addEventListener('keydown', keyHandler);
   window.addEventListener('beforeunload', beforeUnload);
   renderElementPanels();
-  renderZoomSelect();
+  renderViewerReadout();
   attachEvents();
 
   try {

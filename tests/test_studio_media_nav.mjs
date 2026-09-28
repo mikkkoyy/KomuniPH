@@ -379,6 +379,132 @@ test('design geometry persists after save + reload (X/Y/resize/rotation)', async
   check(bad.status === 400, `invalid coords rejected, got ${bad.status}`);
 });
 
+// ── Profile Viewer (CREATOR-06) ─────────────────────────────────────────────
+const viewer = await import(mod('web/js/studioViewer.js'));
+
+group('Profile Viewer Geometry');
+
+test('zoom is clamped to the supported range', async () => {
+  check(viewer.clampZoom(0.01) === viewer.MIN_ZOOM, 'under-range clamps to MIN_ZOOM');
+  check(viewer.clampZoom(99) === viewer.MAX_ZOOM, 'over-range clamps to MAX_ZOOM');
+  check(viewer.clampZoom(1) === 1, '1 stays 1');
+  check(viewer.clampZoom('nonsense') === 1, 'invalid falls back to 1');
+});
+
+test('zoom in/out step by 10% and stop at the limits', async () => {
+  check(viewer.stepZoom(1, 1) === 1.1, 'zoom in steps to 1.1');
+  check(viewer.stepZoom(1, -1) === 0.9, 'zoom out steps to 0.9');
+  check(viewer.stepZoom(viewer.MAX_ZOOM, 1) === viewer.MAX_ZOOM, 'no zoom in past MAX');
+  check(viewer.stepZoom(viewer.MIN_ZOOM, -1) === viewer.MIN_ZOOM, 'no zoom out past MIN');
+  check(viewer.zoomPercent(1.25) === '125%', 'percent formatting');
+  check(viewer.zoomPercent(0.5) === '50%', 'percent formatting (down)');
+});
+
+test('fit to screen shows the whole design and never upscales past 100%', async () => {
+  // 1000x800 viewport, 960x1200 design -> height is the tighter axis.
+  const fit = viewer.fitZoom({ viewportW: 1000, viewportH: 800, canvasW: 960, canvasH: 1200 });
+  check(fit < 1, `shrinks a design taller than the viewer, got ${fit}`);
+  check(1200 * fit <= 800, 'scaled design height fits the viewport');
+  // A design far smaller than the viewport is not blown up.
+  const tiny = viewer.fitZoom({ viewportW: 2000, viewportH: 2000, canvasW: 100, canvasH: 100 });
+  check(tiny === 1, 'never upscales past 100%');
+  // Degenerate input must not produce NaN.
+  check(viewer.fitZoom({ viewportW: 0, viewportH: 0, canvasW: 0, canvasH: 0 }) === 1, 'degenerate fit is safe');
+});
+
+test('pan is bounded so the design can never be dragged out of reach', async () => {
+  // Design much larger than the viewport.
+  const big = viewer.clampPan({ panX: 99999, panY: 99999, viewportW: 800, viewportH: 600, contentW: 4000, contentH: 3000 });
+  check(big.x < 99999 && big.y < 99999, 'pan is clamped on the high side');
+  const far = viewer.clampPan({ panX: -99999, panY: -99999, viewportW: 800, viewportH: 600, contentW: 4000, contentH: 3000 });
+  check(far.x > -99999 && far.y > -99999, 'pan is clamped on the low side');
+  // Design smaller than the viewport is centred rather than left off-screen.
+  const small = viewer.clampPan({ panX: 500, panY: 500, viewportW: 1000, viewportH: 900, contentW: 400, contentH: 300 });
+  check(small.x === 300, `centred horizontally, got ${small.x}`);
+  check(small.y === 300, `centred vertically, got ${small.y}`);
+});
+
+test('viewer transform composes pan and zoom independently', async () => {
+  check(viewer.viewerTransform({ zoom: 1, panX: 0, panY: 0 }) === 'translate(0px, 0px) scale(1)', 'identity');
+  check(viewer.viewerTransform({ zoom: 1.5, panX: 10.4, panY: -20.6 }) === 'translate(10px, -21px) scale(1.5)', 'pans and scales together');
+});
+
+test('pointer -> design point ignores viewer pan and divides out zoom', async () => {
+  // The rect already reflects the applied pan+scale, so only zoom is divided.
+  // This is what keeps "pan the viewer" from corrupting component X/Y.
+  const rect = { left: 137, top: 51 };
+  const pt = viewer.designPoint({ clientX: 337, clientY: 251, rect, zoom: 2 });
+  check(pt.x === 100, `x = 200/2, got ${pt.x}`);
+  check(pt.y === 100, `y = 200/2, got ${pt.y}`);
+  const zoomed = viewer.designPoint({ clientX: 137, clientY: 51, rect, zoom: 0.5 });
+  check(zoomed.x === 0 && zoomed.y === 0, 'rect origin maps to 0,0 at any zoom');
+});
+
+group('Profile Viewer Wiring (source)');
+
+test('studio renders the adjustable Profile Viewer bar', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(resolve('web/js/creatorStudio.js'), 'utf8');
+  check(src.includes('id="studio-viewer-bar"'), 'viewer bar is rendered');
+  check(src.includes('Profile Viewer'), 'viewer bar is labelled');
+  check(src.includes('data-viewer="zoom-in"') && src.includes('data-viewer="zoom-out"'), 'zoom -/+ controls');
+  check(src.includes('data-viewer="fit"'), 'fit-to-screen control');
+  check(src.includes('data-viewer="actual"'), '100% actual-size control');
+  for (const dir of ['pan-left', 'pan-right', 'pan-up', 'pan-down']) {
+    check(src.includes(`data-viewer="${dir}"`), `pan control ${dir}`);
+  }
+  check(src.includes('studio-zoom-readout'), 'zoom percentage readout');
+});
+
+test('viewer state is kept out of the saved design layout', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(resolve('web/js/creatorStudio.js'), 'utf8');
+  // Viewer coordinates live in module state, never inside layout.
+  check(/let\s+zoom\s*=/.test(src), 'zoom is module state');
+  check(/let\s+viewerPan\s*=/.test(src), 'viewerPan is module state');
+  const layoutWrites = src.match(/viewerPan\.[xy]\s*=[^=]/g) || [];
+  check(layoutWrites.every(w => /^\s*viewerPan\.[xy]\s*=/.test(w)), 'viewerPan is only ever assigned directly');
+  // Panning must never mark the design dirty.
+  check(/const wasPan = drag\.mode === 'pan';/.test(src), 'pointer-up distinguishes a pan');
+  check(/if \(wasPan\) \{[\s\S]*?return;[\s\S]*?\}\s*dirty = true;/.test(src), 'pan returns before dirty = true');
+});
+
+test('empty-canvas drag pans the viewer and component drag still moves components', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(resolve('web/js/creatorStudio.js'), 'utf8');
+  check(src.includes("mode: 'pan'"), 'pan drag mode exists');
+  check(src.includes("startPan(event)"), 'empty canvas starts a pan');
+  check(src.includes("if (drag.mode === 'pan')"), 'pointer move handles pan separately');
+  check(src.includes('startMove(comp, event)'), 'component drag still starts a move');
+  // Pan must be measured in screen pixels, not design pixels.
+  check(src.includes('pointerClientX') && src.includes('pointerClientY'), 'pan tracks client coords');
+});
+
+test('arrow keys move the selected component and pan the viewer otherwise', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(resolve('web/js/creatorStudio.js'), 'utf8');
+  check(src.includes('event.shiftKey ? 10 : 1'), 'Shift+Arrow moves by 10');
+  check(src.includes('comp.x + arrows'), 'arrows adjust component x');
+  check(src.includes("viewerArrows[event.key]"), 'arrows fall through to viewer pan');
+  check(src.includes("panViewer(viewerArrows[event.key])"), 'unselected arrows pan the viewer');
+  // Typing must never be hijacked.
+  check(src.includes("target.closest('input, textarea, select')"), 'text inputs are excluded');
+});
+
+group('Creator Studio Layout');
+
+test('lower Layers panel is compact and the viewer keeps the space', async () => {
+  const { readFileSync } = await import('node:fs');
+  const css = readFileSync(resolve('web/css/creatorStudio.css'), 'utf8');
+  check(/#studio-layers\.studio-panel\s*\{[^}]*min-height:\s*0/.test(css), 'layers panel drops the 480px minimum');
+  check(/#studio-layers-list\s*\{[^}]*overflow-y:\s*auto/.test(css), 'layers list scrolls');
+  check(/#studio-layers-list\s*\{[^}]*max-height:\s*1\d\dpx/.test(css), 'layers list is height-capped');
+  // Side editor panels keep their useful editing height.
+  check(/\.studio-panel\s*\{[^}]*min-height:\s*480px/.test(css), 'side panels keep 480px editing height');
+  // The viewer takes the flexible majority.
+  check(/#studio-canvas-scroll\s*\{[^}]*flex:\s*1 1 auto/.test(css), 'viewer grows to fill the stage');
+});
+
 // ── Teardown ─────────────────────────────────────────────────────────────
 queue.push(async () => {
   try { rmSync(TMP_DIR, { recursive: true, force: true }); process.stdout.write('  [cleanup] temp dir removed\n'); } catch {}

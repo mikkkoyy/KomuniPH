@@ -568,6 +568,25 @@
   margin: 0;
 }
 
+/* ── CREATOR-06 layer order + alignment buttons (Properties panel) ───────── */
+.studio-layer-order,
+.studio-align-row {
+  align-items: flex-start;
+}
+.studio-order-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.studio-order-btn {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.8rem;
+}
+
 /* ── Save as Creator Asset modal (CREATOR-02) ──────────────────────────────── */
 .studio-modal-overlay {
   position: fixed;

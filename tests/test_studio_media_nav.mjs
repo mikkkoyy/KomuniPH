@@ -319,6 +319,66 @@ test('wallet has Back to Profile without resetting sections', async () => {
   check(html.includes('Cash In') && html.includes('Cash Out') && html.includes('Gift'), 'wallet actions intact');
 });
 
+test('marketplace catalog has Back to Profile', async () => {
+  globalThis.window = { location: { hash: '#/marketplace', origin: 'http://127.0.0.1' } };
+  try {
+    const html = marketplaceUi.renderMarketplacePage();
+    check(html.includes('Back to Profile'), 'expected back label');
+    check(html.includes('href="#/profile"'), 'expected profile route');
+    check(html.includes('Marketplace'), 'marketplace content intact');
+  } finally { delete globalThis.window; }
+});
+
+test('coin shop catalog has Back to Marketplace', async () => {
+  globalThis.window = { location: { hash: '#/coin-shop', origin: 'http://127.0.0.1' } };
+  try {
+    const html = marketplaceUi.renderCoinShopPage();
+    check(html.includes('Back to Marketplace'), 'expected back label');
+    check(html.includes('href="#/marketplace"'), 'expected marketplace route');
+  } finally { delete globalThis.window; }
+});
+
+test('creator studio properties expose Move Up / Move Down + align (source)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(resolve('web/js/creatorStudio.js'), 'utf8');
+  check(src.includes('Move Up'), 'expected Move Up control');
+  check(src.includes('Move Down'), 'expected Move Down control');
+  check(src.includes('Canvas align'), 'expected alignment controls');
+  check(src.includes('moveLayer(comp.id, 1)'), 'Move Up must reuse moveLayer');
+  check(src.includes('moveLayer(comp.id, -1)'), 'Move Down must reuse moveLayer');
+  check(src.includes('ArrowUp') && src.includes('ArrowDown') && src.includes('ArrowLeft') && src.includes('ArrowRight'), 'arrow-key movement intact');
+});
+
+test('design geometry persists after save + reload (X/Y/resize/rotation)', async () => {
+  const u = createUserWithProfile('media-persist');
+  const token = tokenFor(u.id);
+  const layout = {
+    canvas: { width: 960, minHeight: 1200 },
+    components: [
+      { id: 'persist-1', type: 'text', x: 111, y: 222, width: 320, height: 96, zIndex: 0, visible: true, locked: false, rotation: 15, style: {}, config: { text: 'persist me' } },
+    ],
+  };
+  const created = await api('POST', '/api/profile/design', { token, body: { name: 'Persist', layout, theme: {} } });
+  check(created.status === 201, `create: ${created.status}`);
+  const id = created.data.design.id;
+  const moved = {
+    canvas: { width: 960, minHeight: 1200 },
+    components: [
+      { id: 'persist-1', type: 'text', x: 333, y: 444, width: 400, height: 200, zIndex: 1, visible: true, locked: false, rotation: 45, style: {}, config: { text: 'persist me' } },
+    ],
+  };
+  const saved = await api('PATCH', `/api/profile/design/${id}`, { token, body: { layout: moved } });
+  check(saved.status === 200, `save: ${saved.status}`);
+  const reloaded = await api('GET', `/api/profile/design/${id}`, { token });
+  check(reloaded.status === 200, `reload: ${reloaded.status}`);
+  const comp = reloaded.data.design.layout.components.find(c => c.id === 'persist-1');
+  check(comp && comp.x === 333 && comp.y === 444, `XY persisted, got ${comp && comp.x},${comp && comp.y}`);
+  check(comp.width === 400 && comp.height === 200, 'size persisted');
+  check(comp.rotation === 45, 'rotation persisted');
+  const bad = await api('PATCH', `/api/profile/design/${id}`, { token, body: { layout: { canvas: { width: 960, minHeight: 1200 }, components: [{ id: 'persist-1', type: 'text', x: 'far', y: 0, width: 10, height: 10, zIndex: 0, visible: true, locked: false, rotation: 0, style: {}, config: { text: 'x' } }] } } });
+  check(bad.status === 400, `invalid coords rejected, got ${bad.status}`);
+});
+
 // ── Teardown ─────────────────────────────────────────────────────────────
 queue.push(async () => {
   try { rmSync(TMP_DIR, { recursive: true, force: true }); process.stdout.write('  [cleanup] temp dir removed\n'); } catch {}

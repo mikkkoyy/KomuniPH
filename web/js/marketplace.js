@@ -188,6 +188,7 @@ export function renderMarketplacePage() {
 
   return `
     <section class="marketplace-page">
+      <div class="back-nav-row">${renderBackButton({ label: 'Back to Profile', href: '#/profile' })}</div>
       <header class="marketplace-header">
         <h1>Marketplace</h1>
         <p>Discover products and services from the KomuniPH community</p>

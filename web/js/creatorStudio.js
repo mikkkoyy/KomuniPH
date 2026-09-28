@@ -691,6 +691,76 @@ function canvasProperties(frag) {
   heightInput.addEventListener('input', () => { renderCanvas(); });
 }
 
+/**
+ * CREATOR-06: explicit Layer order buttons in the Properties panel.
+ * "Move Up" brings the component one layer forward, "Move Down" sends it
+ * one layer back. Reuses the same moveLayer() ordering used by the Layers
+ * panel so there is exactly one z-order model (profile_designs zIndex).
+ */
+function layerOrderField(comp) {
+  const wrap = document.createElement('div');
+  wrap.className = 'studio-prop-row studio-layer-order';
+  const label = document.createElement('span');
+  label.className = 'studio-prop-label';
+  label.textContent = 'Order';
+  const buttons = document.createElement('span');
+  buttons.className = 'studio-order-buttons';
+  const up = document.createElement('button');
+  up.type = 'button';
+  up.className = 'btn btn-secondary studio-order-btn';
+  up.textContent = 'Move Up';
+  up.title = 'Bring one layer forward';
+  up.addEventListener('click', () => { moveLayer(comp.id, 1); renderProperties(); });
+  const down = document.createElement('button');
+  down.type = 'button';
+  down.className = 'btn btn-secondary studio-order-btn';
+  down.textContent = 'Move Down';
+  down.title = 'Send one layer backward';
+  down.addEventListener('click', () => { moveLayer(comp.id, -1); renderProperties(); });
+  buttons.append(up, down);
+  wrap.append(label, buttons);
+  return wrap;
+}
+
+/**
+ * CREATOR-06: alignment shortcuts. Sets X/Y against the canvas (or centers)
+ * through the same geometry fields the server validates — no parallel model.
+ */
+function alignField(comp) {
+  const wrap = document.createElement('div');
+  wrap.className = 'studio-prop-row studio-align-row';
+  const label = document.createElement('span');
+  label.className = 'studio-prop-label';
+  label.textContent = 'Canvas align';
+  const buttons = document.createElement('span');
+  buttons.className = 'studio-order-buttons';
+  const actions = [
+    ['Left', () => { comp.x = 0; }],
+    ['Center', () => { comp.x = Math.max(0, Math.round((canvas().width - comp.width) / 2)); }],
+    ['Right', () => { comp.x = Math.max(0, canvas().width - comp.width); }],
+    ['Top', () => { comp.y = 0; }],
+    ['Middle', () => { comp.y = Math.max(0, Math.round((canvas().minHeight - comp.height) / 2)); }],
+    ['Bottom', () => { comp.y = Math.max(0, canvas().minHeight - comp.height); }],
+  ];
+  actions.forEach(([text, apply]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn btn-secondary studio-order-btn';
+    button.textContent = text;
+    button.title = `Align ${text.toLowerCase()} on canvas`;
+    button.addEventListener('click', () => {
+      if (comp.locked) return;
+      pushHistory();
+      apply();
+      markChanged(`Aligned ${text.toLowerCase()}.`);
+      renderProperties();
+    });
+    buttons.appendChild(button);
+  });
+  wrap.append(label, buttons);
+  return wrap;
+}
+
 function componentProperties(frag, comp) {
   const title = document.createElement('div');
   title.className = 'studio-prop-title';
@@ -710,8 +780,11 @@ function componentProperties(frag, comp) {
   frag.appendChild(fieldRow('Height', numberField(comp, 'height', { min: 8, max: 4080, integer: true })));
   frag.appendChild(sectionTitle('Layer'));
   frag.appendChild(fieldRow('Z-index', numberField(comp, 'zIndex', { min: 0, max: 10000, integer: true })));
+  frag.appendChild(layerOrderField(comp));
   frag.appendChild(fieldRow('Visible', toggleField(comp, 'visible')));
   frag.appendChild(fieldRow('Locked', toggleField(comp, 'locked')));
+  frag.appendChild(sectionTitle('Align'));
+  frag.appendChild(alignField(comp));
   frag.appendChild(sectionTitle('Transform'));
   frag.appendChild(fieldRow('Rotation (deg)', numberField(comp, 'rotation', { min: 0, max: 360 })));
 

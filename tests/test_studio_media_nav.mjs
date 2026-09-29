@@ -391,80 +391,76 @@ test('zoom is clamped to the supported range', async () => {
   check(viewer.clampZoom('nonsense') === 1, 'invalid falls back to 1');
 });
 
-test('viewer box is clamped to the minimum and to the available space', async () => {
-  const min = viewer.clampViewerRect({ width: 10, height: 10 });
-  check(min.width === viewer.MIN_VIEWER_WIDTH, `width floors at the minimum, got ${min.width}`);
-  check(min.height === viewer.MIN_VIEWER_HEIGHT, `height floors at the minimum, got ${min.height}`);
-  // Never larger than the stage, so resizing cannot create a scrollbar.
-  const capped = viewer.clampViewerRect({ width: 99999, height: 99999 }, { boundsWidth: 800, boundsHeight: 600 });
-  check(capped.width === 800 && capped.height === 600, `capped to the workspace, got ${capped.width}x${capped.height}`);
-  // When the stage is smaller than the minimum, the minimum still wins.
-  const tiny = viewer.clampViewerRect({ width: 9999, height: 9999 }, { boundsWidth: 100, boundsHeight: 100 });
-  check(tiny.width === viewer.MIN_VIEWER_WIDTH, 'minimum outranks a tiny stage');
-  // The box is always fully inside the stage, so it can never overflow.
-  const inside = viewer.clampViewerRect({ x: -500, y: -500, width: 400, height: 300 }, { boundsWidth: 800, boundsHeight: 600 });
-  check(inside.x === 0 && inside.y === 0, 'a negative origin is pulled back to the stage');
-  const far = viewer.clampViewerRect({ x: 9999, y: 9999, width: 400, height: 300 }, { boundsWidth: 800, boundsHeight: 600 });
-  check(far.x === 400 && far.y === 300, `origin clamped so the box stays in bounds, got ${far.x},${far.y}`);
-  check(far.x + far.width <= 800 && far.y + far.height <= 600, 'clamped box stays inside the stage');
-  // A box below the minimum is grown first, so the origin bound accounts for it.
-  const grown = viewer.clampViewerRect({ x: 9999, y: 0, width: 300, height: 300 }, { boundsWidth: 800, boundsHeight: 600 });
-  check(grown.width === viewer.MIN_VIEWER_WIDTH, 'below-minimum width is grown');
-  check(grown.x === 800 - viewer.MIN_VIEWER_WIDTH, `origin bound uses the enforced width, got ${grown.x}`);
-  check(viewer.clampViewerRect({ width: NaN, height: NaN }).width === viewer.MIN_VIEWER_WIDTH, 'NaN is safe');
-  check(viewer.clampViewerRect({ width: 640.4, height: 480.6 }).width === 640, 'sizes round to whole px');
+test('panel widths are clamped to a minimum and to the space available', async () => {
+  check(viewer.clampPanelWidth(10) === viewer.MIN_PANEL_WIDTH, 'width floors at the panel minimum');
+  check(viewer.clampPanelWidth(99999) === 99999, 'unbounded stays as given when no max');
+  check(viewer.clampPanelWidth(99999, { max: 400 }) === 400, 'capped at the supplied max');
+  check(viewer.clampPanelWidth(640.4) === 640, 'widths round to whole px');
+  check(viewer.clampPanelWidth(NaN) === viewer.MIN_PANEL_WIDTH, 'NaN is safe');
+  // A max below the minimum must not produce an impossible width.
+  check(viewer.clampPanelWidth(10, { max: 50 }) === viewer.MIN_PANEL_WIDTH, 'minimum outranks a tiny max');
 });
 
-test('dragging an edge moves that edge and leaves the opposite one alone', async () => {
-  // Start inset from the stage origin so the west/north edges have room to move.
-  const startRect = { x: 200, y: 200, width: 800, height: 600 };
-  const base = { startRect, startClientX: 500, startClientY: 400, clientX: 500, clientY: 400 };
-  const bounds = { boundsWidth: 1600, boundsHeight: 1200 };
+test('dragging a column boundary resizes that panel and leaves the other alone', async () => {
+  const base = { startLeft: 300, startRight: 370, startClientX: 300, clientX: 300, totalWidth: 1400 };
 
-  // East edge: the right boundary follows the pointer, the left stays put.
-  const right = viewer.viewerRectFromDrag({ ...base, ...bounds, mode: 'e', clientX: 560 });
-  check(right.width === 860, `right edge grows the width, got ${right.width}`);
-  check(right.x === 200, 'right edge leaves the left edge alone');
-  check(right.height === 600 && right.y === 200, 'right edge leaves the height alone');
+  // Left boundary: the left panel follows the pointer, the right panel is fixed.
+  const widerLeft = viewer.columnWidthsFromDrag({ ...base, edge: 'left', clientX: 380 });
+  check(widerLeft.left === 380, `left panel grew, got ${widerLeft.left}`);
+  check(widerLeft.right === 370, 'right panel unchanged while dragging the left boundary');
 
-  // West edge: the left boundary follows the pointer, the right stays put.
-  const left = viewer.viewerRectFromDrag({ ...base, ...bounds, mode: 'w', clientX: 440 });
-  check(left.x === 140, `left edge origin follows the pointer, got ${left.x}`);
-  check(left.width === 860, `left edge grows the width, got ${left.width}`);
-  check(left.x + left.width === 1000, 'left edge keeps the right edge anchored');
+  const narrowerLeft = viewer.columnWidthsFromDrag({ ...base, edge: 'left', clientX: 240 });
+  check(narrowerLeft.left === 240, `left panel shrank, got ${narrowerLeft.left}`);
 
-  const bottom = viewer.viewerRectFromDrag({ ...base, ...bounds, mode: 's', clientY: 470 });
-  check(bottom.height === 670, `bottom edge grows the height, got ${bottom.height}`);
-  check(bottom.width === 800, 'bottom edge leaves the width alone');
-  const top = viewer.viewerRectFromDrag({ ...base, ...bounds, mode: 'n', clientY: 360 });
-  check(top.y === 160 && top.height === 640, `top edge origin and height, got ${top.y},${top.height}`);
-  check(top.y + top.height === 800, 'top edge keeps the bottom edge anchored');
+  // Right boundary: dragging left widens the Properties panel.
+  const widerRight = viewer.columnWidthsFromDrag({ ...base, edge: 'right', clientX: 250 });
+  check(widerRight.right === 420, `properties panel grew, got ${widerRight.right}`);
+  check(widerRight.left === 300, 'left panel unchanged while dragging the right boundary');
 
-  // A corner changes both axes at once.
-  const corner = viewer.viewerRectFromDrag({ ...base, ...bounds, mode: 'se', clientX: 540, clientY: 450 });
-  check(corner.width === 840 && corner.height === 650, `corner changes both axes, got ${corner.width}x${corner.height}`);
-  check(corner.x === 200 && corner.y === 200, 'se corner keeps the top-left anchored');
-  const nw = viewer.viewerRectFromDrag({ ...base, ...bounds, mode: 'nw', clientX: 560, clientY: 430 });
-  check(nw.width === 740 && nw.height === 570, `nw corner shrinks both axes, got ${nw.width}x${nw.height}`);
-  check(nw.x === 260 && nw.y === 230, `nw corner moves the origin with the pointer, got ${nw.x},${nw.y}`);
-  check(nw.x + nw.width === 1000 && nw.y + nw.height === 800, 'nw corner anchors the opposite corner');
+  // The center column absorbs the difference.
+  const centerAfter = base.totalWidth - widerLeft.left - widerLeft.right;
+  const centerBefore = base.totalWidth - base.startLeft - base.startRight;
+  check(centerAfter < centerBefore, 'a wider left panel leaves less room for the viewer');
+  check(centerAfter === 1400 - 380 - 370, 'center width is whatever is left over');
 });
 
-test('a resize drag cannot shrink past the minimum or grow past the stage', async () => {
-  const startRect = { x: 0, y: 0, width: 400, height: 400 };
-  const base = { startRect, startClientX: 500, startClientY: 400, clientX: 500, clientY: 400 };
-  const collapsed = viewer.viewerRectFromDrag({ ...base, mode: 'se', clientX: 0, clientY: 0, boundsWidth: 1600, boundsHeight: 1200 });
-  check(collapsed.width === viewer.MIN_VIEWER_WIDTH, `width floors, got ${collapsed.width}`);
-  check(collapsed.height === viewer.MIN_VIEWER_HEIGHT, `height floors, got ${collapsed.height}`);
-  const overflow = viewer.viewerRectFromDrag({ ...base, mode: 'se', clientX: 99999, clientY: 99999, boundsWidth: 900, boundsHeight: 700 });
-  check(overflow.width === 900 && overflow.height === 700, `capped at the stage, got ${overflow.width}x${overflow.height}`);
-  // Pushing the west edge out of the stage stops at the origin instead of going negative.
-  const out = viewer.viewerRectFromDrag({ ...base, mode: 'w', clientX: -99999, boundsWidth: 800, boundsHeight: 600 });
-  check(out.x === 0, `west edge cannot leave the stage, got x=${out.x}`);
-  check(out.width <= 800, 'west edge cannot outgrow the stage');
-  // An unknown mode must not produce NaN geometry.
-  const unknown = viewer.viewerRectFromDrag({ ...base, mode: '', clientX: 600, clientY: 500, boundsWidth: 800, boundsHeight: 600 });
-  check(Number.isFinite(unknown.width) && Number.isFinite(unknown.height), 'unknown edge stays finite');
+test('column drag cannot starve the center column or a panel minimum', async () => {
+  const base = { startLeft: 300, startRight: 370, startClientX: 300, clientX: 300, totalWidth: 1400 };
+
+  const hugeLeft = viewer.columnWidthsFromDrag({ ...base, edge: 'left', clientX: 5000 });
+  check(hugeLeft.left + hugeLeft.right <= 1400 - viewer.MIN_CENTER_WIDTH,
+    `left panel stops before starving the center, got ${hugeLeft.left}`);
+  check(hugeLeft.left >= viewer.MIN_PANEL_WIDTH, 'left panel keeps its minimum');
+
+  const tinyLeft = viewer.columnWidthsFromDrag({ ...base, edge: 'left', clientX: -5000 });
+  check(tinyLeft.left === viewer.MIN_PANEL_WIDTH, `left panel floors, got ${tinyLeft.left}`);
+
+  const hugeRight = viewer.columnWidthsFromDrag({ ...base, edge: 'right', clientX: -5000 });
+  check(hugeRight.left + hugeRight.right <= 1400 - viewer.MIN_CENTER_WIDTH,
+    `properties panel stops before starving the center, got ${hugeRight.right}`);
+
+  const tinyRight = viewer.columnWidthsFromDrag({ ...base, edge: 'right', clientX: 5000 });
+  check(tinyRight.right === viewer.MIN_PANEL_WIDTH, `properties panel floors, got ${tinyRight.right}`);
+
+  // An unknown edge changes nothing and never yields NaN.
+  const unknown = viewer.columnWidthsFromDrag({ ...base, edge: 'nope', clientX: 900 });
+  check(unknown.left === 300 && unknown.right === 370, 'an unknown edge is a no-op');
+  check(Number.isFinite(unknown.left) && Number.isFinite(unknown.right), 'stays finite');
+});
+
+test('viewer height is clamped so a tall viewer cannot add a scrollbar', async () => {
+  check(viewer.clampViewerHeight(10) === viewer.MIN_VIEWER_HEIGHT, 'floors at the minimum height');
+  check(viewer.clampViewerHeight(600) === 600, 'a sensible height is kept exactly');
+  // The maximum leaves room for the toolbar, status and Layers panel.
+  const tall = viewer.clampViewerHeight(99999, { viewportHeight: 1000 });
+  check(tall === 1000 - viewer.VIEWER_HEIGHT_CHROME, `tall viewer is capped, got ${tall}`);
+  // A short window cannot make the maximum fall below the minimum.
+  const cramped = viewer.clampViewerHeight(99999, { viewportHeight: 100 });
+  check(cramped === viewer.MIN_VIEWER_HEIGHT, 'minimum outranks a short window');
+  check(viewer.clampViewerHeight(640.6) === 641, 'heights round to whole px');
+  check(viewer.clampViewerHeight(NaN) === viewer.MIN_VIEWER_HEIGHT, 'NaN is safe');
+  // Without a known viewport the height is not constrained upwards.
+  check(viewer.clampViewerHeight(99999) === 99999, 'unbounded without a viewport height');
 });
 
 test('pan is bounded so the design can never be dragged out of reach', async () => {
@@ -514,54 +510,82 @@ test('the Profile Viewer control bar is gone, with no replacement', async () => 
   check(src.includes('id="studio-canvas-scroll"'), 'canvas still rendered');
 });
 
-test('the viewer exposes four edge grips and four corner grips', async () => {
+test('the workspace exposes two column resizers and one viewer height grip', async () => {
   const { readFileSync } = await import('node:fs');
   const src = readFileSync(resolve('web/js/creatorStudio.js'), 'utf8');
-  for (const edge of ['n', 's', 'w', 'e']) {
-    check(src.includes(`data-viewer-edge="${edge}"`), `${edge} edge grip is rendered`);
+  check(src.includes('data-resize-col="left"'), 'left column resizer is rendered');
+  check(src.includes('data-resize-col="right"'), 'right column resizer is rendered');
+  check(src.includes('data-resize-height'), 'viewer height grip is rendered');
+  // CREATOR-07A replaces the four-side viewer grips entirely.
+  for (const gone of ['data-viewer-edge', 'studio-viewer-grip', 'studio-viewer-grip-corner']) {
+    check(!src.includes(gone), `${gone} is gone`);
   }
-  for (const corner of ['nw', 'ne', 'sw', 'se']) {
-    check(src.includes(`data-viewer-edge="${corner}"`), `${corner} corner grip is rendered`);
-  }
-  check(src.includes('studio-viewer-grip'), 'grips carry the grip class');
-  // A grip is not inside the canvas, so a viewer drag can never become a
-  // component drag and vice versa.
-  check(src.includes("closest('[data-viewer-edge]')"), 'grips are detected by delegation');
-  check(src.includes('startViewerResize(grip.dataset.viewerEdge, event)'), 'grip drag starts a viewer resize');
+  // The handles must be reachable by real pointer events.
+  check(src.includes("closest('[data-resize-col]')"), 'column resizers are detected by delegation');
+  check(src.includes("closest('[data-resize-height]')"), 'height grip is detected by delegation');
+  check(src.includes('setPointerCapture'), 'handles capture the pointer for fast drags');
+  // The column resizers live in the layout, not inside the scrollable panels.
+  check(src.includes("querySelector('#studio-layout')?.addEventListener('pointerdown'"),
+    'column resizers are wired on the layout container');
 });
 
-test('viewer state is kept out of the saved design layout', async () => {
+test('workspace state is kept out of the saved design layout', async () => {
   const { readFileSync } = await import('node:fs');
   const src = readFileSync(resolve('web/js/creatorStudio.js'), 'utf8');
-  // Viewer coordinates live in module state, never inside layout.
+  // Workspace state lives in module scope, never inside the design layout.
   check(/let\s+zoom\s*=/.test(src), 'zoom is module state');
   check(/let\s+viewerPan\s*=/.test(src), 'viewerPan is module state');
-  check(/let\s+viewerSize\s*=/.test(src), 'viewerSize is module state');
+  check(/let\s+panelWidths\s*=/.test(src), 'panelWidths is module state');
+  check(/let\s+viewerHeight\s*=/.test(src), 'viewerHeight is module state');
   const layoutWrites = src.match(/viewerPan\.[xy]\s*=[^=]/g) || [];
   check(layoutWrites.every(w => /^\s*viewerPan\.[xy]\s*=/.test(w)), 'viewerPan is only ever assigned directly');
-  // Viewer size is applied to the element, never to the design payload.
-  check(src.includes('viewer.style.width'), 'viewer size is applied to the DOM');
-  check(!/viewerSize[^;]*\bcomp\./.test(src), 'viewer size is never written to a component');
+  // The viewer has no width of its own any more: it always fills the column.
+  check(!/viewer\.style\.width/.test(src), 'no inline width is written to the viewer');
+  check(src.includes("setProperty('--studio-col-left'"), 'panel widths go to CSS custom properties');
+  check(!/panelWidths[^;]*\bcomp\./.test(src), 'panel widths are never written to a component');
+  check(!/viewerHeight[^;]*\bcomp\./.test(src), 'viewer height is never written to a component');
   // Panning must never mark the design dirty.
   check(/const wasPan = drag\.mode === 'pan';/.test(src), 'pointer-up distinguishes a pan');
   check(/if \(wasPan\) \{[\s\S]*?return;[\s\S]*?\}\s*dirty = true;/.test(src), 'pan returns before dirty = true');
 });
 
-test('resizing the viewer is not an edit', async () => {
+test('workspace resizing is not an edit', async () => {
   const { readFileSync } = await import('node:fs');
   const src = readFileSync(resolve('web/js/creatorStudio.js'), 'utf8');
-  check(src.includes("mode: 'viewer-resize'"), 'viewer resize drag mode exists');
-  check(src.includes('if (drag.mode === \'viewer-resize\')'), 'pointer move handles the resize separately');
-  // It must bail out of the dirty/history path exactly like a pan does.
-  check(/const wasViewerResize = drag\.mode === 'viewer-resize';/.test(src), 'pointer-up distinguishes a viewer resize');
-  check(/if \(wasViewerResize\) \{[\s\S]*?return;[\s\S]*?\}\s*if \(wasPan\)/.test(src), 'resize returns before dirty = true');
-  // No history entry is pushed for a viewer resize.
-  check(!/startViewerResize[\s\S]{0,400}?pushHistory\(/.test(src), 'resizing pushes no undo entry');
-  // The resize branch must not reference component geometry at all.
-  const branch = src.match(/if \(drag\.mode === 'viewer-resize'\) \{[\s\S]*?\n  \}/);
-  check(!!branch, 'resize branch found');
-  check(!/\bcomp\.(x|y|width|height|zIndex)\s*=/.test(branch ? branch[0] : ''), 'resize writes no component geometry');
-  check(!/history\.|pushHistory\(/.test(branch ? branch[0] : ''), 'resize touches no history');
+  check(src.includes("mode: 'panel-resize'"), 'panel resize drag mode exists');
+  check(src.includes("mode: 'viewer-height'"), 'viewer height drag mode exists');
+  check(src.includes("if (drag.mode === 'panel-resize')"), 'pointer move handles panel resize separately');
+  check(src.includes("if (drag.mode === 'viewer-height')"), 'pointer move handles height resize separately');
+  // Both must bail out of the dirty/history path exactly like a pan does.
+  check(/const wasWorkspaceResize = drag\.mode === 'panel-resize' \|\| drag\.mode === 'viewer-height';/.test(src),
+    'pointer-up distinguishes a workspace resize');
+  check(/if \(wasWorkspaceResize\) \{[\s\S]*?return;[\s\S]*?\}\s*if \(wasPan\)/.test(src),
+    'workspace resize returns before dirty = true');
+  // Neither start path may push history.
+  check(!/startPanelResize[\s\S]{0,700}?pushHistory\(/.test(src), 'panel resize pushes no undo entry');
+  check(!/startViewerHeightResize[\s\S]{0,700}?pushHistory\(/.test(src), 'height resize pushes no undo entry');
+  // Neither branch may touch component geometry or history.
+  for (const mode of ['panel-resize', 'viewer-height']) {
+    const branch = src.match(new RegExp(`if \\(drag\\.mode === '${mode}'\\) \\{[\\s\\S]*?\\n  \\}`));
+    check(!!branch, `${mode} branch found`);
+    check(!/\bcomp\.(x|y|width|height|zIndex)\s*=/.test(branch ? branch[0] : ''), `${mode} writes no component geometry`);
+    check(!/history\.|pushHistory\(/.test(branch ? branch[0] : ''), `${mode} touches no history`);
+  }
+});
+
+test('panel resizing is disabled in the single-column layout', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(resolve('web/js/creatorStudio.js'), 'utf8');
+  check(src.includes("matchMedia('(max-width: 960px)')"), 'single-column mode is detected at the breakpoint');
+  check(/function isSingleColumn\(\)/.test(src), 'single-column helper exists');
+  // Both resize entry points refuse to start when stacked.
+  check(/function startPanelResize[\s\S]{0,200}?if \(!layout \|\| isSingleColumn\(\)\) return;/.test(src),
+    'panel resize refuses to start when stacked');
+  check(/function startViewerHeightResize[\s\S]{0,200}?if \(!viewer \|\| isSingleColumn\(\)\) return;/.test(src),
+    'height resize refuses to start when stacked');
+  // And the handles are hidden rather than left dangling over the stack.
+  check(src.includes('el.hidden = true'), 'handles are hidden in single-column mode');
+  check(src.includes("stage.style.height = ''"), 'the stage height is released back to the stylesheet');
 });
 
 test('empty-canvas drag pans the viewer and component drag still moves components', async () => {
@@ -603,7 +627,8 @@ test('lower Layers panel is compact and the viewer keeps the space', async () =>
 test('the viewer fills the workspace and shows no scrollbars', async () => {
   const { readFileSync } = await import('node:fs');
   const css = readFileSync(resolve('web/css/creatorStudio.css'), 'utf8');
-  // Full available area: the viewer box fills the stage on both axes.
+  // Full available area: the viewer box fills the stage, so it always inherits
+  // whatever width the center column currently has.
   check(/#studio-viewer\s*\{[^}]*inset:\s*0/.test(css), 'viewer fills the stage by default');
   check(/#studio-stage\s*\{[^}]*position:\s*relative/.test(css), 'stage is the viewer positioning context');
   // No scrollbars, and none merely hidden behind a styling trick.
@@ -617,25 +642,47 @@ test('the viewer fills the workspace and shows no scrollbars', async () => {
   }
   // The inner canvas fills the viewer so the whole box is grabbable empty canvas.
   check(/#studio-canvas-inner\s*\{[^}]*min-height:\s*100%/.test(css), 'inner canvas fills the viewer height');
-  // Cursor contract for each grip: the first cursor declared in the rule that
-  // owns the edge selector is the one that applies to it.
-  const cursorFor = (edge) => {
-    const at = css.indexOf(`data-viewer-edge="${edge}"`);
-    if (at < 0) return null;
-    const forward = css.slice(at, at + 400);
-    const end = forward.indexOf('}');
-    return (forward.slice(0, end < 0 ? undefined : end).match(/cursor:\s*([a-z-]+)/) || [])[1] || null;
-  };
-  for (const [edge, cursor] of [['n', 'ns-resize'], ['s', 'ns-resize'], ['w', 'ew-resize'], ['e', 'ew-resize'],
-                                ['nw', 'nwse-resize'], ['se', 'nwse-resize'], ['ne', 'nesw-resize'], ['sw', 'nesw-resize']]) {
-    check(cursorFor(edge) === cursor, `${edge} grip uses ${cursor}, got ${cursorFor(edge)}`);
+
+  // The side columns are driven by custom properties, and the layout is the
+  // positioning context for the boundary handles.
+  check(/\.studio-layout\s*\{[^}]*position:\s*relative/.test(css), 'layout is the resizer positioning context');
+  check(/\.studio-layout\s*\{[^}]*grid-template-columns:\s*var\(--studio-col-left/.test(css),
+    'grid columns are driven by --studio-col-left/right');
+  check(css.includes('var(--studio-col-right'), 'the right column uses --studio-col-right');
+  // The viewer keeps no width of its own (min-width is fine; an explicit
+  // width would fight the center column).
+  const viewerRule = css.match(/#studio-viewer\s*\{[^}]*\}/);
+  check(!!viewerRule, 'viewer rule found');
+  check(!/(?<!min-)width:/.test(viewerRule ? viewerRule[0] : ''), 'no explicit width on the viewer');
+
+  // Cursor contract: column boundaries are ew-resize, the viewer bottom is ns-resize.
+  const colRule = css.match(/\.studio-col-resizer\s*\{[^}]*\}/);
+  check(!!colRule, 'column resizer rule found');
+  check(/cursor:\s*ew-resize/.test(colRule ? colRule[0] : ''), 'column boundary uses ew-resize');
+  const gripRule = css.match(/\.studio-viewer-height-grip\s*\{[^}]*\}/);
+  check(!!gripRule, 'viewer height grip rule found');
+  check(/cursor:\s*ns-resize/.test(gripRule ? gripRule[0] : ''), 'viewer bottom boundary uses ns-resize');
+  // A generous, invisible hit area — not a 1px target.
+  check(/width:\s*1?\dpx/.test(colRule ? colRule[0] : ''), 'column resizer has a grabbable width');
+  check(/height:\s*1?\dpx/.test(gripRule ? gripRule[0] : ''), 'height grip has a grabbable height');
+  const colRuleText = colRule ? colRule[0] : '';
+  const gripRuleText = gripRule ? gripRule[0] : '';
+  check(parseInt(colRuleText.match(/width:\s*(\d+)px/)?.[1] || '0', 10) >= 8, 'column hit area is at least 8px');
+  check(parseInt(gripRuleText.match(/height:\s*(\d+)px/)?.[1] || '0', 10) >= 8, 'height hit area is at least 8px');
+  // No visible resize affordance: both handles stay transparent.
+  check(/background:\s*transparent/.test(colRule ? colRule[0] : ''), 'column resizer is invisible');
+  check(/background:\s*transparent/.test(gripRule ? gripRule[0] : ''), 'height grip is invisible');
+  // Both handles must stack above panel content and the canvas.
+  check(/z-index:\s*4\d/.test(colRule ? colRule[0] : ''), 'column resizer stacks above the panels');
+  check(/z-index:\s*\d/.test(gripRule ? gripRule[0] : ''), 'height grip stacks above the canvas');
+
+  // The removed toolbar and four-side grips leave no CSS behind.
+  for (const gone of ['.studio-viewer-bar', '.studio-viewer-btn', '.studio-viewer-grip', 'data-viewer-edge']) {
+    check(!css.includes(gone), `${gone} CSS removed`);
   }
-  // No visible resize affordance: the grips stay unstyled boxes.
-  check(!/\.studio-viewer-grip\s*\{[^}]*background:\s*(?!none)/.test(css), 'grips have no visible fill');
-  check(!/\.studio-viewer-grip\s*\{[^}]*border:\s*(?!0|none)/.test(css), 'grips have no visible border');
-  // The removed toolbar leaves no CSS behind.
-  check(!css.includes('.studio-viewer-bar'), 'viewer bar CSS removed');
-  check(!css.includes('.studio-viewer-btn'), 'viewer button CSS removed');
+  // Single-column mode drops the custom properties and hides the handles.
+  check(/@media \(max-width: 960px\)[\s\S]*?grid-template-columns:\s*1fr/.test(css),
+    'single column does not use the side-column properties');
 });
 
 // ── Teardown ─────────────────────────────────────────────────────────────

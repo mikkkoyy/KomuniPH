@@ -269,8 +269,9 @@ const emptyCanvasPoint = () => page.evaluate(() => {
       // Must land on the canvas itself, and not on any component.
       if (!el || !el.closest('#studio-canvas-scroll')) continue;
       if (el.closest('[data-comp-id]')) continue;
-      // Also reject the resize grips, which are the viewer's own hit areas.
-      if (el.closest('[data-viewer-edge]')) continue;
+      // Also reject the viewer's own height grip, which is a hit area of the
+      // workspace rather than empty canvas.
+      if (el.closest('#studio-viewer-height-grip')) continue;
       return {
         x, y,
         tag: el.tagName.toLowerCase(),
@@ -297,23 +298,9 @@ const componentGeom = () => page.evaluate(() => {
   };
 });
 const undoDisabled = () => page.$eval('#studio-undo', el => !!el.disabled);
-// Grab points sit a few px inside the edge/corner band, so the pointer is
-// unambiguously on the grip rather than on the exact boundary pixel.
-const GRAB_INSET = 4;
-const CORNER_INSET = 7;
-const edgePoint = (b, edge) => {
-  const midX = b.x + b.width / 2;
-  const midY = b.y + b.height / 2;
-  switch (edge) {
-    case 'e': return { x: b.x + b.width - GRAB_INSET, y: midY };
-    case 'w': return { x: b.x + GRAB_INSET, y: midY };
-    case 'n': return { x: midX, y: b.y + GRAB_INSET };
-    case 's': return { x: midX, y: b.y + b.height - GRAB_INSET };
-    case 'se': return { x: b.x + b.width - CORNER_INSET, y: b.y + b.height - CORNER_INSET };
-    case 'nw': return { x: b.x + CORNER_INSET, y: b.y + CORNER_INSET };
-    default: return { x: midX, y: midY };
-  }
-};
+// Desktop viewport used by the suite; the responsive step temporarily narrows it.
+const DESKTOP_WIDTH = 1600;
+const DESKTOP_HEIGHT = 900;
 const dragMouse = async (from, to) => {
   await page.mouse.move(from.x, from.y);
   await page.mouse.down();
@@ -369,7 +356,7 @@ await step('profile viewer fills the workspace and has no scrollbars', async () 
   }
 });
 
-await step('the viewer control bar is gone with no replacement', async () => {
+await step('the viewer has no toolbar and no directional controls', async () => {
   const bar = await page.$('#studio-viewer-bar');
   check(!bar, 'no viewer toolbar in the DOM');
   const removed = await page.evaluate(() => ({
@@ -380,6 +367,8 @@ await step('the viewer control bar is gone with no replacement', async () => {
     pan: document.querySelectorAll('[data-viewer^="pan-"]').length,
     // Any button inside the viewer at all would be a control replacement.
     buttons: document.querySelectorAll('#studio-viewer button').length,
+    // CREATOR-07A: the four-side grips are gone entirely.
+    oldGrips: document.querySelectorAll('[data-viewer-edge], .studio-viewer-grip').length,
   }));
   check(removed.dataViewer === 0, 'no data-viewer controls remain');
   check(removed.readout === 0, 'no zoom percentage readout');
@@ -387,146 +376,277 @@ await step('the viewer control bar is gone with no replacement', async () => {
   check(removed.fit === 0, 'no Fit or 100% button');
   check(removed.pan === 0, 'no directional pan buttons');
   check(removed.buttons === 0, 'the viewer contains no buttons at all');
-  // The grips are the replacement affordance, and they are invisible.
-  const grips = await page.$$eval('#studio-viewer [data-viewer-edge]', els => els.map(el => ({
-    edge: el.dataset.viewerEdge,
-    cursor: getComputedStyle(el).cursor,
-    visible: getComputedStyle(el).backgroundImage !== 'none' || getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)',
-  })));
-  check(grips.length === 8, `eight resize grips present, got ${grips.length}`);
-  for (const g of grips) {
-    check(['ns-resize', 'ew-resize', 'nwse-resize', 'nesw-resize'].includes(g.cursor),
-      `${g.edge} grip has a resize cursor, got ${g.cursor}`);
-    check(!g.visible, `${g.edge} grip has no visible fill or border`);
+  check(removed.oldGrips === 0, 'the four-side viewer grips are gone');
+  // The viewer is not independently resizable horizontally any more: it has no
+  // inline width of its own. The column widths only appear on the layout
+  // element once a boundary has actually been dragged, which the next steps do.
+  const viewerInlineWidth = await page.evaluate(
+    () => document.querySelector('#studio-viewer').style.width
+  );
+  check(viewerInlineWidth === '', `viewer carries no inline width, got "${viewerInlineWidth}"`);
+});
+
+// Requirement: prove the handles actually receive pointer events rather than
+// being covered by the canvas, a panel, or the sticky toolbar.
+await step('workspace resize handles are the topmost element at their boundary', async () => {
+  const hit = await page.evaluate(() => {
+    const probe = (selector) => {
+      const el = document.querySelector(selector);
+      if (!el) return { selector, missing: true };
+      const r = el.getBoundingClientRect();
+      const x = r.left + r.width / 2;
+      const y = r.top + r.height / 2;
+      const top = document.elementFromPoint(x, y);
+      return {
+        selector,
+        x, y,
+        width: r.width,
+        height: r.height,
+        cursor: getComputedStyle(el).cursor,
+        background: getComputedStyle(el).backgroundColor,
+        topSelector: top ? `${top.tagName.toLowerCase()}${top.id ? '#' + top.id : ''}` : null,
+        isSelfOrChild: !!(top && (top === el || el.contains(top))),
+      };
+    };
+    return [
+      probe('#studio-col-resizer-left'),
+      probe('#studio-col-resizer-right'),
+      probe('#studio-viewer-height-grip'),
+    ];
+  });
+  for (const h of hit) {
+    check(!h.missing, `${h.selector} exists`);
+    check(h.isSelfOrChild,
+      `${h.selector} is the topmost element at its own centre (got ${h.topSelector})`);
+  }
+  check(hit[0].cursor === 'ew-resize', `left column boundary cursor is ew-resize, got ${hit[0].cursor}`);
+  check(hit[1].cursor === 'ew-resize', `right column boundary cursor is ew-resize, got ${hit[1].cursor}`);
+  check(hit[2].cursor === 'ns-resize', `viewer bottom boundary cursor is ns-resize, got ${hit[2].cursor}`);
+  // Generous, invisible hit areas rather than 1px targets.
+  check(hit[0].width >= 8, `left column hit area is at least 8px, got ${hit[0].width}`);
+  check(hit[1].width >= 8, `right column hit area is at least 8px, got ${hit[1].width}`);
+  check(hit[2].height >= 8, `viewer bottom hit area is at least 8px, got ${hit[2].height}`);
+  for (const h of hit) {
+    check(h.background === 'rgba(0, 0, 0, 0)', `${h.selector} is invisible, got ${h.background}`);
   }
 });
 
-await step('dragging the right edge changes the viewer width only', async () => {
+await step('dragging the left panel boundary changes the left panel width', async () => {
+  await selectFirstComponent();
+  const before = await page.evaluate(() => ({
+    left: document.querySelector('#studio-elements').getBoundingClientRect().width,
+    right: document.querySelector('#studio-properties-panel').getBoundingClientRect().width,
+    viewer: document.querySelector('#studio-viewer').getBoundingClientRect().width,
+  }));
+  const geomBefore = await componentGeom();
+  const undoBefore = await undoDisabled();
+
+  // Grab the centre of the left boundary handle and drag it 70px to the right.
+  const start = await page.$eval('#studio-col-resizer-left', el => {
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  await dragMouse(start, { x: start.x + 70, y: start.y });
+
+  const after = await page.evaluate(() => ({
+    left: document.querySelector('#studio-elements').getBoundingClientRect().width,
+    right: document.querySelector('#studio-properties-panel').getBoundingClientRect().width,
+    viewer: document.querySelector('#studio-viewer').getBoundingClientRect().width,
+  }));
+  check(Math.abs(after.left - (before.left + 70)) <= 3,
+    `left panel grew by the pointer delta (${before.left} -> ${after.left})`);
+  check(Math.abs(after.right - before.right) <= 2,
+    `right panel unchanged by a left-boundary drag (${before.right} -> ${after.right})`);
+  // The viewer keeps full width of the center column: it lost exactly what the
+  // left panel gained, and has no width of its own.
+  check(Math.abs(after.viewer - (before.viewer - 70)) <= 3,
+    `viewer width follows the center column (${before.viewer} -> ${after.viewer})`);
+  // Once dragged, the column widths are pushed onto the layout element as
+  // custom properties rather than onto the panels or the viewer.
+  const props = await page.evaluate(() => {
+    const style = document.querySelector('#studio-layout').style;
+    return {
+      left: style.getPropertyValue('--studio-col-left'),
+      right: style.getPropertyValue('--studio-col-right'),
+    };
+  });
+  check(/^\d+(\.\d+)?px$/.test(props.left), `left column width is a layout custom property, got "${props.left}"`);
+  check(/^\d+(\.\d+)?px$/.test(props.right), `right column width is a layout custom property, got "${props.right}"`);
+  check(sameGeom(geomBefore, await componentGeom()), 'panel resize changed no component geometry');
+  check((await undoDisabled()) === undoBefore, 'panel resize created no undo entry');
+});
+
+await step('dragging the Properties boundary changes the Properties width', async () => {
+  const before = await page.evaluate(() => ({
+    left: document.querySelector('#studio-elements').getBoundingClientRect().width,
+    right: document.querySelector('#studio-properties-panel').getBoundingClientRect().width,
+    viewer: document.querySelector('#studio-viewer').getBoundingClientRect().width,
+  }));
+  const geomBefore = await componentGeom();
+
+  // Drag the right boundary leftwards: the Properties panel widens.
+  const start = await page.$eval('#studio-col-resizer-right', el => {
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  await dragMouse(start, { x: start.x - 60, y: start.y });
+
+  const after = await page.evaluate(() => ({
+    left: document.querySelector('#studio-elements').getBoundingClientRect().width,
+    right: document.querySelector('#studio-properties-panel').getBoundingClientRect().width,
+    viewer: document.querySelector('#studio-viewer').getBoundingClientRect().width,
+  }));
+  check(Math.abs(after.right - (before.right + 60)) <= 3,
+    `properties panel grew by the pointer delta (${before.right} -> ${after.right})`);
+  check(Math.abs(after.left - before.left) <= 2,
+    `left panel unchanged by a right-boundary drag (${before.left} -> ${after.left})`);
+  check(Math.abs(after.viewer - (before.viewer - 60)) <= 3,
+    `viewer width follows the center column (${before.viewer} -> ${after.viewer})`);
+  check(sameGeom(geomBefore, await componentGeom()), 'panel resize changed no component geometry');
+});
+
+await step('the viewer keeps full center-column width, not a width of its own', async () => {
+  const fit = await page.evaluate(() => {
+    const viewer = document.querySelector('#studio-viewer').getBoundingClientRect();
+    const scroll = document.querySelector('#studio-canvas-scroll');
+    const stage = document.querySelector('#studio-stage').getBoundingClientRect();
+    return {
+      viewerWidth: viewer.width,
+      viewerLeft: viewer.left,
+      stageWidth: stage.width,
+      stageLeft: stage.left,
+      scrollWidth: scroll.clientWidth,
+      inlineWidth: viewer.width === stage.width ? 'fills' : 'differs',
+    };
+  });
+  check(Math.abs(fit.viewerWidth - fit.stageWidth) <= 2,
+    `viewer spans the whole center column (${fit.viewerWidth} vs ${fit.stageWidth})`);
+  check(Math.abs(fit.viewerLeft - fit.stageLeft) <= 2, 'viewer starts at the column edge');
+  // There is no inline width on the viewer element at all.
+  const inline = await page.$eval('#studio-viewer', el => el.style.width || '');
+  check(inline === '', `viewer has no inline width, got "${inline}"`);
+});
+
+await step('dragging the viewer bottom boundary up makes the viewer shorter', async () => {
   await selectFirstComponent();
   const before = await viewerBox();
   const geomBefore = await componentGeom();
   const undoBefore = await undoDisabled();
 
-  const grab = edgePoint(before, 'e');
-  await dragMouse(grab, { x: grab.x - 70, y: grab.y });
+  // Grab just inside the viewer's bottom edge (the grip is 12px tall).
+  const start = { x: before.x + before.width / 2, y: before.y + before.height - 5 };
+  await dragMouse(start, { x: start.x, y: start.y - 90 });
   const after = await viewerBox();
 
-  check(Math.abs(after.width - (before.width - 70)) <= 2,
-    `right-edge drag shrinks the width by the pointer delta (${before.width} -> ${after.width})`);
-  check(Math.abs(after.height - before.height) <= 2,
-    `height unchanged by a horizontal drag (${before.height} -> ${after.height})`);
-  check(sameGeom(geomBefore, await componentGeom()), 'resizing changed no component geometry');
-  check((await undoDisabled()) === undoBefore, 'resizing created no undo entry');
-});
-
-await step('dragging the left edge changes the viewer width only', async () => {
-  const before = await viewerBox();
-  const geomBefore = await componentGeom();
-  const grab = edgePoint(before, 'w');
-  // Drag the west edge rightwards: the width shrinks and the left edge follows.
-  await dragMouse(grab, { x: grab.x + 60, y: grab.y });
-  const after = await viewerBox();
-
-  check(Math.abs(after.width - (before.width - 60)) <= 2,
-    `left-edge drag shrinks the width (${before.width} -> ${after.width})`);
-  check(Math.abs(after.height - before.height) <= 2,
-    `height unchanged by a horizontal drag (${before.height} -> ${after.height})`);
-  check(after.x + 60 >= before.x - 2, 'the west edge followed the pointer inward');
-  check(sameGeom(geomBefore, await componentGeom()), 'resizing changed no component geometry');
-});
-
-await step('dragging the bottom edge changes the viewer height only', async () => {
-  const before = await viewerBox();
-  const geomBefore = await componentGeom();
-  const grab = edgePoint(before, 's');
-  await dragMouse(grab, { x: grab.x, y: grab.y - 50 });
-  const after = await viewerBox();
-
-  check(Math.abs(after.height - (before.height - 50)) <= 2,
-    `bottom-edge drag shrinks the height (${before.height} -> ${after.height})`);
+  check(after.height < before.height - 40,
+    `viewer became shorter (${before.height} -> ${after.height})`);
+  check(Math.abs((before.height - after.height) - 90) <= 6,
+    `height changed by about the pointer delta (${before.height} -> ${after.height})`);
+  // Height-only: the width is untouched.
   check(Math.abs(after.width - before.width) <= 2,
     `width unchanged by a vertical drag (${before.width} -> ${after.width})`);
-  check(sameGeom(geomBefore, await componentGeom()), 'resizing changed no component geometry');
+  check(Math.abs(after.y - before.y) <= 2, 'the viewer top edge stays put');
+  check(sameGeom(geomBefore, await componentGeom()), 'height resize changed no component geometry');
+  check((await undoDisabled()) === undoBefore, 'height resize created no undo entry');
 });
 
-await step('dragging the top edge changes the viewer height only', async () => {
-  const before = await viewerBox();
-  const geomBefore = await componentGeom();
-  const grab = edgePoint(before, 'n');
-  await dragMouse(grab, { x: grab.x, y: grab.y + 40 });
-  const after = await viewerBox();
-
-  check(Math.abs(after.height - (before.height - 40)) <= 2,
-    `top-edge drag shrinks the height (${before.height} -> ${after.height})`);
-  check(Math.abs(after.width - before.width) <= 2,
-    `width unchanged by a vertical drag (${before.width} -> ${after.width})`);
-  check(after.y + 40 >= before.y - 2, 'the north edge followed the pointer inward');
-  check(sameGeom(geomBefore, await componentGeom()), 'resizing changed no component geometry');
-});
-
-await step('dragging a corner changes width and height together', async () => {
-  const before = await viewerBox();
-  const geomBefore = await componentGeom();
-  const undoBefore = await undoDisabled();
-  const grab = edgePoint(before, 'se');
-  await dragMouse(grab, { x: grab.x - 45, y: grab.y - 35 });
-  const after = await viewerBox();
-
-  check(Math.abs(after.width - (before.width - 45)) <= 2,
-    `corner drag changes the width (${before.width} -> ${after.width})`);
-  check(Math.abs(after.height - (before.height - 35)) <= 2,
-    `corner drag changes the height (${before.height} -> ${after.height})`);
-  check(sameGeom(geomBefore, await componentGeom()), 'corner resize changed no component geometry');
-  check((await undoDisabled()) === undoBefore, 'corner resize created no undo entry');
-});
-
-await step('viewer resize never dirties the design and stays inside the stage', async () => {
-  const before = await viewerBox();
-  const geomBefore = await componentGeom();
-  const undoBefore = await undoDisabled();
-
-  // Drag the south-east corner far past the stage: it must stop at the boundary.
-  await dragMouse(edgePoint(before, 'se'), { x: before.x + 4000, y: before.y + 4000 });
-  const grown = await viewerBox();
-  const stage = await page.$eval('#studio-stage', el => {
-    const r = el.getBoundingClientRect();
-    return { x: r.x, y: r.y, width: r.width, height: r.height };
+await step('dragging the viewer bottom boundary down makes the viewer taller', async () => {
+  const cap = await page.evaluate(() => window.innerHeight);
+  // Make room first: the height is deliberately capped so a tall viewer cannot
+  // push the studio into a vertical scrollbar, so shrink well clear of the cap
+  // before testing that it grows again.
+  const mid = await page.evaluate(() => {
+    const r = document.querySelector('#studio-viewer').getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height - 5 };
   });
-  check(grown.width <= stage.width + 2 && grown.height <= stage.height + 2,
-    `viewer cannot outgrow the stage (${grown.width}x${grown.height} vs ${stage.width}x${stage.height})`);
+  await dragMouse(mid, { x: mid.x, y: mid.y - 320 });
+  const small = await viewerBox();
 
-  // And it cannot shrink below the sensible minimum.
-  await dragMouse(edgePoint(grown, 'se'), { x: grown.x - 4000, y: grown.y - 4000 });
-  const shrunk = await viewerBox();
-  check(shrunk.width >= 320 && shrunk.height >= 240,
-    `viewer respects the minimum size (${shrunk.width}x${shrunk.height})`);
-  check(shrunk.width >= 319 && shrunk.height >= 239, 'minimum is not undercut');
+  const start = { x: small.x + small.width / 2, y: small.y + small.height - 5 };
+  await dragMouse(start, { x: start.x, y: start.y + 120 });
+  const after = await viewerBox();
 
-  // Restore the viewer to the full workspace so the interaction tests that
-  // follow run against a normal-sized canvas.
-  await dragMouse(edgePoint(shrunk, 'se'), { x: shrunk.x + 4000, y: shrunk.y + 4000 });
-  const restored = await viewerBox();
-  check(restored.width > shrunk.width && restored.height > shrunk.height,
-    `viewer grows back after the minimum test (${shrunk.width} -> ${restored.width})`);
-  // Still inside the stage, and still without scrollbars.
-  check(restored.width <= stage.width + 2 && restored.height <= stage.height + 2,
-    'restored viewer is still inside the stage');
+  check(after.height > small.height + 60,
+    `viewer became taller (${small.height} -> ${after.height}, cap ${cap})`);
+  check(Math.abs((after.height - small.height) - 120) <= 6,
+    `height changed by about the pointer delta (${small.height} -> ${after.height})`);
+  check(Math.abs(after.width - small.width) <= 2, 'width unchanged by a vertical drag');
+  check(Math.abs(after.y - small.y) <= 2, 'the viewer top edge stays put');
+});
+
+await step('workspace resizing never dirties the design or adds undo history', async () => {
+  const geomBefore = await componentGeom();
+  const undoBefore = await undoDisabled();
+
+  // Drive all three handles hard in both directions.
+  const left = await page.$eval('#studio-col-resizer-left', el => {
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  await dragMouse(left, { x: left.x - 4000, y: left.y });
+  const right = await page.$eval('#studio-col-resizer-right', el => {
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  await dragMouse(right, { x: right.x + 4000, y: right.y });
+  const bottom = await viewerBox();
+  await dragMouse({ x: bottom.x + bottom.width / 2, y: bottom.y + bottom.height - 5 },
+    { x: bottom.x + bottom.width / 2, y: bottom.y + 5000 });
+
+  // Clamps held even under absurd pointer travel.
+  const state = await page.evaluate(() => ({
+    left: document.querySelector('#studio-elements').getBoundingClientRect().width,
+    right: document.querySelector('#studio-properties-panel').getBoundingClientRect().width,
+    viewerW: document.querySelector('#studio-viewer').getBoundingClientRect().width,
+    viewerH: document.querySelector('#studio-viewer').getBoundingClientRect().height,
+    layout: document.querySelector('#studio-layout').getBoundingClientRect().width,
+    innerH: window.innerHeight,
+  }));
+  check(state.left >= 219, `left panel respects its minimum (${state.left})`);
+  check(state.right >= 219, `properties panel respects its minimum (${state.right})`);
+  check(state.viewerW >= 359, `center column keeps its minimum (${state.viewerW})`);
+  check(state.viewerW <= state.layout + 2, 'the three columns still fit the layout');
+  check(state.viewerH >= 239, `viewer respects its minimum height (${state.viewerH})`);
+  // A tall viewer must not push the studio into a vertical scrollbar.
+  check(state.viewerH <= state.innerH - 150,
+    `viewer height leaves room for the rest of the studio (${state.viewerH} vs ${state.innerH})`);
 
   check(sameGeom(geomBefore, await componentGeom()), 'no component geometry changed across resizes');
   check((await undoDisabled()) === undoBefore, 'no undo entry created across resizes');
 
-  // The design was not marked dirty: Save stays available but no auto-save ran,
-  // and the studio still reports the design as unchanged.
   const status = await page.$eval('#studio-status', el => el.textContent || '');
   check(/design is unchanged/i.test(status), `status confirms the design is untouched, got "${status}"`);
 });
 
-await step('resizing the viewer still leaves component editing working', async () => {
+await step('workspace resizing introduces no viewer scrollbars', async () => {
+  const state = await page.evaluate(() => {
+    const ids = ['#studio-viewer', '#studio-canvas-scroll', '#studio-canvas-inner'];
+    return ids.map(id => {
+      const el = document.querySelector(id);
+      const cs = getComputedStyle(el);
+      return {
+        id,
+        overflow: cs.overflow,
+        gutterX: el.offsetWidth - el.clientWidth
+          - parseFloat(cs.borderLeftWidth || 0) - parseFloat(cs.borderRightWidth || 0),
+        gutterY: el.offsetHeight - el.clientHeight
+          - parseFloat(cs.borderTopWidth || 0) - parseFloat(cs.borderBottomWidth || 0),
+      };
+    });
+  });
+  for (const s of state) {
+    check(s.overflow === 'hidden', `${s.id} clips instead of scrolling (${s.overflow})`);
+    check(s.gutterX <= 1, `${s.id} renders no horizontal scrollbar (gutter=${s.gutterX})`);
+    check(s.gutterY <= 1, `${s.id} renders no vertical scrollbar (gutter=${s.gutterY})`);
+  }
+});
+
+await step('component editing still works after resizing the workspace', async () => {
   await selectFirstComponent();
   const before = await componentXY();
   check(before, 'component selected after resizing');
 
-  // Arrow-key movement must still act on the component, not the viewer.
+  // Arrow-key movement must still act on the component.
   const viewerBefore = await viewerBox();
   await page.keyboard.press('ArrowRight');
   await new Promise(r => setTimeout(r, 220));
@@ -537,7 +657,7 @@ await step('resizing the viewer still leaves component editing working', async (
   check(Math.abs(viewerAfter.width - viewerBefore.width) <= 2,
     'arrow-key component move does not resize the viewer');
 
-  // Component dragging still works, on the smaller canvas.
+  // Component dragging still works.
   const geomBefore = await componentGeom();
   const canvasBox = await page.$eval('#studio-canvas-document', el => {
     const r = el.getBoundingClientRect();
@@ -549,6 +669,107 @@ await step('resizing the viewer still leaves component editing working', async (
   check(!!geomAfter, 'component still present after drag');
   const moved = geomBefore && geomAfter && (geomBefore.x !== geomAfter.x || geomBefore.y !== geomAfter.y);
   check(moved, `component drag still moves the component (${geomBefore?.x},${geomBefore?.y} -> ${geomAfter?.x},${geomAfter?.y})`);
+
+  // Component resizing via its own handle still works. Pick an UNLOCKED,
+  // visible component: a locked one swallows the pointerdown by design.
+  const target = await page.evaluate(() => {
+    const el = document.querySelector(
+      '#studio-canvas-inner [data-comp-id]:not(.studio-comp-locked):not(.studio-comp-hidden)'
+    );
+    if (!el) return null;
+    el.click();
+    return { id: el.dataset.compId };
+  });
+  check(!!target, 'found an unlocked component for the resize test');
+  await new Promise(r => setTimeout(r, 200));
+
+  const sizeBefore = await page.evaluate((id) => {
+    const el = document.querySelector(`#studio-canvas-inner [data-comp-id="${id}"]`);
+    return el ? { w: parseFloat(el.style.width), h: parseFloat(el.style.height) } : null;
+  }, target.id);
+  check(!!sizeBefore, 'component size readable for the resize handle test');
+
+  // The component may sit below the visible canvas after the workspace was
+  // resized, so scroll the handle into view first: a pointer press that lands
+  // outside the scroll viewport would hit the studio layout instead.
+  await page.evaluate((id) => {
+    const el = document.querySelector(`#studio-canvas-inner [data-comp-id="${id}"]`);
+    const h = el && el.querySelector('[data-resize="se"]');
+    if (h) h.scrollIntoView({ block: 'center', inline: 'center' });
+  }, target.id);
+  await new Promise(r => setTimeout(r, 200));
+
+  const handle = await page.evaluate((id) => {
+    const el = document.querySelector(`#studio-canvas-inner [data-comp-id="${id}"]`);
+    if (!el) return null;
+    const h = el.querySelector('[data-resize="se"]');
+    if (!h) return null;
+    const r = h.getBoundingClientRect();
+    const x = r.left + r.width / 2;
+    const y = r.top + r.height / 2;
+    const top = document.elementFromPoint(x, y);
+    return {
+      x, y,
+      topSelector: top ? `${top.tagName.toLowerCase()}${top.id ? '#' + top.id : ''}` : null,
+      isHandle: !!(top && (top === h || h.contains(top))),
+    };
+  }, target.id);
+
+  check(!!handle, 'component exposes a south-east resize handle');
+  check(handle && handle.isHandle,
+    `the south-east handle is the topmost element at its own centre (got ${handle?.topSelector})`);
+  if (handle && sizeBefore) {
+    await dragMouse(handle, { x: handle.x + 30, y: handle.y + 20 });
+    const sizeAfter = await page.evaluate((id) => {
+      const el = document.querySelector(`#studio-canvas-inner [data-comp-id="${id}"]`);
+      return el ? { w: parseFloat(el.style.width), h: parseFloat(el.style.height) } : null;
+    }, target.id);
+    check(sizeAfter && (sizeAfter.w !== sizeBefore.w || sizeAfter.h !== sizeBefore.h),
+      `component resize handle still resizes the component (${sizeBefore.w}x${sizeBefore.h} -> ${sizeAfter?.w}x${sizeAfter?.h})`);
+  }
+});
+
+await step('single-column mode hides the handles and drops the side columns', async () => {
+  const originalWidth = await page.evaluate(() => window.innerWidth);
+  await page.setViewport({ width: 800, height: DESKTOP_HEIGHT });
+  await new Promise(r => setTimeout(r, 400));
+  // The studio re-clamps on window resize, which is what re-hides the handles.
+  await page.evaluate(() => window.dispatchEvent(new Event('resize')));
+  await new Promise(r => setTimeout(r, 400));
+
+  const stacked = await page.evaluate(() => {
+    const left = document.querySelector('#studio-col-resizer-left');
+    const right = document.querySelector('#studio-col-resizer-right');
+    const grip = document.querySelector('#studio-viewer-height-grip');
+    const stage = document.querySelector('#studio-stage');
+    return {
+      leftHidden: !!(left && (left.hidden || getComputedStyle(left).display === 'none')),
+      rightHidden: !!(right && (right.hidden || getComputedStyle(right).display === 'none')),
+      gripHidden: !!(grip && (grip.hidden || getComputedStyle(grip).display === 'none')),
+      stageInlineHeight: stage ? stage.style.height : null,
+      columns: getComputedStyle(document.querySelector('#studio-layout')).gridTemplateColumns.split(' ').length,
+    };
+  });
+  check(stacked.columns === 1, `layout is a single column, got ${stacked.columns}`);
+  check(stacked.leftHidden, 'left column resizer is hidden when stacked');
+  check(stacked.rightHidden, 'right column resizer is hidden when stacked');
+  check(stacked.gripHidden, 'viewer height grip is hidden when stacked');
+  check(stacked.stageInlineHeight === '', `pinned stage height is released, got "${stacked.stageInlineHeight}"`);
+
+  // Back to desktop for the screenshot step.
+  await page.setViewport({ width: DESKTOP_WIDTH, height: DESKTOP_HEIGHT });
+  await new Promise(r => setTimeout(r, 300));
+  await page.evaluate(() => window.dispatchEvent(new Event('resize')));
+  await new Promise(r => setTimeout(r, 300));
+  const restored = await page.evaluate(() => {
+    const left = document.querySelector('#studio-col-resizer-left');
+    return {
+      columns: getComputedStyle(document.querySelector('#studio-layout')).gridTemplateColumns.split(' ').length,
+      leftShown: !!(left && !left.hidden && getComputedStyle(left).display !== 'none'),
+    };
+  });
+  check(restored.columns === 3, `desktop layout is three columns again, got ${restored.columns}`);
+  check(restored.leftShown, 'column resizers come back on desktop');
 });
 
 await step('dragging empty canvas pans the viewer without moving the design', async () => {

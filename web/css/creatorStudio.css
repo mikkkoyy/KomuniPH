@@ -141,13 +141,44 @@
 }
 
 /* ── Workspace layout ──────────────────────────────────────────────────────── */
+/* CREATOR-07A: the two side columns are the adjustable part of the workspace.
+   They are driven by custom properties so a boundary drag can change one panel
+   while the center column absorbs the difference — the viewer itself never
+   needs a horizontal resize of its own. */
 .studio-layout {
+  position: relative;
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr) 370px;
+  grid-template-columns: var(--studio-col-left, 300px) minmax(0, 1fr) var(--studio-col-right, 370px);
   gap: 1rem;
   align-items: stretch;
 }
 .studio-layout > * { gap: 0.75rem; }
+
+/* Drag handles on the two column boundaries. Absolutely positioned and outside
+   the panels, so panel scrolling can never move or clip them. They are
+   invisible; only the cursor reveals them. */
+.studio-col-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  margin-left: -5px;
+  z-index: 45;
+  cursor: ew-resize;
+  touch-action: none;
+  background: transparent;
+}
+.studio-col-resizer[hidden] { display: none; }
+.studio-col-resizer:hover { background: rgba(94, 234, 212, 0.18); }
+#studio-col-resizer-left { left: 300px; }
+#studio-col-resizer-right { right: 370px; }
+/* A drag in progress keeps the resize cursor over the whole workspace. */
+#creator-studio.studio-workspace-resizing,
+#creator-studio.studio-workspace-resizing * {
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: inherit;
+}
 .studio-panel {
   background: var(--studio-cp-panel);
   border: 1px solid var(--studio-line);
@@ -277,86 +308,30 @@
   border-radius: var(--studio-radius);
   padding: 1.25rem;
 }
-/* ── Profile Viewer edge resize (CREATOR-07) ─────────────────────────────────
-   The toolbar is gone. The viewer box is the control: eight invisible grips sit
-   on its edges and corners, each with the matching resize cursor. The grips sit
-   just *inside* the box so they can never overflow the stage. */
-.studio-viewer-grip {
+/* ── Profile Viewer height resize (CREATOR-07A) ───────────────────────────────
+   The viewer has no width of its own: it always fills the center column, which
+   the two column boundaries control. Its only resize control is this bottom
+   boundary. There is no toolbar of any kind. */
+.studio-viewer-height-grip {
   position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 12px;
   z-index: 60;
-  touch-action: none;
-}
-.studio-viewer-grip[data-viewer-edge="n"],
-.studio-viewer-grip[data-viewer-edge="s"] {
-  left: 0;
-  width: 100%;
-  height: 8px;
   cursor: ns-resize;
+  touch-action: none;
+  background: transparent;
 }
-.studio-viewer-grip[data-viewer-edge="w"],
-.studio-viewer-grip[data-viewer-edge="e"] {
-  top: 0;
-  height: 100%;
-  width: 8px;
-  cursor: ew-resize;
-}
-.studio-viewer-grip[data-viewer-edge="n"] { top: 0; }
-.studio-viewer-grip[data-viewer-edge="s"] { bottom: 0; }
-.studio-viewer-grip[data-viewer-edge="w"] { left: 0; }
-.studio-viewer-grip[data-viewer-edge="e"] { right: 0; }
-
-/* Corners sit above the edge grips so a corner drag always wins. */
-.studio-viewer-grip-corner {
-  z-index: 61;
-  width: 14px;
-  height: 14px;
-}
-.studio-viewer-grip[data-viewer-edge="nw"] {
-  top: 0;
-  left: 0;
-  cursor: nwse-resize;
-}
-.studio-viewer-grip[data-viewer-edge="se"] {
-  bottom: 0;
-  right: 0;
-  cursor: nwse-resize;
-}
-.studio-viewer-grip[data-viewer-edge="ne"] {
-  top: 0;
-  right: 0;
-  cursor: nesw-resize;
-}
-.studio-viewer-grip[data-viewer-edge="sw"] {
-  bottom: 0;
-  left: 0;
-  cursor: nesw-resize;
-}
-
-/* While an edge drag is live, keep the cursor and stop text selection, without
-   changing any geometry. */
-#creator-studio.studio-viewer-resizing,
-#creator-studio.studio-viewer-resizing * {
-  user-select: none;
-  -webkit-user-select: none;
-}
-#creator-studio.studio-viewer-resizing #studio-stage { cursor: inherit; }
-#studio-stage[data-viewer-active="n"],
-#studio-stage[data-viewer-active="s"] { cursor: ns-resize; }
-#studio-stage[data-viewer-active="w"],
-#studio-stage[data-viewer-active="e"] { cursor: ew-resize; }
-#studio-stage[data-viewer-active="nw"],
-#studio-stage[data-viewer-active="se"] { cursor: nwse-resize; }
-#studio-stage[data-viewer-active="ne"],
-#studio-stage[data-viewer-active="sw"] { cursor: nesw-resize; }
+.studio-viewer-height-grip[hidden] { display: none; }
+.studio-viewer-height-grip:hover { background: rgba(94, 234, 212, 0.18); }
 
 @media (max-width: 760px) {
-  /* Touch-first: a slightly wider grab area, still invisible. */
-  .studio-viewer-grip[data-viewer-edge="n"],
-  .studio-viewer-grip[data-viewer-edge="s"] { height: 12px; }
-  .studio-viewer-grip[data-viewer-edge="w"],
-  .studio-viewer-grip[data-viewer-edge="e"] { width: 12px; }
-  .studio-viewer-grip-corner { width: 18px; height: 18px; }
+  /* Touch-first: a slightly deeper grab area, still invisible. */
+  .studio-viewer-height-grip { height: 16px; }
+  .studio-col-resizer { width: 16px; margin-left: -8px; }
 }
+
 /* Fills the viewer so the whole box is empty-canvas: clickable, pannable, and
    never a source of overflow. */
 #studio-canvas-inner {
@@ -631,18 +606,23 @@
 .studio-color-clear:hover { color: var(--studio-danger); border-color: var(--studio-danger); }
 
 /* ── Responsive ────────────────────────────────────────────────────────────── */
+/* The breakpoints only change the DEFAULT column widths. Once the user has
+   dragged a boundary, --studio-col-* wins at every breakpoint, so their chosen
+   layout is respected until they reload. */
 @media (min-width: 1500px) {
   .studio-layout {
-    grid-template-columns: 320px minmax(0, 1fr) 400px;
+    grid-template-columns: var(--studio-col-left, 320px) minmax(0, 1fr) var(--studio-col-right, 400px);
   }
 }
 @media (max-width: 1180px) {
   .studio-layout {
-    grid-template-columns: 260px minmax(0, 1fr) 320px;
+    grid-template-columns: var(--studio-col-left, 260px) minmax(0, 1fr) var(--studio-col-right, 320px);
   }
 }
 @media (max-width: 960px) {
   .studio-layout {
+    /* Single column: there are no side panels to resize, so the custom
+       properties are dropped here and the handles are hidden by the script. */
     grid-template-columns: 1fr;
   }
   .studio-panel { max-height: none; overflow: visible; }

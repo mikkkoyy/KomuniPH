@@ -26,9 +26,11 @@ import {
   clampPan,
   viewerTransform,
   designPoint,
-  viewerRectFromDrag,
-  clampViewerRect,
-  MIN_VIEWER_WIDTH,
+  columnWidthsFromDrag,
+  clampPanelWidth,
+  clampViewerHeight,
+  MIN_PANEL_WIDTH,
+  MIN_CENTER_WIDTH,
   MIN_VIEWER_HEIGHT,
 } from './studioViewer.js';
 
@@ -79,11 +81,13 @@ let selectedId = null;
 // the editor looks at the design and are never written to the design itself.
 let zoom = 1;
 let viewerPan = { x: 0, y: 0 };
-// CREATOR-07: `viewerSize` is likewise editor workspace state only. `null` means
-// "fill the available stage"; once the user drags an edge we pin the viewer to an
-// explicit rectangle {x, y, width, height} inside the stage. Either way it never
-// reaches the design.
-let viewerSize = null;
+// CREATOR-07A: workspace layout is editor state only, never design data.
+// `panelWidths` holds the two side-column widths (null = the responsive CSS
+// defaults) and `viewerHeight` the viewer's vertical size (null = fill the
+// stage). The viewer has no width of its own: it always fills the center column,
+// so the panels own the horizontal space.
+let panelWidths = null;
+let viewerHeight = null;
 let dirty = false;
 let busy = false;
 let previewMode = false;
@@ -209,7 +213,7 @@ export function renderCreatorStudioPage() {
         <button id="studio-publish" class="btn btn-cta" type="button">Publish</button>
         <button id="studio-save-asset" class="btn btn-secondary" type="button" title="Create a Coin Shop asset from this design">Save as Asset</button>
       </div>
-      <div class="studio-layout">
+      <div class="studio-layout" id="studio-layout">
         <aside id="studio-elements" class="studio-panel" aria-label="Elements">
           <h2>Profile Sections</h2>
           <p class="studio-panel-note">Each element maps to a real part of your profile page.</p>
@@ -223,20 +227,18 @@ export function renderCreatorStudioPage() {
             <div id="studio-canvas-scroll">
               <div id="studio-canvas-inner"></div>
             </div>
-            <div class="studio-viewer-grip" data-viewer-edge="n" aria-hidden="true"></div>
-            <div class="studio-viewer-grip" data-viewer-edge="s" aria-hidden="true"></div>
-            <div class="studio-viewer-grip" data-viewer-edge="w" aria-hidden="true"></div>
-            <div class="studio-viewer-grip" data-viewer-edge="e" aria-hidden="true"></div>
-            <div class="studio-viewer-grip studio-viewer-grip-corner" data-viewer-edge="nw" aria-hidden="true"></div>
-            <div class="studio-viewer-grip studio-viewer-grip-corner" data-viewer-edge="ne" aria-hidden="true"></div>
-            <div class="studio-viewer-grip studio-viewer-grip-corner" data-viewer-edge="sw" aria-hidden="true"></div>
-            <div class="studio-viewer-grip studio-viewer-grip-corner" data-viewer-edge="se" aria-hidden="true"></div>
+            <div class="studio-viewer-height-grip" id="studio-viewer-height-grip"
+                 data-resize-height role="separator" aria-orientation="horizontal" aria-label="Resize Profile Viewer height"></div>
           </div>
         </div>
         <aside id="studio-properties-panel" class="studio-panel" aria-label="Properties">
           <h2>Properties</h2>
           <div id="studio-properties"></div>
         </aside>
+        <div class="studio-col-resizer" id="studio-col-resizer-left"
+             data-resize-col="left" role="separator" aria-orientation="vertical" aria-label="Resize Elements panel"></div>
+        <div class="studio-col-resizer" id="studio-col-resizer-right"
+             data-resize-col="right" role="separator" aria-orientation="vertical" aria-label="Resize Properties panel"></div>
       </div>
       <section id="studio-layers" class="studio-panel" aria-label="Layers">
         <h2>Layers <span class="studio-panel-note">bottom to top</span></h2>
@@ -309,12 +311,12 @@ function panViewer(direction) {
   renderCanvas();
 }
 
-// ── Direct edge resize (CREATOR-07) ─────────────────────────────────────────
+// ── Workspace resize (CREATOR-07A) ───────────────────────────────────────────
 //
-// The viewer box itself is the resize control. `viewerSize` is editor state:
-// it is applied to the element's inline width/height and is never read into or
-// written to the design, never marks the design dirty, and never pushes an undo
-// entry. `null` means "fill the stage", which is the initial and responsive state.
+// Panel boundaries own the horizontal space; the viewer's bottom boundary owns
+// its height. All three values are editor state applied to CSS custom
+// properties / inline height only: they are never written to the design, never
+// mark the design dirty, and never push an undo entry.
 
 function viewerElement() {
   return root?.querySelector('#studio-viewer') || null;
@@ -324,84 +326,123 @@ function stageElement() {
   return root?.querySelector('#studio-stage') || null;
 }
 
-/** Space the viewer may occupy inside the stage, in screen px. */
-function availableViewerSpace() {
-  const stage = stageElement();
-  if (!stage) return { width: Infinity, height: Infinity };
-  return { width: stage.clientWidth, height: stage.clientHeight };
-}
-
-/** Push the current viewerSize onto the element. No-op while it is null. */
-function applyViewerSize() {
-  const viewer = viewerElement();
-  if (!viewer) return;
-  if (!viewerSize) {
-    viewer.style.left = '';
-    viewer.style.top = '';
-    viewer.style.width = '';
-    viewer.style.height = '';
-    return;
-  }
-  const bounds = availableViewerSpace();
-  const rect = clampViewerRect(viewerSize, {
-    minWidth: MIN_VIEWER_WIDTH,
-    minHeight: MIN_VIEWER_HEIGHT,
-    boundsWidth: bounds.width,
-    boundsHeight: bounds.height,
-  });
-  viewer.style.left = `${rect.x}px`;
-  viewer.style.top = `${rect.y}px`;
-  viewer.style.width = `${rect.width}px`;
-  viewer.style.height = `${rect.height}px`;
+function layoutElement() {
+  return root?.querySelector('#studio-layout') || null;
 }
 
 /**
- * The stage can shrink when the window narrows. A pinned viewer must never
- * outgrow it, so clamp back down (and release the pin entirely if the stage
- * itself has collapsed below the minimum).
+ * Below this width the studio is a single column, where desktop-style panel
+ * resizing makes no sense and must not be forced.
  */
-function clampViewerToStage() {
-  if (!viewerSize) return;
-  const bounds = availableViewerSpace();
-  if (!(bounds.width > 0) || !(bounds.height > 0)) return;
-  viewerSize = clampViewerRect(viewerSize, {
-    minWidth: MIN_VIEWER_WIDTH,
-    minHeight: MIN_VIEWER_HEIGHT,
-    boundsWidth: bounds.width,
-    boundsHeight: bounds.height,
-  });
-  applyViewerSize();
+function isSingleColumn() {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(max-width: 960px)').matches;
+}
+
+/** Push the current workspace state onto the elements. */
+function applyWorkspaceState() {
+  const layout = layoutElement();
+  const stage = stageElement();
+  if (!layout || !stage) return;
+
+  if (isSingleColumn()) {
+    // Hand control back entirely to the responsive stylesheet.
+    layout.style.removeProperty('--studio-col-left');
+    layout.style.removeProperty('--studio-col-right');
+    stage.style.height = '';
+    layout.querySelectorAll('.studio-col-resizer').forEach(el => { el.hidden = true; });
+    const grip = layout.querySelector('#studio-viewer-height-grip');
+    if (grip) grip.hidden = true;
+    return;
+  }
+
+  layout.querySelectorAll('.studio-col-resizer').forEach(el => { el.hidden = false; });
+  const grip = layout.querySelector('#studio-viewer-height-grip');
+  if (grip) grip.hidden = false;
+
+  if (panelWidths) {
+    layout.style.setProperty('--studio-col-left', `${panelWidths.left}px`);
+    layout.style.setProperty('--studio-col-right', `${panelWidths.right}px`);
+  } else {
+    layout.style.removeProperty('--studio-col-left');
+    layout.style.removeProperty('--studio-col-right');
+  }
+
+  // Always seat each handle on the boundary it controls by measuring the panels
+  // and the stage that actually rendered, so the handle is correct at every
+  // breakpoint and immediately after a drag. Each handle is centred in the gap
+  // between the side panel and the stage, so the pointer target sits exactly on
+  // the visible boundary.
+  const leftPanel = layout.querySelector('#studio-elements');
+  const rightPanel = layout.querySelector('#studio-properties-panel');
+  const leftHandle = layout.querySelector('#studio-col-resizer-left');
+  const rightHandle = layout.querySelector('#studio-col-resizer-right');
+  const layoutBox = layout.getBoundingClientRect();
+  const stageBox = stage.getBoundingClientRect();
+  const midpoint = (a, b) => `${(a + b) / 2 - layoutBox.left}px`;
+  if (leftHandle && leftPanel) leftHandle.style.left = midpoint(leftPanel.getBoundingClientRect().right, stageBox.left);
+  if (rightHandle && rightPanel) rightHandle.style.right = `${layoutBox.right - (stageBox.right + rightPanel.getBoundingClientRect().left) / 2}px`;
+
+  if (viewerHeight) {
+    stage.style.height = `${clampViewerHeight(viewerHeight, { min: MIN_VIEWER_HEIGHT, viewportHeight: window.innerHeight })}px`;
+  } else {
+    stage.style.height = '';
+  }
   clampViewerPan();
 }
 
-function startViewerResize(mode, event) {
-  const viewer = viewerElement();
-  const stage = stageElement();
-  if (!viewer || !stage) return;
-  // Seed from the viewer's real on-screen box relative to the stage, so a drag
-  // that starts while the viewer is still filling the stage behaves exactly like
-  // one after it has been pinned to a smaller rectangle.
-  const viewerRect = viewer.getBoundingClientRect();
-  const stageRect = stage.getBoundingClientRect();
-  drag = {
-    mode: 'viewer-resize',
-    id: null,
-    edge: mode,
-    pointerClientX: event.clientX,
-    pointerClientY: event.clientY,
-    startClientX: event.clientX,
-    startClientY: event.clientY,
-    startRect: {
-      x: viewerRect.left - stageRect.left,
-      y: viewerRect.top - stageRect.top,
-      width: viewerRect.width,
-      height: viewerRect.height,
-    },
-  };
-  root?.classList.add('studio-viewer-resizing');
-  if (stage) stage.dataset.viewerActive = mode;
-  setStatus('Resizing the viewer — the saved design is unchanged.');
+/**
+ * A window resize can invalidate a pinned layout, so re-clamp both panels
+ * against the new width and the viewer against the new height. The center
+ * column keeps its minimum, so this can only shrink what no longer fits.
+ */
+function clampWorkspaceToWindow() {
+  const layout = layoutElement();
+  if (layout && panelWidths && !isSingleColumn()) {
+    const total = layout.clientWidth;
+    const ceiling = Math.max(MIN_PANEL_WIDTH, total - MIN_CENTER_WIDTH);
+    const left = clampPanelWidth(panelWidths.left, { min: MIN_PANEL_WIDTH, max: ceiling });
+    const right = clampPanelWidth(panelWidths.right, { min: MIN_PANEL_WIDTH, max: Math.max(MIN_PANEL_WIDTH, ceiling - left) });
+    panelWidths = { left, right };
+  }
+  applyWorkspaceState();
 }
+
+function startPanelResize(edge, event) {
+  const layout = layoutElement();
+  if (!layout || isSingleColumn()) return;
+  const left = layout.querySelector('#studio-elements');
+  const right = layout.querySelector('#studio-properties-panel');
+  if (!left || !right) return;
+  drag = {
+    mode: 'panel-resize',
+    id: null,
+    edge,
+    pointerClientX: event.clientX,
+    startClientX: event.clientX,
+    startLeft: left.getBoundingClientRect().width,
+    startRight: right.getBoundingClientRect().width,
+    totalWidth: layout.clientWidth,
+  };
+  root?.classList.add('studio-workspace-resizing');
+  setStatus('Resizing the workspace panels — the saved design is unchanged.');
+}
+
+function startViewerHeightResize(event) {
+  const viewer = viewerElement();
+  if (!viewer || isSingleColumn()) return;
+  drag = {
+    mode: 'viewer-height',
+    id: null,
+    pointerClientY: event.clientY,
+    startClientY: event.clientY,
+    startHeight: viewer.getBoundingClientRect().height,
+  };
+  root?.classList.add('studio-workspace-resizing');
+  setStatus('Resizing the viewer height — the saved design is unchanged.');
+}
+
 
 function buildContentNode(el, comp) {
   const config = comp.config || {};
@@ -1212,24 +1253,29 @@ function startPan(event) {
 function onPointerMove(event) {
   if (!drag || !currentDesign) return;
 
-  // Viewer edge resize (CREATOR-07). This is workspace state only: it writes
-  // viewerSize and never touches components, `dirty`, or the undo history.
-  if (drag.mode === 'viewer-resize') {
-    const bounds = availableViewerSpace();
-    viewerSize = viewerRectFromDrag({
-      mode: drag.edge,
-      startRect: drag.startRect,
+  // Workspace resize (CREATOR-07A). Both branches write editor layout state
+  // only: no component geometry, no `dirty`, no undo history, no save.
+  if (drag.mode === 'panel-resize') {
+    panelWidths = columnWidthsFromDrag({
+      startLeft: drag.startLeft,
+      startRight: drag.startRight,
+      edge: drag.edge,
       startClientX: drag.startClientX,
-      startClientY: drag.startClientY,
       clientX: event.clientX,
-      clientY: event.clientY,
-      minWidth: MIN_VIEWER_WIDTH,
-      minHeight: MIN_VIEWER_HEIGHT,
-      boundsWidth: bounds.width,
-      boundsHeight: bounds.height,
+      totalWidth: drag.totalWidth,
+      minPanel: MIN_PANEL_WIDTH,
+      minCenter: MIN_CENTER_WIDTH,
     });
-    applyViewerSize();
-    clampViewerPan();
+    applyWorkspaceState();
+    return;
+  }
+
+  if (drag.mode === 'viewer-height') {
+    viewerHeight = clampViewerHeight(drag.startHeight + (event.clientY - drag.startClientY), {
+      min: MIN_VIEWER_HEIGHT,
+      viewportHeight: window.innerHeight,
+    });
+    applyWorkspaceState();
     renderCanvas();
     return;
   }
@@ -1298,17 +1344,15 @@ function onPointerMove(event) {
 function onPointerUp() {
   if (!drag) return;
   const wasPan = drag.mode === 'pan';
-  const wasViewerResize = drag.mode === 'viewer-resize';
+  const wasWorkspaceResize = drag.mode === 'panel-resize' || drag.mode === 'viewer-height';
   drag = null;
   clearGuides();
-  root?.classList.remove('studio-viewer-resizing');
-  const stage = stageElement();
-  if (stage) delete stage.dataset.viewerActive;
-  // Resizing the viewer and panning are NOT edits: neither may mark the design
+  root?.classList.remove('studio-workspace-resizing');
+  // Workspace resizing and panning are NOT edits: neither may mark the design
   // dirty, save, or add an undo entry.
-  if (wasViewerResize) {
-    applyViewerSize();
-    setStatus('Viewer resized. The saved design is unchanged.');
+  if (wasWorkspaceResize) {
+    applyWorkspaceState();
+    setStatus('Workspace resized. The saved design is unchanged.');
     return;
   }
   if (wasPan) {
@@ -1828,19 +1872,33 @@ function attachEvents() {
   });
 
   // CREATOR-07: the viewer resizes by dragging its own edges. These grips are
-  // siblings of #studio-canvas-scroll, so this never competes with the canvas
-  // pointerdown handler below: a component drag cannot start on an edge, and an
-  // edge drag cannot start on a component.
-  root.querySelector('#studio-viewer')?.addEventListener('pointerdown', (event) => {
+  // CREATOR-07A: the two column boundaries control panel widths. They live in
+  // the layout (not inside the scrollable panels) and are absolutely positioned
+  // on the boundary they control, so the hit area can never be swallowed by
+  // panel content, the canvas, or the sticky toolbar.
+  root.querySelector('#studio-layout')?.addEventListener('pointerdown', (event) => {
     if (event.button !== 0) return;
-    const grip = event.target.closest('[data-viewer-edge]');
-    if (!grip) return;
+    const handle = event.target.closest('[data-resize-col]');
+    if (!handle || handle.hidden) return;
     event.preventDefault();
-    startViewerResize(grip.dataset.viewerEdge, event);
+    // Capture so a fast drag that leaves the 8px handle keeps reporting moves.
+    try { handle.setPointerCapture(event.pointerId); } catch { /* not critical */ }
+    startPanelResize(handle.dataset.resizeCol, event);
   });
 
-  // Keep a pinned viewer inside the stage when the window changes size.
-  window.addEventListener('resize', clampViewerToStage);
+  // The viewer's bottom boundary is its only resize control: width always
+  // follows the center column.
+  root.querySelector('#studio-viewer')?.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    const grip = event.target.closest('[data-resize-height]');
+    if (!grip || grip.hidden) return;
+    event.preventDefault();
+    try { grip.setPointerCapture(event.pointerId); } catch { /* not critical */ }
+    startViewerHeightResize(event);
+  });
+
+  // Re-clamp a pinned layout when the window changes size.
+  window.addEventListener('resize', clampWorkspaceToWindow);
 
   root.querySelector('#studio-design-select').addEventListener('change', () => {
     switchDesign(root.querySelector('#studio-design-select').value);
@@ -1855,7 +1913,7 @@ export async function initCreatorStudioPage() {
   window.addEventListener('keydown', keyHandler);
   window.addEventListener('beforeunload', beforeUnload);
   renderElementPanels();
-  applyViewerSize();
+  applyWorkspaceState();
   attachEvents();
 
   try {
@@ -1901,7 +1959,7 @@ export function destroyCreatorStudioPage() {
   window.removeEventListener('beforeunload', beforeUnload);
   window.removeEventListener('pointermove', onPointerMove);
   window.removeEventListener('pointerup', onPointerUp);
-  window.removeEventListener('resize', clampViewerToStage);
+  window.removeEventListener('resize', clampWorkspaceToWindow);
   currentDesign = null;
   designs = [];
   selectedId = null;

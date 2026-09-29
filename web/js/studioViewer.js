@@ -22,9 +22,18 @@ export const PAN_STEP = 40;
 /** Minimum visible overlap, in screen px, between the design and the viewport. */
 export const PAN_MARGIN = 80;
 
-/** Smallest viewer the editor will allow, in screen px. */
-export const MIN_VIEWER_WIDTH = 320;
+/** Smallest viewer the editor will allow, in screen px (vertical only). */
 export const MIN_VIEWER_HEIGHT = 240;
+/** Smallest a side editor panel may be squeezed to, in screen px. */
+export const MIN_PANEL_WIDTH = 220;
+/** The center column never shrinks below this, so the viewer stays usable. */
+export const MIN_CENTER_WIDTH = 360;
+/**
+ * Approximate vertical space outside the stage (toolbar, status bar, Layers
+ * panel) that the viewer height has to leave alone, so growing the viewer
+ * cannot push the page into a vertical scrollbar.
+ */
+export const VIEWER_HEIGHT_CHROME = 200;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -95,71 +104,69 @@ export function designPoint({ clientX, clientY, rect, zoom }) {
   };
 }
 
-// ── Direct edge resize (CREATOR-07) ──────────────────────────────────────────
+// ── Workspace resize (CREATOR-07A) ───────────────────────────────────────────
 //
-// The viewer is its own resize control: the user drags the viewer's own edges
-// and corners. These helpers are pure so the hit-testing and clamping can be
-// verified without a browser. The viewer's size is editor workspace state — it
-// is never written to the profile design.
+// The editor's horizontal space belongs to the PANELS, not to the viewer: the
+// viewer always fills the center column, and the two column boundaries are
+// dragged to change panel widths. The viewer is only adjustable vertically, via
+// its own bottom boundary. All of it is editor workspace state and is never
+// written to the profile design.
 
-/**
- * Clamp a proposed viewer box to the editor's limits.
- *
- * The viewer is a rectangle at (x, y) inside the stage, so both the size and the
- * position are clamped: the size to [minimum, stage] and the origin so the box
- * always stays fully inside the stage. Keeping it in-bounds is what guarantees
- * a viewer resize can never introduce a scrollbar.
- */
-export function clampViewerRect(
-  { x = 0, y = 0, width, height },
-  { minWidth = MIN_VIEWER_WIDTH, minHeight = MIN_VIEWER_HEIGHT, boundsWidth = Infinity, boundsHeight = Infinity } = {},
-) {
-  const w = Math.round(clamp(Number(width) || minWidth, minWidth, Math.max(minWidth, boundsWidth)));
-  const h = Math.round(clamp(Number(height) || minHeight, minHeight, Math.max(minHeight, boundsHeight)));
-  return {
-    width: w,
-    height: h,
-    // A stage smaller than the minimum pins the box at the origin.
-    x: Math.round(clamp(Number(x) || 0, 0, Math.max(0, boundsWidth - w))),
-    y: Math.round(clamp(Number(y) || 0, 0, Math.max(0, boundsHeight - h))),
-  };
+/** Clamp one side panel's width. */
+export function clampPanelWidth(value, { min = MIN_PANEL_WIDTH, max = Infinity } = {}) {
+  return Math.round(clamp(Number(value) || min, min, Math.max(min, max)));
 }
 
 /**
- * New viewer box after dragging `mode` (an edgeHitTest result) by the pointer.
+ * New side-panel widths after dragging a column boundary horizontally.
  *
- * The edge under the cursor follows it and the opposite edge stays put, so
- * dragging the west edge rightwards grows the viewer leftwards rather than
- * silently moving only the right edge.
+ * `edge` is the boundary being dragged: 'left' is the line between the left
+ * panel and the center, 'right' the one between the center and the Properties
+ * panel. Each drag moves exactly one panel, and the center column absorbs the
+ * difference, so the viewer never needs a horizontal resize of its own.
+ *
+ * The centre column is held at or above MIN_CENTER_WIDTH so dragging a panel
+ * wide can never squeeze the viewer out of existence.
  */
-export function viewerRectFromDrag({
-  mode,
-  startRect,
+export function columnWidthsFromDrag({
+  startLeft,
+  startRight,
+  edge,
   startClientX,
-  startClientY,
   clientX,
-  clientY,
-  ...limits
+  totalWidth,
+  minPanel = MIN_PANEL_WIDTH,
+  minCenter = MIN_CENTER_WIDTH,
 }) {
-  const start = startRect || {};
-  const edge = String(mode || '');
+  const left0 = Number(startLeft) || 0;
+  const right0 = Number(startRight) || 0;
+  const total = Number(totalWidth) || 0;
   const dx = (Number(clientX) || 0) - (Number(startClientX) || 0);
-  const dy = (Number(clientY) || 0) - (Number(startClientY) || 0);
 
-  const startX = Number(start.x) || 0;
-  const startY = Number(start.y) || 0;
-  const startWidth = Number(start.width) || 0;
-  const startHeight = Number(start.height) || 0;
+  let left = left0;
+  let right = right0;
+  if (edge === 'left') left = left0 + dx;
+  else if (edge === 'right') right = right0 - dx;
 
-  let x = startX;
-  let y = startY;
-  let width = startWidth;
-  let height = startHeight;
+  // Each panel keeps its own minimum, then the pair is pulled back if together
+  // they would starve the center column.
+  let nextLeft = clampPanelWidth(left, { min: minPanel, max: Math.max(minPanel, total - minCenter - right0) });
+  let nextRight = clampPanelWidth(right, { min: minPanel, max: Math.max(minPanel, total - minCenter - nextLeft) });
+  // The second clamp can invalidate the first on very narrow layouts; settle it.
+  if (nextLeft + nextRight > total - minCenter) {
+    const overflow = nextLeft + nextRight - (total - minCenter);
+    nextLeft = clampPanelWidth(nextLeft - overflow, { min: minPanel, max: Infinity });
+  }
+  return { left: nextLeft, right: nextRight };
+}
 
-  if (edge.includes('e')) width = startWidth + dx;
-  else if (edge.includes('w')) { x = startX + dx; width = startWidth - dx; }
-  if (edge.includes('s')) height = startHeight + dy;
-  else if (edge.includes('n')) { y = startY + dy; height = startHeight - dy; }
-
-  return clampViewerRect({ x, y, width, height }, limits);
+/**
+ * Clamp the viewer height. The maximum is derived from the window height so a
+ * tall viewer cannot push the studio into a vertical scrollbar.
+ */
+export function clampViewerHeight(value, { min = MIN_VIEWER_HEIGHT, viewportHeight, chrome = VIEWER_HEIGHT_CHROME } = {}) {
+  const max = Number.isFinite(viewportHeight) && viewportHeight > 0
+    ? Math.max(min, viewportHeight - chrome)
+    : Infinity;
+  return Math.round(clamp(Number(value) || min, min, max));
 }

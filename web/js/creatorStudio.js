@@ -492,6 +492,17 @@ export function renderCreatorStudioPage() {
           </div>
           <div id="studio-viewer">
             <div id="studio-canvas-scroll">
+              <!-- CREATOR-10B: the Profile Background EFFECT backdrop. It fills the
+                   whole VIEWER, not the 960x1200 design canvas, so an uploaded
+                   background reads as the background of the editing area rather
+                   than as a rectangle sitting inside it - which is what a
+                   published profile does, where the backdrop is a fixed
+                   full-viewport layer. The canvas floats on top of it, so the
+                   design stays exactly 960x1200 and the viewer/canvas split
+                   CREATOR-10 locked is untouched. Empty and invisible until a
+                   background is actually active, so a design with none looks
+                   precisely as it did. -->
+              <div class="studio-profile-backdrop" id="studio-profile-backdrop" aria-hidden="true"></div>
               <div id="studio-canvas-inner"></div>
             </div>
             <div class="studio-viewer-height-grip" id="studio-viewer-height-grip"
@@ -1103,30 +1114,53 @@ function buildProfileSkeleton() {
 }
 
 /**
- * CREATOR-10: paint the uploaded Profile Background behind the whole design.
+ * CREATOR-10B: render the Profile Background IMAGE and EFFECT into the viewer
+ * backdrop, so they fill the whole editing area with the canvas floating on top.
  *
- * It is a BACKGROUND LAYER, not a content card: it is a sibling of the profile
- * structure, sized to the full design area and drawn first so the main column
- * and every sidebar card sit on top of it. It carries no geometry of its own,
- * so it can never be selected, dragged, resized or deleted, and it never
- * appears as a small image card.
+ * The backdrop is a sibling of `#studio-canvas-inner` inside the clipping viewer,
+ * not a child of the design document. That is what makes an uploaded background
+ * read as the background of the profile rather than as a rectangle drawn inside
+ * it — and it matches the published profile, where the backdrop is a fixed
+ * full-viewport layer behind the content.
+ *
+ * The design canvas is untouched: still 960x1200, still zoomed and panned by its
+ * own transform, still the saved coordinate system. Only the decoration moved out
+ * of it. When no background is active the backdrop stays empty and the canvas
+ * keeps its own surface, so a design with no background looks exactly as before.
+ *
+ * Neither layer is a component: no geometry, no data-comp-id, pointer-events
+ * none, and absent from Layers.
  */
-function buildProfileBackgroundLayer() {
+function renderStudioProfileBackdrop(doc) {
+  const backdrop = root?.querySelector('#studio-profile-backdrop');
+  if (!backdrop) return;
+  backdrop.replaceChildren();
+
+  const theme = designTheme();
   const url = backgroundImageUrl();
-  const layer = document.createElement('div');
-  layer.className = 'studio-profile-background';
-  layer.id = 'studio-profile-background';
-  layer.setAttribute('aria-hidden', 'true');
-  layer.dataset.profileBackground = url ? 'set' : 'none';
+  // The effect is a profile-wide layer too, so it shares the backdrop and the
+  // same viewer bounds.
+  const effect = theme && typeof theme.backgroundEffect === 'object' ? theme.backgroundEffect : null;
+  const effectActive = !!effect && effect.enabled !== false && !!effect.effectId;
 
-  const c = canvas();
-  layer.style.left = '0px';
-  layer.style.top = '0px';
-  layer.style.width = `${c.width}px`;
-  layer.style.height = `${Math.max(c.minHeight, PROFILE_LAYOUT.background.height)}px`;
+  // The canvas only becomes transparent when a background image is really behind
+  // it. Otherwise it keeps its own light surface, exactly as before. `doc` is
+  // passed in because renderCanvas() has not attached it yet.
+  if (doc) doc.classList.toggle('studio-canvas-transparent', !!url);
+  const showing = !!url || effectActive;
+  backdrop.dataset.profileBackdrop = showing ? 'set' : 'none';
 
+  // Both layers are always created, even when there is nothing to show, and carry
+  // their `none` state in a data attribute. That keeps "is anything active?" a
+  // single readable value in the DOM whether the answer is yes or no, which is
+  // the same explicitness CREATOR-10A gave the Properties panel. The backdrop
+  // itself is hidden when there is nothing to show, so an empty layer is not a
+  // visible artefact.
+  const imgLayer = document.createElement('div');
+  imgLayer.className = 'studio-profile-background';
+  imgLayer.id = 'studio-profile-background';
+  imgLayer.dataset.profileBackground = url ? 'set' : 'none';
   if (url) {
-    const theme = designTheme();
     // Rendered through a real <img> so the ORIGINAL uploaded file is what the
     // browser scales — no rasterising, no re-encoding, no canvas round-trip.
     const img = document.createElement('img');
@@ -1137,53 +1171,29 @@ function buildProfileBackgroundLayer() {
     img.src = url;
     img.style.objectFit = backgroundSizeCss(theme.backgroundSize);
     img.style.objectPosition = theme.backgroundPosition || 'center';
-    img.style.visibility = theme.backgroundRepeat === 'repeat' ? 'visible' : 'visible';
-    layer.appendChild(img);
+    imgLayer.appendChild(img);
   }
-  return layer;
-}
+  backdrop.appendChild(imgLayer);
 
-/**
- * CREATOR-12: the Profile Background Effect preview layer.
- *
- * Studio-only chrome, in the same position it occupies on a real profile: above
- * the background image, below the profile structure and every component. It is a
- * plain div with `pointer-events: none` and no data-comp-id, so it can never be
- * selected, dragged, resized, or appear in Layers — individual particles are
- * renderer internals, not components.
- *
- * The `bounds` passed to the renderer are the DESIGN CANVAS size, not the
- * window, so the preview matches the published geometry rather than merely
- * looking similar.
- */
-function buildProfileEffectLayer() {
-  const c = canvas();
-  const layer = document.createElement('div');
-  layer.className = 'studio-profile-effect-layer';
-  layer.id = 'studio-profile-effect-layer';
-  layer.setAttribute('aria-hidden', 'true');
-  layer.style.left = '0px';
-  layer.style.top = '0px';
-  layer.style.width = `${c.width}px`;
-  layer.style.height = `${Math.max(c.minHeight, PROFILE_LAYOUT.background.height)}px`;
+  const effectLayer = document.createElement('div');
+  effectLayer.className = 'studio-profile-effect-layer';
+  effectLayer.id = 'studio-profile-effect-layer';
+  effectLayer.setAttribute('aria-hidden', 'true');
+  effectLayer.dataset.profileEffect = effectActive ? effect.effectId : 'none';
+  backdrop.appendChild(effectLayer);
+  if (!effectActive) return;
 
-  const theme = designTheme();
-  const effect = theme && typeof theme.backgroundEffect === 'object' ? theme.backgroundEffect : null;
-  const active = !!effect && effect.enabled !== false && !!effect.effectId;
-  layer.dataset.profileEffect = active ? effect.effectId : 'none';
-  if (!active) return layer;
-
-  // The renderer needs a live DOM node, so this runs after the layer is attached;
-  // renderCanvas() appends it before the components are built.
+  // The renderer needs a live, sized node, so this runs once it is attached.
+  // The bounds are the VIEWER, matching the published fixed backdrop.
   queueMicrotask(() => {
-    if (!layer.isConnected) return;
+    if (!effectLayer.isConnected) return;
+    const box = backdrop.getBoundingClientRect();
     applyProfileBackgroundEffect(effect, {
-      layer,
+      layer: effectLayer,
       creatorEffect: installedEffectDefinition(effect.effectId),
-      bounds: { width: c.width, height: Math.max(c.minHeight, PROFILE_LAYOUT.background.height) },
+      bounds: { width: Math.max(1, box.width), height: Math.max(1, box.height) },
     });
   });
-  return layer;
 }
 
 function renderCanvas() {
@@ -1210,19 +1220,15 @@ function renderCanvas() {
     doc.appendChild(empty);
   }
 
-  // CREATOR-10: draw the Profile Background and the real profile structure
-  // FIRST, so both sit behind every component.
-  //
-  // The BACKGROUND is part of the real published profile, so it is shown in
-  // Preview too. The profile STRUCTURE and the guide cards are Studio-only
-  // editing aids, so Preview leaves them out — exactly the exclusion the public
-  // profile renderer applies.
-  doc.appendChild(buildProfileBackgroundLayer());
-  // CREATOR-12: the Background EFFECT sits between the background image and the
-  // profile, exactly as it does publicly: background image -> effect -> profile
-  // structure and components. Drawing it here (not after the components) is what
-  // guarantees the effect can never paint over the profile.
-  doc.appendChild(buildProfileEffectLayer());
+  // CREATOR-10B: the background image and effect now live in the VIEWER backdrop
+  // (a sibling of this element), not inside the design canvas, so an uploaded
+  // background fills the editing area with the canvas floating on top. Called
+  // here so every canvas render keeps the backdrop in step with the design.
+  renderStudioProfileBackdrop(doc);
+
+  // CREATOR-10: the real profile structure is drawn FIRST, so every component
+  // sits on top of it. It is Studio-only editing chrome, so Preview leaves it
+  // out — exactly the exclusion the public profile renderer applies.
   if (!previewMode) doc.appendChild(buildProfileSkeleton());
 
   // CREATOR-09: guide cards are a Studio-only aid. Preview represents the real

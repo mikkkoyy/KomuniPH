@@ -467,27 +467,46 @@
   gap: 0.35rem;
   box-sizing: border-box;
   padding: 6px;
-  border: 2px dashed rgba(71, 85, 105, 0.55);
+  border: 2px dashed rgba(255, 255, 255, 0.6);
   border-radius: 8px;
-  background: rgba(148, 163, 184, 0.16);
+  /* CREATOR-10B: a guide card is a placement MARKER drawn over the profile
+     background, so it stays near-transparent and is delineated by its dashed
+     border and its label plate. A filled wash here sat on top of the background
+     picture on every module and buried it. */
+  background: rgba(15, 23, 42, 0.05);
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.25);
   /* Deliberately NOT `overflow: hidden`: a component's resize handles sit 6px
      outside its own box, so clipping here would make them ungrabbable. The
      labels below carry their own ellipsis instead. */
   text-align: center;
   cursor: move;
 }
+/* Selected, so a creator can always find the guide they are editing. */
+.studio-comp-selected.studio-guide-card {
+  border-color: rgba(45, 212, 191, 0.95);
+  box-shadow: 0 0 0 1px rgba(45, 212, 191, 0.6);
+}
+/* CREATOR-10B: guide labels sit on top of a photograph, so each carries its own
+   light plate and dark ink. Without the plate the label was dark slate on an
+   arbitrary image and simply disappeared into it. */
 .studio-guide-card-label {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.06em;
-  color: rgba(51, 65, 85, 0.8);
+  color: rgba(30, 41, 59, 0.92);
   line-height: 1.2;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 3px;
+  padding: 0 3px;
 }
 .studio-guide-card-area {
   font-size: 11px;
   font-style: italic;
-  color: rgba(51, 65, 85, 0.55);
+  color: rgba(51, 65, 85, 0.85);
   line-height: 1.2;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 3px;
+  padding: 0 3px;
 }
 /* A tiny card cannot show both lines; keep at least the section label. */
 .studio-guide-card-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
@@ -568,7 +587,40 @@
   min-width: 100%;
   min-height: 100%;
   overflow: hidden;
+  /* CREATOR-10B: the design canvas FLOATS on the viewer backdrop, so it has to
+     paint above it. It stays exactly 960x1200 and keeps its own zoom/pan
+     transform — only its stacking against the backdrop changed. */
+  position: relative;
+  z-index: 1;
 }
+
+/* CREATOR-10B: the Profile Background EFFECT backdrop.
+   It fills the whole VIEWER rather than the 960x1200 design canvas, which is what
+   makes an uploaded background read as the background of the profile instead of a
+   rectangle drawn inside it — matching the published profile, where the backdrop
+   is a fixed full-viewport layer behind the content. It is pure decoration: no
+   geometry, not a component, `pointer-events: none`, and absent from Layers.
+
+   It is empty and fully transparent until a background is actually active, and
+   the canvas keeps its own light surface in that case, so a design with no
+   background looks precisely as it did. */
+#studio-profile-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  border-radius: inherit;
+}
+#studio-profile-backdrop[data-profile-backdrop="none"] { display: none; }
+#studio-profile-backdrop .studio-profile-background,
+#studio-profile-backdrop .studio-profile-effect-layer {
+  position: absolute;
+  inset: 0;
+}
+/* The canvas only stops painting its own surface when a background is really
+   behind it, so the picture is not hidden by the canvas's light sheet. */
+#studio-canvas-document.studio-canvas-transparent { background: transparent; }
 #studio-zoom-layer {
   transform-origin: 0 0;
   display: inline-block;
@@ -650,25 +702,44 @@
   pointer-events: none;
 }
 
-/* The outer background area: shows where an uploaded background actually sits. */
+/* -- CREATOR-10B: the Studio profile surfaces must not hide the background ----
+   These boxes stack: the outer background area, then a whole COLUMN, then a
+   card per module, then a guide card on top of each module. At their previous
+   alphas that compounded to roughly 80% white across the entire content area, so
+   an uploaded background was legible only in the margins and the canvas read as a
+   pale screen sitting on top of the picture — the same complaint as the public
+   profile, reproduced in the editor.
+
+   The fix mirrors the public profile: the areas still exist and still show where
+   each module goes, but they are delineated by BORDER rather than by fill.
+     • the outer background area carries no fill at all — the uploaded image is
+       already painted directly beneath it, so a white wash here only hid it;
+     • a column is a boundary, not a surface, so its fill is nearly nothing;
+     • a module card is a placement marker over the picture, so it stays very
+       translucent and leans on its border.
+
+   Labels sit on a photograph rather than on a flat fill, so they get a small
+   light plate of their own to stay readable over any image. */
 .studio-skeleton-bg {
   position: absolute;
   box-sizing: border-box;
-  border: 2px dashed rgba(71, 85, 105, 0.35);
+  border: 2px dashed rgba(255, 255, 255, 0.55);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.28);
+  background: transparent;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.28);
 }
 
 /* The two real columns, drawn as separate areas. */
 .studio-skeleton-column {
   position: absolute;
   box-sizing: border-box;
-  border: 2px solid rgba(71, 85, 105, 0.28);
+  border: 2px solid rgba(255, 255, 255, 0.4);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.4);
+  /* Essentially no fill: a column is a boundary, not a surface. */
+  background: rgba(15, 23, 42, 0.03);
 }
-.studio-skeleton-main { border-color: rgba(30, 64, 175, 0.28); }
-.studio-skeleton-sidebar { border-color: rgba(124, 58, 237, 0.28); }
+.studio-skeleton-main { border-color: rgba(147, 197, 253, 0.5); }
+.studio-skeleton-sidebar { border-color: rgba(196, 181, 253, 0.5); }
 
 /* One card per real profile module. */
 .studio-skeleton-card {
@@ -676,13 +747,32 @@
   box-sizing: border-box;
   display: flex;
   align-items: flex-start;
-  border: 1.5px dashed rgba(71, 85, 105, 0.4);
+  border: 1.5px dashed rgba(255, 255, 255, 0.6);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.55);
+  /* Barely a tint. The sidebar packs many small cards edge to edge, so anything
+     heavier accumulates there and made the whole sidebar read darker than the
+     main column, which is not a real difference in the profile. Border plus label
+     plate is what makes a module area readable. */
+  background: rgba(15, 23, 42, 0.05);
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.22);
 }
-.studio-skeleton-card-main { border-color: rgba(30, 64, 175, 0.3); }
-.studio-skeleton-card-sidebar { border-color: rgba(124, 58, 237, 0.3); }
-.studio-skeleton-card .studio-skeleton-label { color: rgba(51, 65, 85, 0.62); }
+.studio-skeleton-card-main { border-color: rgba(147, 197, 253, 0.6); }
+.studio-skeleton-card-sidebar { border-color: rgba(196, 181, 253, 0.6); }
+
+/* A label has to stay readable over an arbitrary photograph, so it carries its
+   own light plate instead of relying on a flat fill behind it. */
+.studio-skeleton-label,
+.studio-section-label,
+.studio-section-hint {
+  background: rgba(255, 255, 255, 0.82);
+  color: rgba(30, 41, 59, 0.9);
+  border-radius: 3px;
+  padding: 0 3px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* -- CREATOR-10A: `hidden` must actually hide ---------------------------------
    The `hidden` attribute only supplies a UA-level `display: none`, so ANY
@@ -813,10 +903,15 @@
   align-items: center;
   justify-content: center;
   gap: 4px;
-  background: rgba(255, 255, 255, 0.75);
-  border: 1.5px dashed #8fa3c0;
+  /* CREATOR-10B: a controlled profile module a creator has actually placed sits
+     on the profile background like any other card, so it is translucent here
+     too rather than an opaque plate. The label below carries its own surface, so
+     the module still reads clearly over any image. */
+  background: rgba(15, 23, 42, 0.16);
+  border: 1.5px dashed rgba(255, 255, 255, 0.6);
   border-radius: 8px;
-  color: #3d4d68;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.25);
+  color: #e2e8f0;
   text-align: center;
   padding: 6px;
 }

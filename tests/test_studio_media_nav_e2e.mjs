@@ -1779,11 +1779,18 @@ await step('CREATOR-10: the Profile Background is uploaded and sits behind the w
     const lr = layer?.getBoundingClientRect();
     const sr = layer?.parentElement?.getBoundingClientRect();
     // Is the background behind the main column AND every sidebar card?
+    //
+    // Overlap, not full containment: the design canvas is 1200px tall and the
+    // viewer clips it, so a column's box legitimately extends below the visible
+    // area and is reached by panning. The requirement is that every VISIBLE part
+    // of each area sits over the background, which is what the backdrop being
+    // exactly the viewer guarantees — so assert the areas are actually shown
+    // over it rather than fully swallowed by it.
     const behind = (sel) => Array.from(document.querySelectorAll(sel)).map(el => {
       const r = el.getBoundingClientRect();
-      const inside = !!lr && r.left >= lr.left - 1 && r.top >= lr.top - 1
-        && r.right <= lr.right + 1 && r.bottom <= lr.bottom + 1;
-      return { inside };
+      const overlapW = Math.max(0, Math.min(r.right, lr.right) - Math.max(r.left, lr.left));
+      const overlapH = Math.max(0, Math.min(r.bottom, lr.bottom) - Math.max(r.top, lr.top));
+      return { inside: overlapW > 4 && overlapH > 4, overlapW: Math.round(overlapW), overlapH: Math.round(overlapH) };
     });
     return {
       set: layer?.dataset.profileBackground,
@@ -1812,9 +1819,36 @@ await step('CREATOR-10: the Profile Background is uploaded and sits behind the w
   check(applied.naturalW > 0 && applied.naturalH > 0,
     `the uploaded image actually loaded (${applied.naturalW}x${applied.naturalH})`);
 
-  // It fills the whole design area, so main + sidebar all sit on it.
-  check(applied.fillW >= 900, `the background spans the design width, got ${applied.fillW}`);
-  check(applied.fillH >= 1200, `the background spans the design height, got ${applied.fillH}`);
+  // It covers the WHOLE editing area, so the entire design canvas — main column
+  // and every sidebar card — sits on top of it. Since CREATOR-10B the backdrop
+  // fills the VIEWER rather than the 960x1200 canvas, which is what a published
+  // profile does, so the invariant is "the viewer is covered and the canvas is
+  // inside that covered area" rather than a fixed pixel width.
+  const cover = await page.evaluate(() => {
+    const layer = document.querySelector('#studio-profile-background');
+    const scroll = document.querySelector('#studio-canvas-scroll');
+    const doc = document.querySelector('#studio-canvas-document');
+    if (!layer || !scroll || !doc) return null;
+    const lr = layer.getBoundingClientRect();
+    const sr = scroll.getBoundingClientRect();
+    const dr = doc.getBoundingClientRect();
+    // The canvas may legitimately extend past the viewer at 100% zoom — the
+    // viewer clips it and the creator pans to reach the rest. What must hold is
+    // that the backdrop is exactly the visible area, so every pixel the creator
+    // can actually see of the canvas is over the background.
+    const overlapW = Math.max(0, Math.min(dr.right, sr.right) - Math.max(dr.left, sr.left));
+    const overlapH = Math.max(0, Math.min(dr.bottom, sr.bottom) - Math.max(dr.top, sr.top));
+    return {
+      layerW: Math.round(lr.width), layerH: Math.round(lr.height),
+      viewW: Math.round(sr.width), viewH: Math.round(sr.height),
+      overlapW: Math.round(overlapW), overlapH: Math.round(overlapH),
+      backdropIsViewer: Math.abs(lr.width - sr.width) <= 2 && Math.abs(lr.height - sr.height) <= 2,
+    };
+  });
+  check(cover && cover.backdropIsViewer,
+    `the background is exactly the visible editing area, got ${JSON.stringify(cover)}`);
+  check(cover && cover.overlapW > 0 && cover.overlapH > 0,
+    `the design canvas is visible within the covered area, got ${JSON.stringify(cover)}`);
   for (const m of applied.main) check(m.inside, 'the main profile area is inside the background');
   for (const m of applied.sidebar) check(m.inside, 'the sidebar area is inside the background');
   for (const m of applied.sidebarCards) check(m.inside, 'every sidebar card is inside the background');
@@ -4496,10 +4530,24 @@ await step('CREATOR-12: the effect is inert and never a component', async () => 
   const order = await page.evaluate(() => {
     const bg = document.querySelector('#studio-profile-background');
     const effect = document.querySelector('#studio-profile-effect-layer');
+    const backdrop = document.querySelector('#studio-profile-backdrop');
+    const inner = document.querySelector('#studio-canvas-inner');
+    // CREATOR-10B: the background and the effect now live in the viewer BACKDROP,
+    // a sibling of the canvas, and the canvas floats on top of it. The invariant
+    // is unchanged in meaning — the effect is above the picture and below the
+    // profile — but it is expressed across the two elements rather than as one
+    // ordered list of children of the design document.
     const kids = Array.from(document.querySelector('#studio-canvas-document').children);
+    const z = (el) => (el ? parseInt(getComputedStyle(el).zIndex || '0', 10) : null);
     return {
-      bgIndex: kids.indexOf(bg), effectIndex: kids.indexOf(effect),
+      bgIndex: backdrop && bg ? Array.from(backdrop.children).indexOf(bg) : -1,
+      effectIndex: backdrop && effect ? Array.from(backdrop.children).indexOf(effect) : -1,
       firstComp: kids.findIndex(el => el.dataset.compId || el.id === 'studio-profile-skeleton'),
+      // The canvas is a later sibling AND paints above the backdrop.
+      backdropBeforeInner: backdrop && inner
+        ? (backdrop.compareDocumentPosition(inner) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+        : false,
+      backdropZ: z(backdrop), innerZ: z(inner),
       // A press at the top of the canvas must not land on the effect layer. The
       // profile structure above it is pointer-events:none too, so the honest
       // assertion is "the effect never got it", not "a component got it".
@@ -4511,9 +4559,13 @@ await step('CREATOR-12: the effect is inert and never a component', async () => 
       })(),
     };
   });
+  check(order.bgIndex >= 0, 'the background layer is in the viewer backdrop');
   check(order.effectIndex > order.bgIndex, 'the effect layer is painted after the background image');
-  check(order.effectIndex < order.firstComp,
-    'the effect layer is painted before the profile structure and components');
+  check(order.effectIndex < order.firstComp || order.backdropBeforeInner,
+    'the effect is painted below the profile structure and components');
+  check(order.backdropBeforeInner, 'the backdrop precedes the canvas in the document');
+  check(order.backdropZ < order.innerZ,
+    `the canvas floats above the backdrop (backdrop z=${order.backdropZ}, canvas z=${order.innerZ})`);
   check(order.pressSkipsEffect, 'a press on the canvas never lands on the effect layer');
 });
 

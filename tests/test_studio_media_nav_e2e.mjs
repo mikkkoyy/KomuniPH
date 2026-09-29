@@ -73,7 +73,22 @@ function cleanupUploads() {
     try { rmSync(join(CREATOR_UPLOAD_DIR, name), { force: true }); } catch { /* best effort */ }
   }
 }
-process.on('exit', cleanupUploads);
+// CREATOR-12 imports real .kpeffect packages, which the importer extracts into
+// uploads/creator-effects. That is a second directory the run can dirty, so it
+// is cleaned on exactly the same terms — the whole per-install directory the
+// import created, and nothing that was already there.
+const CREATOR_EFFECT_DIR = resolve('uploads', 'creator-effects');
+const effectsBefore = new Set(
+  existsSync(CREATOR_EFFECT_DIR) ? readdirSync(CREATOR_EFFECT_DIR) : [],
+);
+function cleanupEffectUploads() {
+  if (!existsSync(CREATOR_EFFECT_DIR)) return;
+  for (const name of readdirSync(CREATOR_EFFECT_DIR)) {
+    if (effectsBefore.has(name)) continue;
+    try { rmSync(join(CREATOR_EFFECT_DIR, name), { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+}
+process.on('exit', () => { cleanupUploads(); cleanupEffectUploads(); });
 
 // Hard watchdog: never hang the runner indefinitely (a hung browser close
 // or navigation reports code 3 instead of blocking forever). Raised from 150s
@@ -4846,4 +4861,5 @@ try { rmSync(TMP_DIR, { recursive: true, force: true }); } catch {}
 // Done explicitly as well as on exit, so a hard process.exit() can never leave
 // untracked files behind in the git working tree.
 cleanupUploads();
+cleanupEffectUploads();
 process.exit(failed.length ? 1 : 0);

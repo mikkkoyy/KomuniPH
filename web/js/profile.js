@@ -443,6 +443,18 @@ export function renderProfilePage(viewUsername = null, { preview = false } = {})
 // Default Gradient Slate theme — used when no custom background is set
 const DEFAULT_BACKGROUND_GRADIENT = 'linear-gradient(135deg, #0f172a 0%, #334155 50%, #475569 100%)';
 
+/* CREATOR-10B — how translucent a profile card may become once a background the
+   visitor chose is really behind the content. These are CEILINGS, not values:
+   a creator who picked a lower cardOpacity than the ceiling keeps exactly the
+   card they asked for, and Math.min() can only ever make a card more
+   transparent, never less. The header sits firmer than the body it sits on
+   because a card translucent enough to show a photograph still has to give its
+   title a readable ground, and the status strip is the other full-width band
+   where the same reasoning applies. */
+const PROFILE_CARD_SURFACE_ALPHA = 0.62;
+const PROFILE_CARD_HEADER_SURFACE_ALPHA = 0.82;
+const PROFILE_STATUS_SURFACE_ALPHA = 0.72;
+
 export function applyProfileBackground(profile) {
   const frame = document.getElementById('profile-frame');
   if (!frame) return;
@@ -478,6 +490,35 @@ export function applyProfileBackground(profile) {
   const mutedTextColor = custom.mutedTextColor || theme.textSecondary || '#6b6072';
   const accentColor = custom.accentColor || theme.accent || '#0e6e6e';
 
+  // CREATOR-10B: resolve the profile's own card surfaces.
+  //
+  // `--theme-card-background` is one nearly opaque value shared by every surface
+  // on the site, so on a profile it painted the entire content column as a
+  // single sheet. With an uploaded background behind that column, the picture
+  // survived only in the slivers between cards and read as "a screen sitting on
+  // top of my background" rather than as the background of the profile.
+  //
+  // So the profile gets three surfaces of its own — card body, card header and
+  // status strip — and only their ALPHA is lowered, each derived from the
+  // creator's own card color. The hue, the border, the radius, the text colors
+  // and every theme control are untouched, so nothing here overrides a custom
+  // theme; it only stops a shared value from being reused where a different
+  // amount of transparency is wanted.
+  //
+  // The trigger is a background the visitor CHOSE: an uploaded picture, a custom
+  // gradient or a custom color. The stock theme gradient deliberately does not
+  // count — it is simply what an untouched profile looks like, and softening
+  // cards for it would change every profile in the app to fix a problem only an
+  // uploaded background has.
+  const hasChosenBackground = hasImageBackground || hasCustomGradient || hasCustomColor;
+  const profileSurface = (ceiling) => toRgbaWithOpacity(
+    cardBg,
+    hasChosenBackground ? Math.min(effectiveCardOpacity, ceiling) : effectiveCardOpacity,
+  );
+  const cardSurface = profileSurface(PROFILE_CARD_SURFACE_ALPHA);
+  const cardHeaderSurface = profileSurface(PROFILE_CARD_HEADER_SURFACE_ALPHA);
+  const statusSurface = profileSurface(PROFILE_STATUS_SURFACE_ALPHA);
+
   // Set CSS variables on the frame so all child elements inherit them
   frame.style.setProperty('--theme-background', bgColor);
   frame.style.setProperty('--theme-card-background', cardBgRgba);
@@ -488,6 +529,17 @@ export function applyProfileBackground(profile) {
   frame.style.setProperty('--theme-text', textColor);
   frame.style.setProperty('--theme-text-secondary', mutedTextColor);
   frame.style.setProperty('--theme-accent', accentColor);
+
+  // CREATOR-10B: the profile's three surfaces, plus the attribute that lets CSS
+  // blur the card backdrop only while those surfaces are actually translucent.
+  // Both are set from the single `hasChosenBackground` decision, so a page can
+  // never end up blurred behind opaque cards, or translucent with a sharp
+  // picture showing straight through it.
+  frame.style.setProperty('--profile-card-surface', cardSurface);
+  frame.style.setProperty('--profile-card-header-surface', cardHeaderSurface);
+  frame.style.setProperty('--profile-status-surface', statusSurface);
+  if (hasChosenBackground) frame.setAttribute('data-profile-surface', 'soft');
+  else frame.removeAttribute('data-profile-surface');
 
   // Apply background to the fixed viewport layer, NOT the scrolling frame.
   // Priority: uploaded image > custom gradient > custom color > theme gradient > theme color

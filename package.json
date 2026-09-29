@@ -23,6 +23,7 @@
     "test:creator10": "node tests/test_creator10_profile_viewer.mjs",
     "test:creator11": "node tests/test_creator11_fonts_animation_masking.mjs",
     "test:creator10a": "node tests/test_creator10a_background_state.mjs",
+    "test:creator10b": "node tests/test_creator10b_profile_background_visibility.mjs",
     "test:creator12": "node tests/test_creator12_background_effects.mjs",
     "test:coin-gift": "node tests/test_coin_gift.mjs",
     "test:coin-rewards": "node tests/test_coin_rewards.mjs"

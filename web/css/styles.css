@@ -1022,29 +1022,11 @@ select:focus {
   margin-bottom: 1rem;
 }
 
-/* Profile modules */
-.profile-module {
-  background: var(--theme-card-background, rgba(255, 247, 236, 0.95));
-  border: 1px solid var(--theme-card-border-color, var(--kp-border));
-  border-radius: var(--theme-card-radius, var(--kp-card-radius));
-  margin-bottom: 1rem;
-  overflow: hidden;
-}
-
-.profile-module-header {
-  padding: 0.75rem 1rem;
-  font-weight: 600;
-  font-size: 0.875rem;
-  color: var(--theme-text, var(--kp-ink));
-  border-bottom: 1px solid var(--theme-card-border-color, var(--kp-border));
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.profile-module-body {
-  padding: 1rem;
-}
+/* Profile modules and sidebar modules are defined once, in the PROFILE-04
+   block below. They used to be declared here as well, byte for byte identical,
+   so the later PROFILE-04 copy silently won the cascade and any edit made to
+   this one had no effect at all - a duplicate that only ever confused the next
+   reader. The canonical definitions live with the rest of the profile layout. */
 
 /* Profile info grid */
 .profile-info-grid {
@@ -1224,26 +1206,8 @@ select:focus {
   background: var(--theme-accent, var(--kp-teal));
 }
 
-/* Sidebar modules */
-.sidebar-module {
-  background: var(--theme-card-background, rgba(255, 247, 236, 0.95));
-  border: 1px solid var(--theme-card-border-color, var(--kp-border));
-  border-radius: var(--theme-card-radius, var(--kp-card-radius));
-  margin-bottom: 1rem;
-  overflow: hidden;
-}
-
-.sidebar-module-header {
-  padding: 0.5rem 0.75rem;
-  font-weight: 600;
-  font-size: 0.75rem;
-  color: var(--theme-text, var(--kp-ink));
-  border-bottom: 1px solid var(--theme-card-border-color, var(--kp-border));
-}
-
-.sidebar-module-body {
-  padding: 0.75rem;
-}
+/* Sidebar modules are defined once, in the PROFILE-04 block below - see the
+   note by the profile modules above. */
 
 /* Friends grid */
 .friends-grid {
@@ -1496,6 +1460,22 @@ select:focus {
   width: 100vw;
   min-height: 100vh;
   min-height: 100dvh;
+
+  /* CREATOR-10B: the profile's own card surfaces.
+     `--theme-card-background` is a single, nearly opaque value that every
+     surface on the site shares, so on a profile it painted the whole content
+     column as one continuous sheet and the uploaded background was only ever
+     visible in the slivers between cards. The profile therefore resolves three
+     surfaces of its own - the card body, the card header and the status strip
+     - and applyProfileBackground() lowers only the ALPHA of each, from the
+     creator's own card color. Color, border, radius and text stay theme-driven.
+
+     These declarations are the fallback chain for a page that has not resolved
+     a theme yet (a freshly rendered profile, the editor preview before its
+     first save): a readable, near-opaque card, exactly as before. */
+  --profile-card-surface: var(--theme-card-background, rgba(255, 247, 236, 0.95));
+  --profile-card-header-surface: var(--profile-card-surface);
+  --profile-status-surface: var(--profile-card-surface);
 }
 
 /* Fixed background layer — anchored to the viewport so it does not scroll
@@ -1518,10 +1498,16 @@ select:focus {
 
 /* Profile content frame - centered content column that sits on top of the
    fixed backdrop above. Layout-only: it intentionally carries no
-   background of its own so the backdrop always shows through around it. */
+   background of its own so the backdrop always shows through around it.
+
+   z-index 2 is the CREATOR-12 invariant and is declared HERE, once: the picture
+   is z 0, the effect is z 1, this is z 2. It used to read `z-index: 1` here and
+   be silently raised to 2 by a second `.profile-content-frame` rule hundreds of
+   lines further down, so the declaration in the layout block contradicted the
+   one that actually won the cascade. */
 .profile-content-frame {
   position: relative;
-  z-index: 1;
+  z-index: 2;
   max-width: calc(1040px);
   margin: 0 auto;
   padding: 1rem;
@@ -1565,9 +1551,13 @@ select:focus {
   margin-bottom: 0.5rem;
 }
 
-/* Quote/status strip */
+/* Quote/status strip.
+   A full-width band, so it is one of the two surfaces that most easily reads as
+   a page-level layer. It gets its own profile surface rather than the full card
+   color, and it is NOT made transparent: the strip is a single line of small
+   text, so it is the surface that has to stay legible over a busy picture. */
 .profile-status-strip {
-  background: var(--theme-card-background, rgba(255, 247, 236, 0.95));
+  background: var(--profile-status-surface);
   border: 1px solid var(--theme-card-border-color, var(--kp-border));
   border-radius: var(--theme-card-radius, var(--kp-card-radius));
   padding: 0.75rem 1rem;
@@ -1607,20 +1597,24 @@ select:focus {
   }
 }
 
-/* Profile main module */
+/* Main profile module */
 .profile-module {
-  background: var(--theme-card-background, rgba(255, 247, 236, 0.95));
+  background: var(--profile-card-surface);
   border: 1px solid var(--theme-card-border-color, var(--kp-border));
   border-radius: var(--theme-card-radius, var(--kp-card-radius));
   margin-bottom: 1rem;
   overflow: hidden;
 }
 
+/* The header is a distinct surface from the body below it: a card that is
+   translucent enough to show the background still needs its title to read as a
+   title, so the header sits a little firmer than the body it sits on. */
 .profile-module-header {
   padding: 0.75rem 1rem;
   font-weight: 600;
   font-size: 0.875rem;
   color: var(--theme-text, var(--kp-ink));
+  background: var(--profile-card-header-surface);
   border-bottom: 1px solid var(--theme-card-border-color, var(--kp-border));
   display: flex;
   justify-content: space-between;
@@ -1831,9 +1825,12 @@ select:focus {
   background: rgba(107, 96, 114, 0.1);
 }
 
-/* Right sidebar modules */
+/* Right sidebar modules. Deliberately independent cards - Friend Space, Photo
+   Gallery, Video Box, Music and Scraps each keep their own border, radius and
+   surface, and nothing wraps them in a single sidebar panel, so the profile
+   background shows through the gap between them as well as around them. */
 .sidebar-module {
-  background: var(--theme-card-background, rgba(255, 247, 236, 0.95));
+  background: var(--profile-card-surface);
   border: 1px solid var(--theme-card-border-color, var(--kp-border));
   border-radius: var(--theme-card-radius, var(--kp-card-radius));
   margin-bottom: 1rem;
@@ -1845,6 +1842,7 @@ select:focus {
   font-weight: 600;
   font-size: 0.75rem;
   color: var(--theme-text, var(--kp-ink));
+  background: var(--profile-card-header-surface);
   border-bottom: 1px solid var(--theme-card-border-color, var(--kp-border));
 }
 
@@ -2718,9 +2716,10 @@ select:focus {
   text-align: center;
 }
 
-/* Footer */
+/* Footer - a full-width band like the status strip, so it uses the same
+   controlled profile surface. */
 .profile-footer {
-  background: var(--theme-card-background, rgba(255, 247, 236, 0.95));
+  background: var(--profile-status-surface);
   border: 1px solid var(--theme-card-border-color, var(--kp-border));
   border-radius: var(--theme-card-radius, var(--kp-card-radius));
   padding: 0.75rem 1rem;
@@ -6331,9 +6330,15 @@ select:focus {
 
    The stacking invariant, as CSS:
 
-     .profile-background-layer        (the picture, z-index 0)
-     .profile-background-effect-layer (the effect, z-index 1)
-     .profile-content-frame           (the content, z-index 2)
+     .profile-background-layer        (the picture, z-index 0)   — declared above
+     .profile-background-effect-layer (the effect, z-index 1)   — below
+     .profile-content-frame           (the content, z-index 2)   — declared above
+
+   Each of the three is declared exactly once, in the block that owns it, so
+   nothing here has to override anything anywhere else. CREATOR-10B relies on
+   this: a second, full-viewport layer painted above the content is exactly the
+   failure mode it exists to rule out.
+
 
    The effect layer is a FIXED viewport overlay, not a document element, so it
    can never take part in layout: it cannot add height, cannot push content, and
@@ -6359,7 +6364,6 @@ select:focus {
   display: block;
   pointer-events: none;
 }
-.profile-content-frame { z-index: 2; }
 
 .profile-bg-effect-atmosphere,
 .profile-bg-effect-lightning,
@@ -6397,3 +6401,28 @@ select:focus {
     animation: none !important;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   CREATOR-10B - the soft profile surface.
+
+   Applied only while a background the visitor actually chose - an uploaded
+   picture, a custom gradient or a custom color - is really behind the content.
+   `.profile-frame` carries `data-profile-surface="soft"` in exactly that case
+   and no attribute at all otherwise, so a profile that has no custom background
+   is left byte for byte as it was: same surface, same blur state, same look.
+
+   The backdrop blur is what buys the readability that lowering the surface alpha
+   costs. It is a BACKDROP filter and never `opacity` on an ancestor, so the only
+   thing that gets softened is the background picture showing through the card:
+   the card's own text, border, buttons and focus ring keep their full opacity.
+   A blur is not motion, so `prefers-reduced-motion` does not apply to it - what
+   does matter is that nothing is blurred while its card is still opaque, which
+   is why the gate is this attribute rather than a media query. */
+.profile-frame[data-profile-surface="soft"] .profile-module,
+.profile-frame[data-profile-surface="soft"] .sidebar-module,
+.profile-frame[data-profile-surface="soft"] .profile-status-strip,
+.profile-frame[data-profile-surface="soft"] .profile-footer {
+  -webkit-backdrop-filter: blur(10px) saturate(115%);
+  backdrop-filter: blur(10px) saturate(115%);
+}
+

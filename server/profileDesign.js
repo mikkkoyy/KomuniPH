@@ -37,6 +37,7 @@ export const DESIGN_COMPONENT_TYPES = new Set([
   'card',
   'sticker',
   'profile_guide',
+  'profile_guide_card',
 ]);
 
 /**
@@ -51,6 +52,24 @@ export const DESIGN_COMPONENT_TYPES = new Set([
  */
 export const GUIDE_PATTERNS = new Set(['default', 'minimal', 'classic']);
 export const DEFAULT_GUIDE_PATTERN = 'default';
+
+/**
+ * CREATOR-09: the real profile sections a `profile_guide_card` may stand in for.
+ * These are exactly the controlled sections the public profile renders, so a
+ * guide card can label a placement without ever carrying profile data. A stored
+ * card selects one of these ids and nothing else — no markup, CSS, script, text
+ * content or user data.
+ */
+export const GUIDE_SECTIONS = new Set([
+  'profile_photo',
+  'name',
+  'alias',
+  'bio',
+  'personal_info',
+  'gallery',
+  'testimonials',
+  'communities',
+]);
 
 /**
  * Recognized-but-unbuilt components. They are rejected today so a design can
@@ -228,6 +247,24 @@ function validateContentConfig(component, errors) {
     return;
   }
 
+  // CREATOR-09: a guide card carries exactly one allowlisted section id. It is a
+  // wireframe, not content, so it can express no text, no URL and no markup.
+  if (type === 'profile_guide_card') {
+    if (config === null || config === undefined) {
+      errors.push(`Component "${id}" is a profile_guide_card and requires a config object`);
+      return;
+    }
+    if (!isPlainObject(config)) return; // shape errors already reported
+    for (const key of Object.keys(config)) {
+      if (key !== 'section') errors.push(`Component "${id}" config has unknown field: ${key}`);
+    }
+    const section = config.section;
+    if (typeof section !== 'string' || !GUIDE_SECTIONS.has(section)) {
+      errors.push(`Component "${id}" config.section must be one of: ${[...GUIDE_SECTIONS].join(', ')}`);
+    }
+    return;
+  }
+
   if (type !== 'text' && type !== 'image' && type !== 'card' && type !== 'sticker') return;
 
   if (config === null || config === undefined) {
@@ -367,9 +404,18 @@ function validateLayoutConfig(layout) {
     return errors;
   }
 
-  const allowed = new Set(['canvas', 'components']);
+  // CREATOR-09: `guideInitialized` is design-level metadata, not geometry. It
+  // records that the Profile Guide has already been initialised for this design,
+  // which is what lets the editor tell "never initialised" (give it the default
+  // guide) from "intentionally deleted" (leave it alone). It is metadata only —
+  // it carries no coordinates and is never rendered.
+  const allowed = new Set(['canvas', 'components', 'guideInitialized']);
   for (const key of Object.keys(layout)) {
     if (!allowed.has(key)) errors.push(`Unknown layout_config field: ${key}`);
+  }
+
+  if (layout.guideInitialized !== undefined && typeof layout.guideInitialized !== 'boolean') {
+    errors.push('layout.guideInitialized must be a boolean');
   }
 
   if (layout.canvas !== undefined && layout.canvas !== null) {

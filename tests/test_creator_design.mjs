@@ -162,6 +162,16 @@ const guide = (config, overrides = {}) => ({
   rotation: 0, zIndex: 0, visible: true, locked: false, config, ...overrides,
 });
 
+/**
+ * CREATOR-09: read the shared client guide-pattern registry, so the server tests
+ * assert against the SAME card set the editor actually creates rather than a
+ * hand-copied list that could drift.
+ */
+const guidePatternForTest = async (id) => {
+  const registry = await import(mod('web/js/profileDesign.js'));
+  return registry.guidePattern(id);
+};
+
 test('CREATOR-08: a valid profile_guide is accepted and round-trips its pattern', async () => {
   // A dedicated user, so these designs never pollute tokenA's design list that
   // the CRUD tests count.
@@ -236,6 +246,135 @@ test('CREATOR-08: guide geometry is validated like any other component', async (
     check(r.status === 400, `guide geometry ${JSON.stringify(overrides)} is rejected, got ${r.status}`);
   }
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// CREATOR-09: Profile Guide cards
+// ════════════════════════════════════════════════════════════════════════════
+
+// A guide card marks where a REAL KomuniPH profile section belongs. It carries a
+// single allowlisted section id and nothing else.
+const guideCard = (config, overrides = {}) => ({
+  id: 'gc1', type: 'profile_guide_card', x: 40, y: 20, width: 200, height: 190,
+  rotation: 0, zIndex: 0, visible: true, locked: false, config, ...overrides,
+});
+
+test('CREATOR-09: a valid profile_guide_card is accepted and round-trips its section', async () => {
+  const cardToken = tokenFor(createUserWithProfile('design-guide-card'));
+  const r = await api('POST', '/api/profile/design', {
+    token: cardToken,
+    body: {
+      name: 'GuideCard',
+      layout: {
+        canvas: { width: 960, minHeight: 1200 },
+        components: [guideCard({ section: 'testimonials' })],
+      },
+    },
+  });
+  check(r.status === 201, `a valid guide card is created, got ${r.status}: ${JSON.stringify(r.data)}`);
+  const comp = r.data?.design?.layout?.components?.[0];
+  check(comp?.type === 'profile_guide_card', 'the guide card is stored as its own type');
+  check(comp?.config?.section === 'testimonials', 'the section id round-trips');
+  check(comp?.width === 200 && comp?.height === 190, 'guide card geometry persists');
+});
+
+test('CREATOR-09: every real profile section is an allowed guide-card section', async () => {
+  const cardToken = tokenFor(createUserWithProfile('design-guide-card-2'));
+  const real = ['profile_photo', 'name', 'alias', 'bio', 'personal_info', 'gallery', 'testimonials', 'communities'];
+  for (const section of real) {
+    const r = await api('POST', '/api/profile/design', {
+      token: cardToken,
+      body: {
+        name: `G-${section}`,
+        layout: { canvas: { width: 960, minHeight: 1200 }, components: [guideCard({ section })] },
+      },
+    });
+    check(r.status === 201, `the real section "${section}" is allowed, got ${r.status}`);
+  }
+});
+
+test('CREATOR-09: a guide card accepts only a known section id', async () => {
+  const cardToken = tokenFor(createUserWithProfile('design-guide-card-3'));
+  for (const bad of ['cover', 'Header', 'made_up_section', '', 42, null, undefined]) {
+    const r = await api('POST', '/api/profile/design', {
+      token: cardToken,
+      body: {
+        name: 'BadSection',
+        layout: { canvas: { width: 960, minHeight: 1200 }, components: [guideCard({ section: bad })] },
+      },
+    });
+    check(r.status === 400, `guide card section ${JSON.stringify(bad)} is rejected, got ${r.status}`);
+  }
+});
+
+test('CREATOR-09: a guide card cannot smuggle content, markup, script or a pattern', async () => {
+  const cardToken = tokenFor(createUserWithProfile('design-guide-card-4'));
+  for (const config of [
+    { section: 'bio', text: 'real looking profile data' },
+    { section: 'bio', imageUrl: 'https://example.com/x.png' },
+    { section: 'bio', pattern: 'default' },
+    { section: 'bio', heading: 'Testimonials', body: 'fake review text' },
+    { section: 'bio', style: 'color:red' },
+    { section: '<script>alert(1)</script>' },
+  ]) {
+    const r = await api('POST', '/api/profile/design', {
+      token: cardToken,
+      body: {
+        name: 'HostileCard',
+        layout: { canvas: { width: 960, minHeight: 1200 }, components: [guideCard(config)] },
+      },
+    });
+    check(r.status === 400, `guide card config ${JSON.stringify(config)} is rejected, got ${r.status}`);
+  }
+  // A guide card must carry a config object rather than silently defaulting.
+  for (const config of [null, 'gallery', 7, []]) {
+    const r = await api('POST', '/api/profile/design', {
+      token: cardToken,
+      body: {
+        name: 'NoCfgCard',
+        layout: { canvas: { width: 960, minHeight: 1200 }, components: [guideCard(config)] },
+      },
+    });
+    check(r.status === 400, `guide card config ${JSON.stringify(config)} is rejected, got ${r.status}`);
+  }
+});
+
+test('CREATOR-09: guide card geometry is validated like any other component', async () => {
+  const cardToken = tokenFor(createUserWithProfile('design-guide-card-5'));
+  for (const overrides of [
+    { width: 4 }, { height: 0 }, { x: 99999 }, { rotation: 400 },
+    { zIndex: 1.5 }, { width: '200' }, { height: null },
+  ]) {
+    const r = await api('POST', '/api/profile/design', {
+      token: cardToken,
+      body: {
+        name: 'BadCardGeom',
+        layout: { canvas: { width: 960, minHeight: 1200 }, components: [guideCard({ section: 'bio' }, overrides)] },
+      },
+    });
+    check(r.status === 400, `guide card geometry ${JSON.stringify(overrides)} is rejected, got ${r.status}`);
+  }
+});
+
+test('CREATOR-09: a full default guide set saves and reloads unchanged', async () => {
+  const cardToken = tokenFor(createUserWithProfile('design-guide-card-6'));
+  const pattern = await guidePatternForTest('default');
+  const components = pattern.cards.map((c, i) => guideCard(
+    { section: c.section },
+    { id: `gc_${i}`, x: c.x, y: c.y, width: c.width, height: c.height, zIndex: i },
+  ));
+  const r = await api('POST', '/api/profile/design', {
+    token: cardToken,
+    body: { name: 'FullGuide', layout: { canvas: { width: 960, minHeight: 1200 }, components } },
+  });
+  check(r.status === 201, `the whole default guide set saves, got ${r.status}: ${JSON.stringify(r.data)}`);
+  const stored = r.data?.design?.layout?.components || [];
+  check(stored.length === pattern.cards.length, `all ${pattern.cards.length} guide cards are stored, got ${stored.length}`);
+  check(
+    stored.every((c, i) => c.config.section === pattern.cards[i].section && c.x === pattern.cards[i].x && c.width === pattern.cards[i].width),
+    'every guide card keeps its section and exact geometry',
+  );
+});
+
 
 test('unknown component type is rejected', async () => {
   if (!tokenA) { uidA = createUserWithProfile('design-a'); tokenA = tokenFor(uidA); }  const r = await api('POST', '/api/profile/design', {
@@ -669,10 +808,12 @@ test('registries expose the controlled contract for clients', async () => {
   for (const type of expected) {
     check(profileDesign.DESIGN_COMPONENT_TYPES.has(type), `missing controlled type: ${type}`);
   }
-  // CREATOR-08 adds `profile_guide`, so the registry is 8 controlled + 4
-  // content + 1 guide.
-  check(profileDesign.DESIGN_COMPONENT_TYPES.size === 13, 'registry must contain the 8 controlled + 4 content types + the guide');
-  check(profileDesign.DESIGN_COMPONENT_TYPES.has('profile_guide'), 'the guide type is registered');
+  // CREATOR-08 added `profile_guide`; CREATOR-09 added `profile_guide_card`
+  // (and keeps the legacy type accepted so a pre-CREATOR-09 design still saves).
+  // So the registry is 8 controlled + 4 content + 2 guide types.
+  check(profileDesign.DESIGN_COMPONENT_TYPES.size === 14, 'registry must contain the 8 controlled + 4 content types + 2 guide types');
+  check(profileDesign.DESIGN_COMPONENT_TYPES.has('profile_guide_card'), 'the guide card type is registered');
+  check(profileDesign.DESIGN_COMPONENT_TYPES.has('profile_guide'), 'the legacy guide type is still accepted for saved designs');
 });
 
 // ════════════════════════════════════════════════════════════════════════════

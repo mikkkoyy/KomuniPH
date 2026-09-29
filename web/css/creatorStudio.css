@@ -54,7 +54,15 @@
   margin: 0.4rem 0 0.8rem;
   font-size: 0.85rem;
   color: var(--studio-muted);
-  min-height: 1.1em;
+  /* Reserve two lines unconditionally. The status text sits ABOVE the workspace,
+     so a message that grew from one line to two would otherwise push the whole
+     editor down mid-gesture — moving the canvas out from under a pointer that
+     was measured a moment earlier. A fixed height makes the status purely
+     informational. */
+  min-height: 2.2em;
+  max-height: 2.2em;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ── Toolbar ───────────────────────────────────────────────────────────────── */
@@ -296,6 +304,36 @@
      the zoom bar and the viewer. The bar separates itself with its own padding. */
   gap: 0;
 }
+/* CREATOR-09: one bar above the viewer carrying the design-canvas size and the
+   zoom controls. The canvas size names the DESIGN coordinate system (the saved
+   layout.canvas), which is a different thing from the Profile Viewer below it —
+   the viewer is only the editing viewport that displays that canvas. Both live
+   on one row so the indicator costs the viewer no vertical space. It is a
+   non-growing flex item, so it never covers the canvas or steals pointer
+   events from editing. */
+#studio-stage-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0 0 0.5rem;
+}
+#studio-canvas-size {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--studio-muted);
+  background: rgba(148, 163, 184, 0.16);
+  border: 1px dashed rgba(100, 116, 139, 0.5);
+  border-radius: 4px;
+  padding: 0.15rem 0.45rem;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  white-space: nowrap;
+}
+
 /* CREATOR-08: the compact zoom bar sits above the viewer as a non-growing flex
    item, so it never covers the profile canvas and never steals pointer events
    from editing. It affects zoom/pan only — never the viewer's size. */
@@ -304,7 +342,6 @@
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0 0 0.5rem;
 }
 .studio-zoom-btn {
   min-width: 2rem;
@@ -373,7 +410,90 @@
 .studio-viewer-height-grip[hidden] { display: none; }
 .studio-viewer-height-grip:hover { background: rgba(94, 234, 212, 0.18); }
 
-/* ── Profile Guide (CREATOR-08) ───────────────────────────────────────────────
+/* ── Real image editing (CREATOR-09) ───────────────────────────────────────────
+   The public stylesheet scopes the image sizing rules to
+   `.profile-frame.has-profile-design`, so inside Creator Studio an <img> had NO
+   size rules at all: it rendered at its NATURAL pixel size and spilled out of the
+   component box, which made an uploaded image look "just contained in a box" and
+   meant resizing the box did not visibly resize the image.
+
+   These rules give the editor the same rendering model the public profile uses —
+   the image fills its component bounds and honours cover / contain / fill — so a
+   resize handle changes the picture, not an invisible container.
+
+   The clipping lives on `.design-image-inner`, deliberately NOT on the component
+   box: a component's resize handles sit 6px OUTSIDE its own box, so clipping the
+   component would make them unreachable. The image is contained by its own
+   wrapper, which is enough to stop it spilling out of the design. */
+#studio-canvas-inner .design-image-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+}
+#studio-canvas-inner .design-image-inner img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+#studio-canvas-inner .design-image-fit-cover img { object-fit: cover; }
+#studio-canvas-inner .design-image-fit-contain img { object-fit: contain; }
+#studio-canvas-inner .design-image-fit-fill img { object-fit: fill; }
+#studio-canvas-inner .design-image-inner.design-image-broken {
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.06);
+  border: 1px dashed rgba(71, 85, 105, 0.5);
+  color: rgba(51, 65, 85, 0.6);
+  font-size: 12px;
+}
+#studio-canvas-inner .design-image-inner.design-image-broken img { display: none; }
+
+/* ── Profile Guide cards (CREATOR-09) ───────────────────────────────────────────
+   A guide card is a WIREFRAME marking where a real profile section belongs. It
+   is deliberately unlike a finished profile card: a dashed outline, a
+   translucent fill, an uppercase section name and a muted "Guide Area" hint, so
+   it can never be mistaken for real content or published profile data.
+
+   Unlike CREATOR-08's single full-canvas block, each card is its own component,
+   so cards are individually selectable, draggable and resizable. */
+.studio-guide-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  box-sizing: border-box;
+  padding: 6px;
+  border: 2px dashed rgba(71, 85, 105, 0.55);
+  border-radius: 8px;
+  background: rgba(148, 163, 184, 0.16);
+  /* Deliberately NOT `overflow: hidden`: a component's resize handles sit 6px
+     outside its own box, so clipping here would make them ungrabbable. The
+     labels below carry their own ellipsis instead. */
+  text-align: center;
+  cursor: move;
+}
+.studio-guide-card-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: rgba(51, 65, 85, 0.8);
+  line-height: 1.2;
+}
+.studio-guide-card-area {
+  font-size: 11px;
+  font-style: italic;
+  color: rgba(51, 65, 85, 0.55);
+  line-height: 1.2;
+}
+/* A tiny card cannot show both lines; keep at least the section label. */
+.studio-guide-card-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.studio-guide-card-area { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+
+/* ── Legacy single-block guide (CREATOR-08), shown only pre-migration ─────────
    A layout SKETCH, deliberately unlike real profile content: dashed soft
    borders, a low-opacity wash and muted labels, so it never reads as a finished
    profile and never competes with the components being placed on top of it.

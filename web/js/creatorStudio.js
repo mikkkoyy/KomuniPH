@@ -20,10 +20,15 @@ import {
   CONTENT_COMPONENT_TYPES,
   applyGeometryToElement,
   applyCommonStyleToElement,
-  GUIDE_COMPONENT_TYPE,
+  GUIDE_CARD_COMPONENT_TYPE,
+  LEGACY_GUIDE_COMPONENT_TYPE,
+  GUIDE_COMPONENT_TYPES,
+  GUIDE_SECTIONS,
+  GUIDE_SECTION_IDS,
   GUIDE_PATTERN_IDS,
   DEFAULT_GUIDE_PATTERN,
   guidePattern,
+  guideSectionLabel,
   guideLabel,
 } from './profileDesign.js';
 import {
@@ -64,30 +69,17 @@ const CONTENT_SECTIONS = [
 ];
 
 /**
- * CREATOR-08: the Profile Guide. It is a real, editable design component — it
- * moves, resizes, appears in Layers and is saved with the design — but it is a
- * STUDIO-ONLY aid that never renders on the public profile. New designs get
- * exactly one default guide; it is never re-created by renderCanvas(), so a
- * deleted guide stays deleted and a saved one stays as the creator left it.
- */
-const GUIDE_SECTION = {
-  type: GUIDE_COMPONENT_TYPE,
-  label: 'Profile Guide',
-  hint: 'A layout sketch to design against — Studio only',
-  w: 960,
-  h: 1200,
-  config: { pattern: DEFAULT_GUIDE_PATTERN },
-};
-/**
- * The guide starts just inside the canvas rather than exactly on its edges.
+ * CREATOR-09: the Profile Guide is no longer one big block. It is a set of
+ * `profile_guide_card` components — one per real KomuniPH profile section — so
+ * each card selects, moves, resizes and deletes through the ordinary geometry
+ * system. The guide is NOT content: it is a Studio-only wireframe, so it is
+ * never rendered on the public profile, in Preview, in a published design, in
+ * Marketplace listings or in installed themes/assets.
  *
- * A component that fills the canvas is unclippable in practice: its resize
- * handles sit ~6px OUTSIDE the component box, so a full-bleed guide's handles
- * are all cut off by the canvas viewport and the guide could never be resized or
- * moved. A small inset keeps every handle reachable and gives the guide room to
- * move immediately, while still reading as "the whole profile canvas".
+ * The guide is initialised ONCE, at design creation or at the load/migration
+ * boundary, and never by renderCanvas() — so a guide card the creator deleted
+ * stays deleted and re-opening a design never resurrects it.
  */
-const GUIDE_INSET = 12;
 const ALL_SECTIONS = [...CONTROLLED_SECTIONS, ...CONTENT_SECTIONS];
 const CONTROLLED_TYPES = new Set(CONTROLLED_SECTIONS.map(s => s.type));
 
@@ -153,8 +145,14 @@ function roundInt(value) { return Math.round(value); }
 function newId() { idCounter += 1; return `c${Date.now().toString(36)}${idCounter.toString(36)}`; }
 function labelOf(comp) {
   const meta = ALL_SECTIONS.find(s => s.type === comp.type);
-  // CREATOR-08: the guide shows its current pattern, never an internal id.
-  if (comp.type === GUIDE_COMPONENT_TYPE) return guideLabel(comp.config && comp.config.pattern);
+  // CREATOR-09: a guide card is named after the real section it marks, with a
+  // "Guide" prefix so it is never mistaken for a real component in Layers.
+  if (comp.type === GUIDE_CARD_COMPONENT_TYPE) {
+    return `Guide — ${guideSectionLabel(comp.config && comp.config.section)}`;
+  }
+  // CREATOR-08's legacy single-block guide, still shown if an un-migrated design
+  // is somehow open.
+  if (comp.type === LEGACY_GUIDE_COMPONENT_TYPE) return guideLabel(comp.config && comp.config.pattern);
   if (comp.type === 'text') {
     const preview = String((comp.config && comp.config.text) || '').slice(0, 24);
     return `Text — ${preview || '…'}`;
@@ -220,6 +218,11 @@ function normalizeDesign(design) {
     : { canvas: { ...DEFAULT_CANVAS }, components: [] };
   if (!layoutObj.canvas || typeof layoutObj.canvas !== 'object') layoutObj.canvas = { ...DEFAULT_CANVAS };
   if (!Array.isArray(layoutObj.components)) layoutObj.components = [];
+  // CREATOR-09: the guide initialisation / migration boundary. It runs when a
+  // design is OPENED, not when it is drawn, and it is a no-op on any design that
+  // has already been initialised — so an intentional deletion is never undone
+  // and guide cards are never duplicated.
+  ensureGuideInitialized(layoutObj);
   return { ...design, layout: layoutObj };
 }
 
@@ -244,6 +247,8 @@ export function renderCreatorStudioPage() {
         <button id="studio-undo" class="btn btn-secondary" type="button" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
         <button id="studio-redo" class="btn btn-secondary" type="button" title="Redo (Ctrl+Y)" disabled>↷ Redo</button>
         <button id="studio-preview-toggle" class="btn btn-secondary" type="button">Preview</button>
+        <button id="studio-guide-reset" class="btn btn-secondary" type="button"
+                title="Remove every guide card and restore the default guide set">Reset Guide</button>
         <span class="studio-toolbar-sep" aria-hidden="true"></span>
         <span class="studio-spacer" aria-hidden="true"></span>
         <button id="studio-coin-shop" class="btn btn-secondary" type="button" title="Manage the digital assets you sell for KomuniPH Coins">My Coin Shop</button>
@@ -262,14 +267,25 @@ export function renderCreatorStudioPage() {
           <div id="studio-content-list" class="studio-element-list"></div>
         </aside>
         <div id="studio-stage">
-          <!-- CREATOR-08: a compact zoom control bar sits ABOVE the viewer, so it
-               never covers the profile canvas and never steals pointer events
-               from editing. It controls zoom/pan only — never viewer size. -->
-          <div id="studio-viewer-controls" role="group" aria-label="Profile Viewer zoom">
-            <button type="button" id="studio-zoom-out" class="btn btn-secondary studio-zoom-btn" title="Zoom out (10%)" aria-label="Zoom out">−</button>
-            <span id="studio-zoom-readout" class="studio-zoom-readout" role="status" aria-live="polite" title="Current zoom">100%</span>
-            <button type="button" id="studio-zoom-in" class="btn btn-secondary studio-zoom-btn" title="Zoom in (10%)" aria-label="Zoom in">+</button>
-            <button type="button" id="studio-zoom-reset" class="btn btn-secondary studio-zoom-btn studio-zoom-reset" title="Reset zoom to 100% and re-centre">Reset</button>
+          <!-- CREATOR-09: ONE bar above the viewer carrying the DESIGN CANVAS size
+               and the CREATOR-08 zoom controls. The canvas size is the design
+               coordinate system (960 x 1200 by default), NOT the Profile Viewer:
+               the viewer below is only the editing viewport that displays it.
+               Keeping both on ONE row means the indicator costs the viewer no
+               vertical space. The label is re-rendered from layout.canvas on
+               every canvas render, so it always states the real dimensions. -->
+          <div id="studio-stage-bar">
+            <span id="studio-canvas-size" title="Design canvas size in design coordinates"
+                  role="status" aria-live="polite">Canvas 960 × 1200 px</span>
+            <!-- CREATOR-08: the compact zoom bar, kept on the same row so it never
+                 covers the profile canvas and never steals pointer events from
+                 editing. It controls zoom/pan only — never viewer size. -->
+            <div id="studio-viewer-controls" role="group" aria-label="Profile Viewer zoom">
+              <button type="button" id="studio-zoom-out" class="btn btn-secondary studio-zoom-btn" title="Zoom out (10%)" aria-label="Zoom out">−</button>
+              <span id="studio-zoom-readout" class="studio-zoom-readout" role="status" aria-live="polite" title="Current zoom">100%</span>
+              <button type="button" id="studio-zoom-in" class="btn btn-secondary studio-zoom-btn" title="Zoom in (10%)" aria-label="Zoom in">+</button>
+              <button type="button" id="studio-zoom-reset" class="btn btn-secondary studio-zoom-btn studio-zoom-reset" title="Reset zoom to 100% and re-centre">Reset</button>
+            </div>
           </div>
           <div id="studio-viewer">
             <div id="studio-canvas-scroll">
@@ -508,11 +524,36 @@ function startViewerHeightResize(event) {
 
 
 /**
- * CREATOR-08: build the editable Profile Guide. Every node is created with
- * element APIs and `textContent` from the server-known pattern registry — never
- * innerHTML — so a stored pattern id can express labels and nothing else.
+ * CREATOR-09: build ONE guide card — a labelled wireframe block marking where a
+ * real profile section belongs. It is built with element APIs and `textContent`
+ * from the server-known section registry, never innerHTML, so a stored section
+ * id can express a label and nothing else.
+ *
+ * The card is deliberately NOT dressed like a finished profile card: it has a
+ * dashed outline, a translucent fill, an uppercase section label and a
+ * "Guide Area" hint, so it always reads as a placement guide.
  */
-function buildGuideNode(el, comp) {
+function buildGuideCardNode(el, comp) {
+  const section = comp.config && comp.config.section;
+  el.classList.add('studio-guide-card');
+
+  const label = document.createElement('span');
+  label.className = 'studio-guide-card-label';
+  label.textContent = guideSectionLabel(section).toUpperCase();
+  el.appendChild(label);
+
+  const area = document.createElement('span');
+  area.className = 'studio-guide-card-area';
+  area.textContent = 'Guide Area';
+  el.appendChild(area);
+}
+
+/**
+ * CREATOR-08's legacy single-block guide. Rendered only for a design that has
+ * not yet been migrated, so an un-migrated design is still visible rather than
+ * blank while it loads.
+ */
+function buildLegacyGuideNode(el, comp) {
   const pattern = guidePattern(comp.config && comp.config.pattern);
   const inner = document.createElement('div');
   inner.className = 'studio-guide-inner';
@@ -522,15 +563,15 @@ function buildGuideNode(el, comp) {
   title.textContent = `Profile Guide — ${pattern.label}`;
   inner.appendChild(title);
 
-  for (const block of pattern.blocks) {
+  for (const card of pattern.cards) {
     const row = document.createElement('div');
     row.className = 'studio-guide-block';
     // A block is sized as a fraction of the guide box so it stays proportional
     // when the creator resizes the guide.
-    row.style.height = `${(block.height / 1200) * 100}%`;
+    row.style.height = `${(card.height / 1200) * 100}%`;
     const label = document.createElement('span');
     label.className = 'studio-guide-label';
-    label.textContent = block.label;
+    label.textContent = guideSectionLabel(card.section);
     row.appendChild(label);
     inner.appendChild(row);
   }
@@ -539,8 +580,10 @@ function buildGuideNode(el, comp) {
 
 function buildContentNode(el, comp) {
   const config = comp.config || {};
-  if (comp.type === GUIDE_COMPONENT_TYPE) {
-    buildGuideNode(el, comp);
+  if (comp.type === GUIDE_CARD_COMPONENT_TYPE) {
+    buildGuideCardNode(el, comp);
+  } else if (comp.type === LEGACY_GUIDE_COMPONENT_TYPE) {
+    buildLegacyGuideNode(el, comp);
   } else if (comp.type === 'image' || comp.type === 'sticker') {
     const inner = document.createElement('div');
     inner.className = 'design-image-inner';
@@ -628,6 +671,11 @@ function renderCanvas() {
   doc.style.width = `${c.width}px`;
   doc.style.minHeight = `${c.minHeight}px`;
 
+  // CREATOR-09: state the real design canvas size. It tracks layout.canvas, so
+  // editing the canvas width/height in Properties updates it immediately.
+  const sizeLabel = root?.querySelector('#studio-canvas-size');
+  if (sizeLabel) sizeLabel.textContent = `Canvas ${c.width} × ${c.minHeight} px`;
+
   const ordered = [...components()].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
   if (ordered.length === 0) {
     const empty = document.createElement('div');
@@ -635,12 +683,12 @@ function renderCanvas() {
     empty.textContent = 'Your profile is empty. Click a section or "+" in the Elements panel to place it, or drag it onto the canvas.';
     doc.appendChild(empty);
   }
-  // CREATOR-08: the guide is a Studio-only aid. Preview represents the real
-  // published profile, so the guide is not drawn there — exactly as the public
-  // profile renderer skips it. The component itself is untouched and still
-  // saved with the design.
+  // CREATOR-09: guide cards are a Studio-only aid. Preview represents the real
+  // published profile, so no guide is drawn there — exactly as the public
+  // profile renderer excludes them. The components themselves are untouched and
+  // still saved with the design.
   const visible = previewMode
-    ? ordered.filter(comp => comp.type !== GUIDE_COMPONENT_TYPE)
+    ? ordered.filter(comp => !GUIDE_COMPONENT_TYPES.has(comp.type))
     : ordered;
   visible.forEach(comp => doc.appendChild(buildComponentNode(comp)));
 
@@ -731,10 +779,38 @@ function sectionTitle(text) {
   return heading;
 }
 
+/**
+ * CREATOR-09 §12: keep the Properties geometry fields showing the component's
+ * real geometry while it is dragged or resized on the canvas.
+ *
+ * There is exactly ONE authoritative geometry — the component object — so this
+ * only ever mirrors that object into the already-rendered inputs. The panel is
+ * deliberately NOT rebuilt (rebuilding would blur the field the creator may be
+ * typing into), and a field that currently has focus is left alone.
+ */
+function syncGeometryFields(comp) {
+  if (!comp) return;
+  const panel = root?.querySelector('#studio-properties');
+  if (!panel) return;
+  const title = panel.querySelector('.studio-prop-id');
+  // Only mirror into the panel that is actually showing this component.
+  if (!title || title.textContent !== `id: ${comp.id}`) return;
+  panel.querySelectorAll('input[data-prop-path]').forEach(input => {
+    if (document.activeElement === input) return;
+    const value = getPath(comp, input.dataset.propPath);
+    const next = value === null || value === undefined ? '' : String(value);
+    if (input.value !== next) input.value = next;
+  });
+}
+
 function numberField(comp, path, { min = -Infinity, max = Infinity, step = 'any', integer = false } = {}) {
   const input = document.createElement('input');
   input.type = 'number';
   input.step = step;
+  // CREATOR-09: tag the control with the property it edits so a canvas drag can
+  // keep the displayed geometry in step without rebuilding the panel (which
+  // would steal focus and interrupt typing).
+  input.dataset.propPath = path;
   const current = getPath(comp, path);
   input.value = current === null || current === undefined ? '' : String(current);
   input.addEventListener('input', () => {
@@ -1084,37 +1160,45 @@ function componentProperties(frag, comp) {
   frag.appendChild(fieldRow('Shadow blur', numberField(comp, 'style.shadowBlur', { min: 0, max: 200 })));
   frag.appendChild(fieldRow('Shadow color', colorField(comp, 'style.shadowColor')));
 
-  if (comp.type === GUIDE_COMPONENT_TYPE) {
-    frag.appendChild(sectionTitle('Guide Pattern'));
-    frag.appendChild(fieldRow('Pattern', selectField(comp, 'config.pattern', GUIDE_PATTERN_IDS, {
-      labels: GUIDE_PATTERN_IDS.map(id => guidePattern(id).label),
+  if (comp.type === GUIDE_CARD_COMPONENT_TYPE) {
+    frag.appendChild(sectionTitle('Guide Card'));
+    frag.appendChild(fieldRow('Section', selectField(comp, 'config.section', GUIDE_SECTION_IDS, {
+      labels: GUIDE_SECTION_IDS.map(id => GUIDE_SECTIONS[id]),
     })));
     const hint = document.createElement('p');
     hint.className = 'studio-prop-hint';
-    hint.textContent = 'A layout sketch of the profile structure. It is saved with your design, is editable, and never appears on your public profile.';
+    hint.textContent = 'A placement guide for a real profile section. It is saved with your design, is editable like any component, and never appears on your public profile, in a published design or in the Marketplace.';
     frag.appendChild(hint);
 
-    // Replacing swaps the pattern in place, keeping position, size, rotation and
-    // z-index — the guide is never recreated as a new component.
+    // CREATOR-09 §7: Reset restores the default guide set for the WHOLE design.
+    // It removes every guide card and creates exactly one default set, leaving
+    // all other components untouched.
     const actions = document.createElement('div');
     actions.className = 'studio-prop-row studio-guide-actions';
-    const replace = document.createElement('button');
-    replace.type = 'button';
-    replace.id = 'studio-guide-replace';
-    replace.className = 'btn btn-secondary';
-    replace.textContent = 'Replace Pattern';
-    replace.title = 'Cycle to the next guide pattern';
-    replace.addEventListener('click', () => { replaceGuidePattern(comp.id); renderProperties(); });
+    const reset = document.createElement('button');
+    reset.type = 'button';
+    reset.id = 'studio-guide-reset-in-properties';
+    reset.className = 'btn btn-secondary';
+    reset.textContent = 'Reset Guide';
+    reset.title = 'Remove all guide cards and restore the default guide set';
+    reset.addEventListener('click', () => { resetGuide(); renderProperties(); });
     const del = document.createElement('button');
     del.type = 'button';
     del.id = 'studio-guide-delete';
     del.className = 'btn btn-secondary';
-    del.textContent = 'Delete Guide';
-    del.title = 'Remove this guide from the design';
+    del.textContent = 'Delete Card';
+    del.title = 'Remove this guide card from the design';
     del.addEventListener('click', () => { removeComponent(comp.id); });
-    actions.appendChild(replace);
+    actions.appendChild(reset);
     actions.appendChild(del);
     frag.appendChild(actions);
+  }
+
+  if (comp.type === LEGACY_GUIDE_COMPONENT_TYPE) {
+    const hint = document.createElement('p');
+    hint.className = 'studio-prop-hint';
+    hint.textContent = 'This is a pre-CREATOR-09 guide. It is converted to guide cards when the design is next saved.';
+    frag.appendChild(hint);
   }
 
   if (CONTENT_COMPONENT_TYPES.has(comp.type)) {
@@ -1183,49 +1267,114 @@ function renderAll() {
   updateToolbar();
 }
 
-// ── Guide operations (CREATOR-08) ────────────────────────────────────────────
-/**
- * Build the initial guide component for a brand-new design. It is inserted ONCE
- * at creation time only — never from renderCanvas() — so a guide the creator
- * deletes stays deleted and a guide they repositioned is not undone by a re-render.
- */
-function makeDefaultGuide() {
-  // Uses DEFAULT_CANVAS directly rather than canvas(): this runs while a design
-  // is being CREATED, before currentDesign exists, so it must not read the
-  // module's current design.
-  return {
+// ── Guide operations (CREATOR-08 / CREATOR-09) ───────────────────────────────
+//
+// CREATOR-09: the guide is a SET of `profile_guide_card` components, each a
+// labelled wireframe for one real profile section. Cards use the ordinary
+// geometry/selection system — there is no second editor here.
+//
+// The guide is initialised at exactly one boundary: design creation, or the
+// load/migration path in ensureGuideInitialized(). It is NEVER created by a
+// render, so an intentional deletion survives re-opening the design, and the
+// `guideInitialized` flag on the layout is what distinguishes "never
+// initialised" from "intentionally deleted".
+const GUIDE_INIT_FLAG = 'guideInitialized';
+
+/** True when a layout has ever had the guide initialised (or explicitly reset). */
+function isGuideInitialized(layoutObj) {
+  return !!layoutObj && layoutObj[GUIDE_INIT_FLAG] === true;
+}
+
+/** Build the card components for a guide pattern, in a fresh component list. */
+function buildGuideCards(patternId, { zIndex = 0 } = {}) {
+  return guidePattern(patternId).cards.map(card => ({
     id: newId(),
-    type: GUIDE_COMPONENT_TYPE,
-    x: GUIDE_INSET,
-    y: GUIDE_INSET,
-    width: DEFAULT_CANVAS.width - GUIDE_INSET * 2,
-    height: DEFAULT_CANVAS.minHeight - GUIDE_INSET * 2,
+    type: GUIDE_CARD_COMPONENT_TYPE,
+    x: card.x,
+    y: card.y,
+    width: card.width,
+    height: card.height,
     rotation: 0,
-    zIndex: 0,
+    zIndex,
     visible: true,
     locked: false,
-    config: { pattern: DEFAULT_GUIDE_PATTERN },
+    config: { section: card.section },
+  }));
+}
+
+/**
+ * CREATOR-09: the initialisation / migration boundary, run ONCE when a design is
+ * opened — never from renderCanvas().
+ *
+ * Three cases, distinguished by the `guideInitialized` flag:
+ *
+ *   flag true  → the creator has seen the guide. A design with no cards is one
+ *                they deliberately deleted. Do NOTHING; never resurrect it.
+ *   flag false + legacy guide present → a pre-CREATOR-09 design. Convert its
+ *                single block into guide cards (a migration, not an injection).
+ *   flag false + nothing → never initialised. Create the default card set.
+ *
+ * In both mutating cases the flag is set, so this can only ever run once per
+ * design and can never produce duplicate cards.
+ */
+function ensureGuideInitialized(layoutObj) {
+  if (!layoutObj || !Array.isArray(layoutObj.components)) return;
+  if (isGuideInitialized(layoutObj)) return;
+
+  const legacy = layoutObj.components.find(c => c.type === LEGACY_GUIDE_COMPONENT_TYPE);
+  if (legacy) {
+    // Migrate CREATOR-08's single block into the card set for its pattern. The
+    // legacy component is replaced, not duplicated.
+    const patternId = legacy.config && legacy.config.pattern;
+    const cards = buildGuideCards(patternId, { zIndex: legacy.zIndex ?? 0 });
+    const index = layoutObj.components.indexOf(legacy);
+    layoutObj.components.splice(index, 1, ...cards);
+  } else if (!layoutObj.components.some(c => c.type === GUIDE_CARD_COMPONENT_TYPE)) {
+    layoutObj.components.push(...buildGuideCards(DEFAULT_GUIDE_PATTERN));
+  }
+  layoutObj[GUIDE_INIT_FLAG] = true;
+}
+
+/** A fresh design layout: the default canvas plus exactly one default guide set. */
+function newDesignLayout() {
+  return {
+    canvas: { ...DEFAULT_CANVAS },
+    components: buildGuideCards(DEFAULT_GUIDE_PATTERN),
+    [GUIDE_INIT_FLAG]: true,
   };
 }
 
-/** A fresh design layout: the default canvas plus exactly one default guide. */
-function newDesignLayout() {
-  return { canvas: { ...DEFAULT_CANVAS }, components: [makeDefaultGuide()] };
+/** Every guide card currently in the design. */
+function guideCards() {
+  return components().filter(c => c.type === GUIDE_CARD_COMPONENT_TYPE);
 }
 
 /**
- * Replace a guide's pattern IN PLACE. Geometry, rotation, z-index and selection
- * are untouched — only the internal visual pattern changes, and the component
- * is never recreated.
+ * CREATOR-09 §7: Reset the guide.
+ *
+ * Removes EVERY existing guide card and creates exactly one default set. It
+ * leaves every non-guide component — and all of their geometry, style, content
+ * and z-order — untouched, so a design is never damaged by restoring its guide.
+ * The init flag stays true, so resetting can never produce a duplicate set and
+ * re-opening the design does not add another.
  */
-function replaceGuidePattern(id) {
-  const comp = findComp(id);
-  if (!comp || comp.type !== GUIDE_COMPONENT_TYPE) return;
+function resetGuide() {
+  const cards = guideCards();
+  const legacy = components().filter(c => c.type === LEGACY_GUIDE_COMPONENT_TYPE);
+  if (cards.length === 0 && legacy.length === 0) {
+    setStatus('This design already has no guide cards.');
+    return;
+  }
   pushHistory();
-  const index = GUIDE_PATTERN_IDS.indexOf(comp.config && comp.config.pattern);
-  const next = GUIDE_PATTERN_IDS[(index + 1) % GUIDE_PATTERN_IDS.length];
-  comp.config = { ...(comp.config || {}), pattern: next };
-  markChanged(`Guide pattern changed to ${guidePattern(next).label}. Position and size were kept.`);
+  const removed = new Set([...cards, ...legacy].map(c => c.id));
+  layout().components = components().filter(c => !removed.has(c.id));
+  // Guide cards sit at the bottom of the stack so they read as guides behind the
+  // real profile content, exactly as a fresh design does.
+  const baseZ = Math.min(0, ...components().map(c => c.zIndex ?? 0));
+  layout().components.push(...buildGuideCards(DEFAULT_GUIDE_PATTERN, { zIndex: baseZ }));
+  layout()[GUIDE_INIT_FLAG] = true;
+  if (selectedId && removed.has(selectedId)) selectedId = null;
+  markChanged(`Guide reset to the default set (${guidePattern(DEFAULT_GUIDE_PATTERN).cards.length} cards). Your other components were left alone.`);
 }
 
 // ── Zoom controls (CREATOR-08) ────────────────────────────────────────────────
@@ -1521,8 +1670,23 @@ function onPointerMove(event) {
   const comp = findComp(drag.id);
   if (!comp) return;
   const c = canvas();
-  const dx = point.x - drag.pointerX;
-  const dy = point.y - drag.pointerY;
+  // The pointer delta arrives in SCREEN axes. For an unrotated component those
+  // are the design axes; for a rotated one the drag must be rotated back into
+  // the component's own frame, otherwise a corner drag both resizes and swings
+  // the box around. designPoint() has already divided out zoom, so the delta is
+  // in design units.
+  const rotation = Number(comp.rotation) || 0;
+  let dx = point.x - drag.pointerX;
+  let dy = point.y - drag.pointerY;
+  if (rotation) {
+    const rad = rotation * Math.PI / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    const localX = dx * cos + dy * sin;
+    const localY = -dx * sin + dy * cos;
+    dx = localX;
+    dy = localY;
+  }
 
   clearGuides();
 
@@ -1557,9 +1721,14 @@ function onPointerMove(event) {
     comp.y = y;
     comp.width = width;
     comp.height = height;
+    // CREATOR-09 §13: rotation is deliberately left untouched by move and
+    // resize — the value is the design's, and the drag is applied in the
+    // component's own rotated frame above, so the box does not swing either.
   }
   renderCanvas();
   renderLayers();
+  // CREATOR-09 §12: dragging/resizing updates the Properties fields too.
+  syncGeometryFields(comp);
 }
 
 function onPointerUp() {
@@ -1583,6 +1752,9 @@ function onPointerUp() {
   dirty = true;
   renderCanvas();
   renderLayers();
+  // CREATOR-09 §12: a full refresh on release so every derived field (geometry,
+  // align previews, the component title) settles to the final values.
+  renderProperties();
   updateToolbar();
   setStatus('Placed. Press Ctrl+Z to undo.');
 }
@@ -2068,6 +2240,12 @@ function attachEvents() {
   root.querySelector('#studio-zoom-out').addEventListener('click', () => zoomBy('out'));
   root.querySelector('#studio-zoom-reset').addEventListener('click', resetViewerView);
   root.querySelector('#studio-canvas-inner').addEventListener('pointerdown', onStagePointerDown);
+  // CREATOR-09: restore the default guide set from the toolbar, so it is
+  // reachable whether or not a guide card is currently selected.
+  root.querySelector('#studio-guide-reset').addEventListener('click', () => {
+    resetGuide();
+    renderAll();
+  });
   root.querySelector('#studio-canvas-inner').addEventListener('dragover', event => event.preventDefault());
   root.querySelector('#studio-canvas-inner').addEventListener('drop', onCanvasDrop);
   root.querySelector('#studio-layers-list').addEventListener('click', onLayersClick);

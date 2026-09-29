@@ -294,8 +294,12 @@ const viewerBox = () => page.$eval('#studio-viewer', (el) => {
 // CREATOR-08: the stage also contains the compact zoom bar, so the viewer fills
 // the stage MINUS that bar. Tests compare against the stage using this helper
 // rather than assuming the two are equal.
+//
+// CREATOR-09: the chrome directly above the viewer is now ONE bar that carries
+// both the design-canvas size and the zoom controls, so measure the BAR rather
+// than the zoom group inside it.
 const zoomBarHeight = () => page.evaluate(() => {
-  const bar = document.querySelector('#studio-viewer-controls');
+  const bar = document.querySelector('#studio-stage-bar') || document.querySelector('#studio-viewer-controls');
   return bar ? bar.getBoundingClientRect().height : 0;
 });
 const stageBox = () => page.$eval('#studio-stage', el => {
@@ -316,18 +320,23 @@ const heightGripPoint = () => page.evaluate(() => {
   return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
 });
 // Authoritative component geometry, read from the rendered canvas node.
-// CREATOR-08: the Profile Guide is a real component but is click-through, so the
-// helpers below deliberately skip it and exercise ordinary content instead.
-const contentCompSelector = '#studio-canvas-inner [data-comp-id]:not([data-comp-type="profile_guide"])';
-// Geometry of the guide itself, read from the design values it renders.
-const contentGeomGuide = () => page.evaluate(() => {
-  const el = document.querySelector('#studio-canvas-inner [data-comp-type="profile_guide"]');
-  if (!el) return null;
-  return {
+// CREATOR-09: guide cards are real, interactive components, so the helpers that
+// exercise ORDINARY content deliberately skip BOTH guide types. The guide has its
+// own steps further down.
+const contentCompSelector = '#studio-canvas-inner [data-comp-id]:not([data-comp-type="profile_guide_card"]):not([data-comp-type="profile_guide"])';
+// Geometry of one guide card, read from the design values it renders.
+const guideCardSelector = '#studio-canvas-inner [data-comp-type="profile_guide_card"]';
+const guideCardCount = () => page.evaluate(
+  (sel) => document.querySelectorAll(sel).length, guideCardSelector,
+);
+const guideCards = () => page.evaluate((sel) => {
+  return Array.from(document.querySelectorAll(sel)).map(el => ({
+    section: el.querySelector('.studio-guide-card-label')?.textContent || '',
     x: parseFloat(el.style.left), y: parseFloat(el.style.top),
     width: parseFloat(el.style.width), height: parseFloat(el.style.height),
-  };
-});
+    selected: el.classList.contains('studio-selected'),
+  }));
+}, guideCardSelector);
 const componentGeom = () => page.evaluate((sel) => {
   const el = document.querySelector(sel);
   if (!el) return null;
@@ -685,312 +694,362 @@ await step('CREATOR-08: zoom and reset change only the view, never the design', 
 
 // Resolve the centre point of a component's resize handle, scrolling both the
 // page and the canvas viewport so the point is comfortably inside the window.
-// A synthetic pointer event at a coordinate outside the viewport hits nothing.
-const guideHandlePoint = (dir, block) => page.evaluate(([d, blk]) => {
-  document.querySelector('#studio-viewer').scrollIntoView({ block: 'center', inline: 'center' });
-  const el = document.querySelector('#studio-canvas-inner [data-comp-type="profile_guide"]');
-  const container = el.closest('#studio-canvas-scroll');
-  el.scrollIntoView({ block: blk, inline: 'center' });
-  const measure = () => {
-    const h = el.querySelector(`[data-resize="${d}"]`);
-    const r = h.getBoundingClientRect();
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-  };
-  // Resize handles sit just OUTSIDE the component edge (bottom: -6px), and the
-  // canvas clips with overflow: hidden. Aligning the guide's edge to the canvas
-  // edge therefore clips the handle, so scroll the inner container to bring the
-  // handle itself inside, then bring the whole point inside the page viewport.
-  let pt = measure();
-  const cBox = container.getBoundingClientRect();
-  // A guide that fills the canvas has its handles partly outside the clipped
-  // canvas, so nudge the container on BOTH axes and report what is reachable.
-  // Note the container is sized to its content, so a horizontal nudge cannot
-  // bring a left/right handle in on a full-width guide: those edges can be
-  // reached through the Properties fields instead.
-  if (pt.y > cBox.bottom - 30) { container.scrollTop += pt.y - (cBox.bottom - 40); pt = measure(); }
-  if (pt.y < cBox.top + 30) { container.scrollTop -= (cBox.top + 40) - pt.y; pt = measure(); }
-  if (pt.x > cBox.right - 30) { container.scrollLeft += pt.x - (cBox.right - 40); pt = measure(); }
-  if (pt.x < cBox.left + 30) { container.scrollLeft -= (cBox.left + 40) - pt.x; pt = measure(); }
-  if (pt.y < 60) window.scrollBy(0, pt.y - 100);
-  else if (pt.y > window.innerHeight - 60) window.scrollBy(0, pt.y - (window.innerHeight - 100));
-  pt = measure();
-  const hb = el.querySelector(`[data-resize="${d}"]`);
-  const top2 = document.elementFromPoint(pt.x, pt.y);
-  return {
-    ...pt,
-    isHandle: top2 === hb,
-    topEl: top2 ? `${top2.tagName.toLowerCase()}.${String(top2.className || '').split(' ')[0] || '?'}` : null,
-    resize: top2?.dataset?.resize || null,
-    onGuide: !!top2?.closest('[data-comp-type="profile_guide"]'),
-  };
-}, [dir, block]);
+// ── Guide-card helpers (CREATOR-09) ────────────────────────────────────────────
+// A guide card is a small labelled wireframe, so unlike CREATOR-08's one
+// full-canvas block it is fully reachable: it never spans the whole canvas, so
+// its handles are always on screen and it can be grabbed with a real pointer.
 
-// A point on the guide's own body (its centre), scrolled into view and verified
-// to actually hit the guide. Used to drag the guide rather than a handle.
-const guideBodyPoint = () => page.evaluate(() => {
+// A point at the centre of a guide card's own body, verified to actually hit that
+// card (so a drag really moves the guide and not the panel behind it).
+//
+// scrollIntoView and the measurement are deliberately SEPARATE: scrolling can
+// still be settling when the promise resolves, and a point measured mid-scroll
+// is stale by the time the real pointer event is dispatched — which would make
+// the press land on empty canvas and pan the viewer instead of moving the card.
+const scrollCardIntoView = (index) => page.evaluate((i) => {
   document.querySelector('#studio-viewer').scrollIntoView({ block: 'center', inline: 'center' });
-  const el = document.querySelector('#studio-canvas-inner [data-comp-type="profile_guide"]');
-  el.scrollIntoView({ block: 'center', inline: 'center' });
-  const container = el.closest('#studio-canvas-scroll');
-  const measure = () => {
-    const r = el.getBoundingClientRect();
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-  };
-  let pt = measure();
-  const cBox = container.getBoundingClientRect();
-  if (pt.y > cBox.bottom - 40) { container.scrollTop += pt.y - (cBox.bottom - 60); pt = measure(); }
-  if (pt.y < cBox.top + 40) { container.scrollTop -= (cBox.top + 60) - pt.y; pt = measure(); }
-  if (pt.x > cBox.right - 40) { container.scrollLeft += pt.x - (cBox.right - 60); pt = measure(); }
-  if (pt.x < cBox.left + 40) { container.scrollLeft -= (cBox.left + 60) - pt.x; pt = measure(); }
-  if (pt.y < 80) window.scrollBy(0, pt.y - 120);
-  else if (pt.y > window.innerHeight - 80) window.scrollBy(0, pt.y - (window.innerHeight - 120));
-  pt = measure();
-  // The guide is a large backdrop and real components sit on top of it, so the
-  // exact centre may well be covered. Scan a small grid for a point where the
-  // guide really is the topmost hit target.
-  const cBox2 = container.getBoundingClientRect();
-  for (const fy of [0.2, 0.35, 0.5, 0.65, 0.8]) {
-    for (const fx of [0.2, 0.35, 0.5, 0.65, 0.8]) {
-      const r = el.getBoundingClientRect();
-      const x = r.left + r.width * fx;
-      const y = r.top + r.height * fy;
-      if (y < cBox2.top + 5 || y > cBox2.bottom - 5 || x < cBox2.left + 5 || x > cBox2.right - 5) continue;
-      const hit = document.elementFromPoint(x, y);
-      if (hit && hit.closest('[data-comp-type="profile_guide"]')) {
-        return { x, y, onGuide: true, topEl: 'guide', selected: el.classList.contains('studio-selected'), pe: getComputedStyle(el).pointerEvents };
-      }
-    }
-  }
-  const top = document.elementFromPoint(pt.x, pt.y);
-  return {
-    ...pt,
-    selected: el.classList.contains('studio-selected'),
-    pe: getComputedStyle(el).pointerEvents,
-    onGuide: !!top?.closest('[data-comp-type="profile_guide"]'),
-    topEl: top ? `${top.tagName.toLowerCase()}${top.id ? '#' + top.id : ''}.${String(top.className || '').split(' ')[0]}` : null,
-  };
-});
+  document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide_card"]')[i]
+    ?.scrollIntoView({ block: 'center', inline: 'center' });
+}, index);
 
-await step('CREATOR-08: the Profile Guide renders, is selectable, movable and resizable', async () => {
-  const guide = await page.evaluate(() => {
-    const el = document.querySelector('#studio-canvas-inner [data-comp-type="profile_guide"]');
+const guideCardBodyPoint = async (index = 0) => {
+  await scrollCardIntoView(index);
+  await new Promise(r => setTimeout(r, 200));
+  return page.evaluate((i) => {
+    const el = document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide_card"]')[i];
     if (!el) return null;
     const r = el.getBoundingClientRect();
+    const x = r.left + r.width / 2;
+    const y = r.top + r.height / 2;
+    const top = document.elementFromPoint(x, y);
     return {
-      present: true,
-      width: parseFloat(el.style.width),
-      height: parseFloat(el.style.height),
-      x: parseFloat(el.style.left),
-      y: parseFloat(el.style.top),
-      title: el.querySelector('.studio-guide-title')?.textContent || '',
-      blocks: Array.from(el.querySelectorAll('.studio-guide-block')).map(b => b.querySelector('.studio-guide-label')?.textContent),
-      pointerEvents: getComputedStyle(el).pointerEvents,
+      x, y,
+      section: el.querySelector('.studio-guide-card-label')?.textContent || '',
+      // Must be THIS card, not a different guide card stacked over it.
+      hitsThis: !!top && top.closest('[data-comp-type="profile_guide_card"]') === el,
+      topEl: top ? `${top.tagName.toLowerCase()}.${String(top.className || '').split(' ')[0] || '?'}` : null,
     };
-  });
-  check(!!guide, 'the design carries exactly one profile guide');
-  const count = await page.evaluate(
-    () => document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide"]').length
-  );
-  check(count === 1, `a new design has exactly one guide, got ${count}`);
-  check(guide.width === 936 && guide.height === 1176,
-    `the guide covers the profile canvas (slightly inset), got ${guide.width}x${guide.height}`);
-  check(guide.x === 12 && guide.y === 12,
-    `the guide is inset so its handles stay reachable, got ${guide.x},${guide.y}`);
-  check(/Profile Guide/.test(guide.title), `the guide is labelled, got "${guide.title}"`);
-  check(guide.blocks.length >= 5, `the default pattern has its structure blocks, got ${guide.blocks.length}`);
-  check(guide.blocks.includes('Cover / Header') && guide.blocks.includes('Communities'),
-    `the default pattern shows the documented structure, got ${JSON.stringify(guide.blocks)}`);
-  // Click-through until selected, so it never blocks editing.
-  check(guide.pointerEvents === 'none', `the guide is click-through until selected, got ${guide.pointerEvents}`);
+  }, index);
+};
 
-  // Select it from the Layers panel (it is click-through on canvas by design).
-  const selected = await page.evaluate(() => {
-    const row = Array.from(document.querySelectorAll('#studio-layers-list .studio-layer-row'))
-      .find(r => /Guide\s+—/.test(r.querySelector('.studio-layer-name')?.textContent.trim() || ''));
-    if (!row) return null;
-    row.querySelector('.studio-layer-name').click();
+// A point at the centre of one of a guide card's resize handles.
+const guideCardHandlePoint = async (index, dir) => {
+  await scrollCardIntoView(index);
+  await new Promise(r => setTimeout(r, 200));
+  return page.evaluate(([i, d]) => {
+    const el = document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide_card"]')[i];
+    if (!el) return null;
+    const h = el.querySelector(`[data-resize="${d}"]`);
+    if (!h) return null;
+    const r = h.getBoundingClientRect();
+    const x = r.left + r.width / 2;
+    const y = r.top + r.height / 2;
+    const top = document.elementFromPoint(x, y);
     return {
-      label: row.querySelector('.studio-layer-name').textContent.trim(),
+      x, y,
+      isHandle: top === h,
+      topEl: top ? `${top.tagName.toLowerCase()}.${String(top.className || '').split(' ')[0] || '?'}` : null,
     };
-  });
-  check(!!selected, 'the guide appears in the Layers panel with a readable label');
-  check(/Guide\s+—\s*Default Profile$/.test(selected.label),
-    `the layer label names the pattern, got "${selected.label}"`);
-  const isSelected = await page.evaluate(
-    () => !!document.querySelector('#studio-canvas-inner [data-comp-type="profile_guide"].studio-selected')
-  );
-  check(isSelected, 'selecting it from Layers shows the normal selection outline');
-  const handles = await page.evaluate(
-    () => document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide"] [data-resize]').length
-  );
-  check(handles === 8, `the selected guide exposes the normal 8 resize handles, got ${handles}`);
+  }, [index, dir]);
+};
 
-  // The guide steps below scroll the page and the canvas to reach the handles.
-  // Reset both afterwards so later steps see the same viewport as earlier ones.
-  const resetScroll = () => page.evaluate(() => {
-    window.scrollTo(0, 0);
-    const c = document.querySelector('#studio-canvas-scroll');
-    if (c) c.scrollTop = 0;
-  });
+// Select a guide card in the Layers panel by its section label. The layer name is
+// "n. Guide — Gallery", so the match is case-insensitive.
+const selectGuideCardInLayers = (label) => page.evaluate((wanted) => {
+  const rows = Array.from(document.querySelectorAll('#studio-layers-list .studio-layer-row'));
+  const row = rows.find(r => (r.querySelector('.studio-layer-name')?.textContent || '')
+    .toUpperCase().includes(wanted.toUpperCase()));
+  if (!row) return false;
+  row.querySelector('.studio-layer-name').click();
+  return true;
+}, label);
 
-  // Resize with a real pointer drag on the NORTH handle. The north handle is
-  // deliberately chosen: the studio canvas is sized to its content and does not
-  // pan horizontally, so a guide as wide as the canvas puts its left/right
-  // handles outside the visible centre column, while the top edge is always on
-  // screen. The 9px handle is too small for a reliable elementFromPoint
-  // identity assertion, so the proof is behavioural: a drag on a handle changes
-  // SIZE, whereas a drag on the body changes POSITION.
-  const beforeResize = await contentGeomGuide();
-  const north = await guideHandlePoint('n', 'start');
-  check(north.isHandle, `the north handle is the hit target at its own centre, got ${north.topEl}`);
-  await new Promise(r => setTimeout(r, 200));
-  await dragMouse(north, { x: north.x, y: north.y + 400 });
-  const afterNorth = await contentGeomGuide();
-  check(afterNorth.height < beforeResize.height,
-    `a pointer drag on the north handle made the guide shorter (${beforeResize.height} -> ${afterNorth.height})`);
+// Deselect whatever is selected, so the Properties panel shows the CANVAS
+// properties. Find a point that is genuinely on empty canvas — inside the
+// canvas document, but not on any component — and press there.
+const showCanvasProperties = async () => {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const done = await page.evaluate(() => Array.from(
+      document.querySelectorAll('#studio-properties .studio-prop-label'),
+    ).some(l => l.textContent.trim() === 'Canvas height'));
+    if (done) return true;
 
-  // Then resize horizontally through the Properties width field, which is the
-  // deterministic path for an edge that is outside the visible column.
-  await new Promise(r => setTimeout(r, 300));
-  const resizedByField = await page.evaluate(() => {
-    const rows = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'));
-    const row = rows.find(r => r.querySelector('.studio-prop-label')?.textContent.trim() === 'Width');
-    const input = row?.querySelector('input');
-    if (!input) return null;
-    const before = parseFloat(input.value);
-    input.value = '400';
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    return { before };
-  });
-  check(!!resizedByField, 'the guide exposes a Width field in the Properties panel');
-  await new Promise(r => setTimeout(r, 300));
-  const afterResize = await contentGeomGuide();
-  check(afterResize.width === 400,
-    `the Width field resized the guide (${resizedByField?.before} -> ${afterResize.width})`);
-
-  // Then move it: a guide smaller than the canvas has room to be dragged.
-  await new Promise(r => setTimeout(r, 200));
-  const body = await guideBodyPoint();
-  check(body.onGuide, `the guide body is the hit target at an unobstructed point, got ${body.topEl}`);
-  const beforeMove = await contentGeomGuide();
-  await dragMouse(body, { x: body.x + 30, y: body.y + 30 });
-  const afterMove = await contentGeomGuide();
-  check(afterMove.x > beforeMove.x && afterMove.y > beforeMove.y,
-    `dragging the selected guide moves it (${beforeMove.x},${beforeMove.y} -> ${afterMove.x},${afterMove.y})`);
-  await resetScroll();
-});
-
-await step('CREATOR-08: the guide can be resized and its pattern replaced in place', async () => {
-  await page.evaluate(() => {
-    const row = Array.from(document.querySelectorAll('#studio-layers-list .studio-layer-row'))
-      .find(r => /Guide\s+—/.test(r.querySelector('.studio-layer-name')?.textContent.trim() || ''));
-    row?.querySelector('.studio-layer-name').click();
-  });
-  await new Promise(r => setTimeout(r, 200));
-
-  // Replace the pattern: geometry must be preserved.
-  const geomBeforeReplace = await contentGeomGuide();
-  const replaceButton = await page.$('#studio-guide-replace');
-  check(!!replaceButton, 'the Properties panel offers Replace Pattern');
-  await replaceButton.click();
-  await new Promise(r => setTimeout(r, 250));
-
-  const afterReplace = await contentGeomGuide();
-  check(afterReplace.x === geomBeforeReplace.x && afterReplace.y === geomBeforeReplace.y,
-    `replacing the pattern preserved position (${geomBeforeReplace.x},${geomBeforeReplace.y} -> ${afterReplace.x},${afterReplace.y})`);
-  check(afterReplace.width === geomBeforeReplace.width && afterReplace.height === geomBeforeReplace.height,
-    `replacing the pattern preserved size (${geomBeforeReplace.width}x${geomBeforeReplace.height} -> ${afterReplace.width}x${afterReplace.height})`);
-
-  // The same component, not a new one, and the pattern actually changed.
-  const guideCount = await page.evaluate(
-    () => document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide"]').length
-  );
-  check(guideCount === 1, 'replacing the pattern did not create a second guide');
-  const pattern = await page.evaluate(() => {
-    const el = document.querySelector('#studio-canvas-inner [data-comp-type="profile_guide"]');
-    return Array.from(el.querySelectorAll('.studio-guide-label')).map(l => l.textContent);
-  });
-  check(!pattern.includes('Cover / Header'),
-    `the default structure was replaced, got ${JSON.stringify(pattern)}`);
-  const layerLabel = await page.evaluate(() => {
-    const row = Array.from(document.querySelectorAll('#studio-layers-list .studio-layer-row'))
-      .find(r => /Guide\s+—/.test(r.querySelector('.studio-layer-name')?.textContent.trim() || ''));
-    return row?.querySelector('.studio-layer-name').textContent.trim();
-  });
-  check(/Guide\s+—/.test(layerLabel || ''),
-    `the Layers label still identifies the guide, got "${layerLabel}"`);
-  check(!/Default Profile$/.test(layerLabel || ''),
-    `the Layers label follows the replacement away from Default, got "${layerLabel}"`);
-  await page.evaluate(() => {
-    window.scrollTo(0, 0);
-    const c = document.querySelector('#studio-canvas-scroll');
-    if (c) c.scrollTop = 0;
-  });
-});
-
-await step('CREATOR-08: the guide can be deleted and is not recreated', async () => {
-  // Re-select the guide, then delete it through the Properties action.
-  await page.evaluate(() => {
-    const row = Array.from(document.querySelectorAll('#studio-layers-list .studio-layer-row'))
-      .find(r => /Guide\s+—/.test(r.querySelector('.studio-layer-name')?.textContent.trim() || ''));
-    row?.querySelector('.studio-layer-name').click();
-  });
-  await new Promise(r => setTimeout(r, 200));
-  const del = await page.$('#studio-guide-delete');
-  check(!!del, 'the Properties panel offers Delete Guide');
-  await del.click();
-  await new Promise(r => setTimeout(r, 250));
-
-  check(await page.evaluate(
-    () => document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide"]').length
-  ) === 0, 'the guide is gone from the canvas');
-  check(await page.evaluate(() => !/Guide\s+—/.test(
-    Array.from(document.querySelectorAll('#studio-layers-list .studio-layer-row'))
-      .map(r => r.querySelector('.studio-layer-name')?.textContent.trim() || '')
-      .find(l => l.includes('Guide')) || ''
-  )), 'the guide is gone from the Layers panel');
-
-  // CREATOR-08: renderCanvas must NOT bring it back. Force several re-renders.
-  for (let i = 0; i < 3; i += 1) {
-    await selectFirstComponent();
-    await new Promise(r => setTimeout(r, 120));
+    const hit = await page.evaluate(() => {
+      const inner = document.querySelector('#studio-canvas-inner');
+      const doc = document.querySelector('#studio-canvas-document');
+      if (!inner || !doc) return null;
+      const box = inner.getBoundingClientRect();
+      // Sweep the canvas and take the first point that is on the canvas itself
+      // and not on any component, so the click lands on empty design space.
+      for (let fy = 0.12; fy <= 0.92; fy += 0.08) {
+        for (let fx = 0.1; fx <= 0.95; fx += 0.05) {
+          const x = box.left + box.width * fx;
+          const y = box.top + box.height * fy;
+          const top = document.elementFromPoint(x, y);
+          if (!top || !inner.contains(top)) continue;
+          if (top.closest('[data-comp-id]') || top.closest('[data-resize]')) continue;
+          const opts = { bubbles: true, clientX: x, clientY: y, button: 0, pointerId: 1 };
+          top.dispatchEvent(new PointerEvent('pointerdown', opts));
+          top.dispatchEvent(new PointerEvent('pointerup', opts));
+          return { x, y };
+        }
+      }
+      return null;
+    });
+    if (!hit) return false;
+    await new Promise(r => setTimeout(r, 250));
   }
-  check(await page.evaluate(
-    () => document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide"]').length
-  ) === 0, 'the deleted guide is not recreated by re-rendering');
+  return page.evaluate(() => Array.from(
+    document.querySelectorAll('#studio-properties .studio-prop-label'),
+  ).some(l => l.textContent.trim() === 'Canvas height'));
+};
+
+// Read a named Properties field for the selected component.
+const propValue = (label) => page.evaluate((wanted) => {
+  const rows = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'));
+  const row = rows.find(r => r.querySelector('.studio-prop-label')?.textContent.trim() === wanted);
+  const input = row?.querySelector('input');
+  return input ? input.value : null;
+}, label);
+
+// Set a named Properties field to a value, as the creator typing would.
+const setPropValue = (label, value) => page.evaluate(([wanted, next]) => {
+  const rows = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'));
+  const row = rows.find(r => r.querySelector('.studio-prop-label')?.textContent.trim() === wanted);
+  const input = row?.querySelector('input');
+  if (!input) return false;
+  input.value = next;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  return true;
+}, [label, value]);
+
+// Put the guide back if a step deleted it, so later steps still have one.
+const ensureGuidePresent = async () => {
+  if (await guideCardCount() > 0) return;
+  await page.click('#studio-guide-reset');
+  await new Promise(r => setTimeout(r, 300));
+};
+
+await step('CREATOR-09: a new design starts with the default set of guide cards', async () => {
+  // The design under edit is the one seeded by the harness; make sure we are
+  // looking at a guide set rather than whatever a previous step left behind.
+  await ensureGuidePresent();
+  const count = await guideCardCount();
+  check(count > 0, `the design carries a default guide set, got ${count} cards`);
+
+  const cards = await guideCards();
+  const sections = cards.map(c => c.section);
+  // Only REAL KomuniPH profile sections, labelled in upper case.
+  const expected = ['PROFILE PHOTO', 'NAME', 'ALIAS', 'BIO', 'PERSONAL INFORMATION', 'GALLERY', 'TESTIMONIALS', 'COMMUNITIES'];
+  for (const want of expected) {
+    check(sections.includes(want), `the guide includes a "${want}" card, got ${JSON.stringify(sections)}`);
+  }
+  // Every card is a plausible box on the 960x1200 design canvas.
+  for (const c of cards) {
+    check(c.width > 0 && c.height > 0, `card ${c.section} has a real size`);
+    check(c.x >= 0 && c.y >= 0 && c.x + c.width <= 960 && c.y + c.height <= 1200,
+      `card ${c.section} sits inside the design canvas`);
+  }
+  // No duplicate sections — one card per section.
+  check(new Set(sections).size === sections.length, `no duplicate guide cards, got ${JSON.stringify(sections)}`);
 });
 
-await step('CREATOR-08: the guide is a Studio-only aid, hidden in Preview', async () => {
-  // Re-add a guide so Preview can be checked with one present.
-  await page.evaluate(() => {
-    const row = Array.from(document.querySelectorAll('#studio-layers-list .studio-layer-row'))[0];
-    row?.querySelector('.studio-layer-name').click();
+await step('CREATOR-09: a guide card reads as a guide, not a finished profile card', async () => {
+  const look = await page.evaluate(() => {
+    const el = document.querySelector('#studio-canvas-inner [data-comp-type="profile_guide_card"]');
+    if (!el) return null;
+    const s = getComputedStyle(el);
+    return {
+      borderStyle: s.borderStyle,
+      label: el.querySelector('.studio-guide-card-label')?.textContent || '',
+      area: el.querySelector('.studio-guide-card-area')?.textContent || '',
+      hasImg: !!el.querySelector('img'),
+      hasInput: !!el.querySelector('input, textarea'),
+    };
   });
-  const hasGuideNow = await page.evaluate(
-    () => document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide"]').length
-  );
-  check(hasGuideNow === 0, 'the guide stays deleted for the rest of the suite');
+  check(!!look, 'a guide card is rendered');
+  check(look.borderStyle === 'dashed', `a guide card has a dashed outline, got ${look.borderStyle}`);
+  check(look.area === 'Guide Area', `a guide card is marked "Guide Area", got "${look.area}"`);
+  check(!look.hasImg && !look.hasInput, 'a guide card carries no media or editable content');
+});
 
-  // Enter Preview: it must still not be drawn, because Preview represents the
-  // real published profile.
-  await page.click('#studio-preview-toggle');
+await step('CREATOR-09: the design canvas size is stated and tracks the real canvas', async () => {
+  const label = () => page.$eval('#studio-canvas-size', el => el.textContent.trim());
+  check(await label() === 'Canvas 960 × 1200 px', `the canvas size is stated, got "${await label()}"`);
+
+  // The document element really is 960x1200, in DESIGN coordinates.
+  const doc = await page.$eval('#studio-canvas-document', el => ({
+    width: parseFloat(el.style.width), height: parseFloat(el.style.minHeight),
+  }));
+  check(doc.width === 960 && doc.height === 1200, `the canvas document is 960x1200, got ${doc.width}x${doc.height}`);
+
+  // Change the canvas height through the canvas Properties; the indicator must
+  // follow, because it is re-read from layout.canvas on every canvas render.
+  await showCanvasProperties();
+  const changed = await setPropValue('Canvas height', '1400');
+  check(changed, 'the canvas height field is reachable in the Properties panel');
   await new Promise(r => setTimeout(r, 300));
+  check(await label() === 'Canvas 960 × 1400 px', `the indicator follows the real canvas, got "${await label()}"`);
+  const grew = await page.$eval('#studio-canvas-document', el => parseFloat(el.style.minHeight));
+  check(grew === 1400, `the canvas document really grew, got ${grew}`);
+
+  // Put it back so later steps use the documented 960x1200 canvas.
+  await setPropValue('Canvas height', '1200');
+  await new Promise(r => setTimeout(r, 300));
+  check(await label() === 'Canvas 960 × 1200 px', `the indicator is restored, got "${await label()}"`);
+  const back = await page.$eval('#studio-canvas-document', el => parseFloat(el.style.minHeight));
+  check(back === 1200, `the canvas document is back to 1200, got ${back}`);
+});
+
+await step('CREATOR-09: a guide card can be selected, moved and resized with the mouse', async () => {
+  // Move: a real pointer drag on the card's own body.
+  const before = (await guideCards())[0];
+  const body = await guideCardBodyPoint(0);
+  check(!!body, 'a guide card body point is available');
+  check(body.hitsThis, `the point hits the intended ${body.section} card, got ${body.topEl}`);
+  await page.mouse.move(body.x, body.y);
+  const atPress = await page.evaluate(([x, y]) => {
+    const el = document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide_card"]')[0];
+    const r = el.getBoundingClientRect();
+    const top = document.elementFromPoint(x, y);
+    return {
+      measuredCardRect: { l: r.left, t: r.top, w: r.width, h: r.height },
+      topAtMeasuredPoint: top ? `${top.tagName}.${String(top.className || '').split(' ')[0]}` : null,
+      isCard: !!top && top.closest('[data-comp-type="profile_guide_card"]') === el,
+      scrollTop: document.querySelector('#studio-canvas-scroll')?.scrollTop,
+    };
+  }, [body.x, body.y]);
+  await page.mouse.down();
+  await page.mouse.move(body.x + 60, body.y + 40, { steps: 12 });
+  await page.mouse.up();
+  await new Promise(r => setTimeout(r, 300));
+  const afterMove = (await guideCards())[0];
+  const statusNow = await page.$eval('#studio-status', el => el.textContent).catch(() => '?');
+  check(afterMove.x > before.x && afterMove.y > before.y,
+    `dragging a guide card moves it (${before.section} ${before.x},${before.y} -> ${afterMove.x},${afterMove.y}) status="${statusNow}" atPress=${JSON.stringify(atPress)}`);
+  check(afterMove.selected, 'the dragged card is the selected one');
+
+  // Resize: a real pointer drag on the card's EAST handle changes only width.
+  const sized = (await guideCards())[0];
+  const handle = await guideCardHandlePoint(0, 'e');
+  check(!!handle, 'the guide card exposes an east resize handle');
+  check(handle.isHandle, `the east handle is the hit target, got ${handle.topEl}`);
+  await dragMouse(handle, { x: handle.x + 80, y: handle.y });
+  const afterResize = (await guideCards())[0];
+  check(afterResize.width > sized.width,
+    `dragging the east handle widened the card (${sized.width} -> ${afterResize.width})`);
+  check(afterResize.height === sized.height, `an edge handle changed only the width, height ${sized.height} -> ${afterResize.height}`);
+
+  // A CORNER handle changes both axes.
+  const beforeCorner = (await guideCards())[0];
+  const corner = await guideCardHandlePoint(0, 'se');
+  check(!!corner?.isHandle, `the south-east handle is the hit target, got ${corner && corner.topEl}`);
+  await dragMouse(corner, { x: corner.x + 60, y: corner.y + 40 });
+  const afterCorner = (await guideCards())[0];
+  check(afterCorner.width > beforeCorner.width && afterCorner.height > beforeCorner.height,
+    `dragging the corner handle grew both axes (${beforeCorner.width}x${beforeCorner.height} -> ${afterCorner.width}x${afterCorner.height})`);
+});
+
+await step('CREATOR-09: guide card Properties stay in step with the card', async () => {
+  await selectGuideCardInLayers('GALLERY');
+  await new Promise(r => setTimeout(r, 250));
+
+  const shown = await guideCards();
+  const galleryIndex = shown.findIndex(c => c.section === 'GALLERY');
+  const gallery = shown[galleryIndex];
+  check(!!gallery, 'a Gallery guide card exists');
+
+  // The Properties panel shows the card's real geometry.
+  for (const [field, value] of [['X', gallery.x], ['Y', gallery.y], ['Width', gallery.width], ['Height', gallery.height]]) {
+    const shownValue = Number(await propValue(field));
+    check(shownValue === value, `Properties ${field} matches the card (${shownValue} vs ${value})`);
+  }
+
+  // Changing a Properties field resizes the card on the canvas.
+  await setPropValue('Width', '300');
+  await new Promise(r => setTimeout(r, 250));
+  const afterField = (await guideCards())[galleryIndex];
+  check(afterField.width === 300, `the Width field resized the card, got ${afterField.width}`);
+
+  // And dragging the card updates the Properties field (CREATOR-09 §12).
+  const body = await guideCardBodyPoint(galleryIndex);
+  await dragMouse(body, { x: body.x + 40, y: body.y + 25 });
+  const afterDrag = (await guideCards())[galleryIndex];
+  const shownX = Number(await propValue('X'));
+  const shownY = Number(await propValue('Y'));
+  check(afterDrag.x !== gallery.x && afterDrag.y !== gallery.y, `the card moved from (${gallery.x},${gallery.y}) to (${afterDrag.x},${afterDrag.y})`);
+  check(shownX === afterDrag.x && shownY === afterDrag.y,
+    `Properties followed the drag (X ${shownX} vs ${afterDrag.x}, Y ${shownY} vs ${afterDrag.y})`);
+});
+
+await step('CREATOR-09: a guide card can be deleted, and deletion survives reopening', async () => {
+  await ensureGuidePresent();
+  const before = await guideCardCount();
+  await selectGuideCardInLayers('BIO');
+  await new Promise(r => setTimeout(r, 250));
+  await page.click('#studio-guide-delete');
+  await new Promise(r => setTimeout(r, 300));
+  const after = await guideCardCount();
+  check(after === before - 1, `deleting a card removed exactly one (${before} -> ${after})`);
+  const sections = (await guideCards()).map(c => c.section);
+  check(!sections.includes('BIO'), `the deleted card is gone, got ${JSON.stringify(sections)}`);
+
+  // Save, then RELOAD the whole studio and reopen the design. An intentional
+  // deletion must NOT be undone by the guide initialisation path.
+  await page.click('#studio-save');
+  await new Promise(r => setTimeout(r, 1500));
+  const designId = await page.$eval('#studio-design-select', el => el.value);
+  await page.reload({ waitUntil: 'networkidle0' });
+  await page.waitForSelector('#studio-design-select', { timeout: 15000 });
+  await new Promise(r => setTimeout(r, 1200));
+  await page.select('#studio-design-select', designId);
+  await new Promise(r => setTimeout(r, 1500));
+  const reopened = (await guideCards()).map(c => c.section);
+  check(!reopened.includes('BIO'), `reopening the design did NOT recreate the deleted card, got ${JSON.stringify(reopened)}`);
+  check(reopened.length === after, `reopening created no extra cards (${after} -> ${reopened.length})`);
+});
+
+await step('CREATOR-09: Reset Guide restores exactly one default set', async () => {
+  // Delete two more cards so Reset has real work to do.
+  for (const label of ['ALIAS', 'TESTIMONIALS']) {
+    await ensureGuidePresent();
+    if (await selectGuideCardInLayers(label)) {
+      await new Promise(r => setTimeout(r, 200));
+      await page.click('#studio-guide-delete');
+      await new Promise(r => setTimeout(r, 250));
+    }
+  }
+  const damaged = await guideCardCount();
+  check(damaged < 8, `some cards are missing before the reset (${damaged})`);
+
+  await page.click('#studio-guide-reset');
+  await new Promise(r => setTimeout(r, 400));
+  const restored = await guideCards();
+  check(restored.length === 8, `reset restored exactly one default set, got ${restored.length} cards`);
+  const sections = restored.map(c => c.section);
+  check(new Set(sections).size === sections.length, `reset created no duplicates, got ${JSON.stringify(sections)}`);
+  check(sections.includes('BIO') && sections.includes('ALIAS') && sections.includes('TESTIMONIALS'),
+    `reset brought back every default section, got ${JSON.stringify(sections)}`);
+});
+
+await step('CREATOR-09: guide cards never appear in Preview', async () => {
+  await ensureGuidePresent();
+  check(await guideCardCount() > 0, 'a guide set is present before Preview');
+  await page.click('#studio-preview-toggle');
+  await new Promise(r => setTimeout(r, 350));
   const inPreview = await page.evaluate(() => ({
-    guides: document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide"]').length,
+    cards: document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide_card"]').length,
+    legacy: document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide"]').length,
     previewClass: !!document.querySelector('#creator-studio.studio-preview-mode'),
   }));
   check(inPreview.previewClass, 'preview mode is active');
-  check(inPreview.guides === 0, 'no guide is drawn in Preview mode');
+  check(inPreview.cards === 0, `no guide card is drawn in Preview, got ${inPreview.cards}`);
+  check(inPreview.legacy === 0, `no legacy guide is drawn in Preview, got ${inPreview.legacy}`);
   await page.click('#studio-preview-toggle');
-  await new Promise(r => setTimeout(r, 250));
-
-  // And the guide was never sent to the public renderer: the design model keeps
-  // it as a normal component, and the public renderer has no selector for it.
-  const publicRenderer = await page.evaluate(() => ({
-    selector: !!document.querySelector('[data-comp-type="profile_guide"]'),
-  }));
-  void publicRenderer;
+  await new Promise(r => setTimeout(r, 300));
+  check(await guideCardCount() > 0, 'leaving Preview brings the guide cards back');
 });
+
 
 await step('CREATOR-08: a compact zoom bar exists, but no viewer SIZING controls do', async () => {
   const state = await page.evaluate(() => ({
@@ -1366,16 +1425,15 @@ await step('component editing still works after resizing the workspace', async (
   check(moved, `component drag still moves the component (${geomBefore?.x},${geomBefore?.y} -> ${geomAfter?.x},${geomAfter?.y})`);
 
   // Component resizing via its own handle still works. Pick an UNLOCKED,
-  // visible component: a locked one swallows the pointerdown by design.
-  const target = await page.evaluate(() => {
-    const el = document.querySelector(
-      '#studio-canvas-inner [data-comp-id]:not(.studio-comp-locked):not(.studio-comp-hidden)'
-    );
+  // visible component: a locked one swallows the pointerdown by design. Guide
+  // cards are excluded — this step is about ORDINARY content editing.
+  const target = await page.evaluate((sel) => {
+    const el = document.querySelector(`${sel}:not(.studio-comp-locked):not(.studio-comp-hidden)`);
     if (!el) return null;
     el.click();
     return { id: el.dataset.compId };
-  });
-  check(!!target, 'found an unlocked component for the resize test');
+  }, contentCompSelector);
+  check(!!target, 'found an unlocked content component for the resize test');
   await new Promise(r => setTimeout(r, 200));
 
   const sizeBefore = await page.evaluate((id) => {

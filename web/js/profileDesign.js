@@ -19,58 +19,98 @@
 export const CONTENT_COMPONENT_TYPES = new Set(['text', 'image', 'card', 'sticker']);
 
 /**
- * CREATOR-08: `profile_guide` is a Creator Studio editing aid — a visual sketch
- * of the profile's usable structure. It is a real, editable design component
- * (it moves, resizes, appears in Layers and is persisted with the design), but
- * it is a STUDIO-ONLY type: it is deliberately absent from
+ * CREATOR-09: `profile_guide_card` is a Creator Studio editing aid — a labelled
+ * WIREFRAME CARD marking where a real profile section belongs. Each card is its
+ * own design component, so it selects, moves, resizes and deletes through the
+ * ordinary Creator Studio geometry system.
+ *
+ * It is a STUDIO-ONLY type: it is deliberately absent from
  * `CONTENT_COMPONENT_TYPES` and from `COMPONENT_SELECTORS`, so the public
- * profile renderer skips it and the guide can never appear on a real profile
- * or in Preview mode.
+ * profile renderer skips it and a guide card can never appear on a real
+ * profile, in Preview, in a published design, in Marketplace listings or in an
+ * installed theme/asset.
+ *
+ * A guide card is NOT profile content, NOT a marketplace card and NOT a
+ * purchasable asset — it carries no data, only a `section` id naming which
+ * KomuniPH profile section it stands in for.
  */
-export const GUIDE_COMPONENT_TYPE = 'profile_guide';
+export const GUIDE_CARD_COMPONENT_TYPE = 'profile_guide_card';
 
 /**
- * The server-known guide patterns. A stored design may only reference one of
- * these ids, so a guide can never carry arbitrary markup, CSS or script — it
- * selects a built-in layout description and nothing else.
+ * CREATOR-08's original single-block guide type. It is retained ONLY so a design
+ * saved before CREATOR-09 can still be loaded and migrated to guide cards; no
+ * new component is ever created with this type.
+ */
+export const LEGACY_GUIDE_COMPONENT_TYPE = 'profile_guide';
+
+/**
+ * The real KomuniPH profile sections a guide card may stand in for. These are
+ * exactly the controlled sections the public profile actually renders — no
+ * invented sections, and no user data. A stored card selects one of these ids,
+ * so a guide can never carry arbitrary markup, CSS, script or profile content.
+ */
+export const GUIDE_SECTIONS = {
+  profile_photo: 'Profile Photo',
+  name: 'Name',
+  alias: 'Alias',
+  bio: 'Bio',
+  personal_info: 'Personal Information',
+  gallery: 'Gallery',
+  testimonials: 'Testimonials',
+  communities: 'Communities',
+};
+
+export const GUIDE_SECTION_IDS = Object.keys(GUIDE_SECTIONS);
+
+/** Any guide type the editor understands, current or legacy. */
+export const GUIDE_COMPONENT_TYPES = new Set([
+  GUIDE_CARD_COMPONENT_TYPE,
+  LEGACY_GUIDE_COMPONENT_TYPE,
+]);
+
+/**
+ * CREATOR-09: the server-known guide patterns. Each pattern is a list of card
+ * placements in DESIGN coordinates on the 960x1200 canvas — a plain description
+ * of where things go, never content.
  */
 export const GUIDE_PATTERNS = {
   default: {
     id: 'default',
     label: 'Default Profile',
-    blocks: [
-      { label: 'Cover / Header', height: 150 },
-      { label: 'Profile Photo', height: 180, width: 180 },
-      { label: 'Name / Alias', height: 70 },
-      { label: 'Bio / About', height: 110 },
-      { label: 'Personal Information', height: 140 },
-      { label: 'Photo Gallery', height: 190 },
-      { label: 'Testimonials', height: 160 },
-      { label: 'Communities', height: 160 },
+    cards: [
+      { section: 'profile_photo', x: 40, y: 20, width: 200, height: 190 },
+      { section: 'name', x: 40, y: 222, width: 420, height: 64 },
+      { section: 'alias', x: 40, y: 294, width: 360, height: 56 },
+      { section: 'bio', x: 40, y: 362, width: 480, height: 120 },
+      { section: 'personal_info', x: 40, y: 494, width: 440, height: 150 },
+      { section: 'gallery', x: 40, y: 656, width: 560, height: 200 },
+      { section: 'testimonials', x: 40, y: 868, width: 480, height: 160 },
+      { section: 'communities', x: 40, y: 1040, width: 520, height: 150 },
     ],
   },
   minimal: {
     id: 'minimal',
     label: 'Minimal Profile',
-    blocks: [
-      { label: 'Profile Photo', height: 150, width: 150 },
-      { label: 'Name', height: 64 },
-      { label: 'Bio', height: 100 },
-      { label: 'Main Content', height: 200 },
-      { label: 'Gallery', height: 170 },
+    cards: [
+      { section: 'profile_photo', x: 40, y: 24, width: 150, height: 150 },
+      { section: 'name', x: 40, y: 192, width: 400, height: 60 },
+      { section: 'bio', x: 40, y: 268, width: 440, height: 130 },
+      { section: 'gallery', x: 40, y: 414, width: 520, height: 230 },
+      { section: 'communities', x: 40, y: 660, width: 480, height: 170 },
     ],
   },
   classic: {
     id: 'classic',
     label: 'Classic Profile',
-    blocks: [
-      { label: 'Header', height: 130 },
-      { label: 'Identity', height: 150 },
-      { label: 'About Me', height: 120 },
-      { label: 'Personal Information', height: 150 },
-      { label: 'Gallery', height: 180 },
-      { label: 'Testimonials', height: 160 },
-      { label: 'Communities', height: 150 },
+    cards: [
+      { section: 'profile_photo', x: 40, y: 24, width: 180, height: 180 },
+      { section: 'name', x: 40, y: 220, width: 440, height: 70 },
+      { section: 'alias', x: 40, y: 298, width: 340, height: 56 },
+      { section: 'bio', x: 40, y: 370, width: 460, height: 130 },
+      { section: 'personal_info', x: 40, y: 516, width: 420, height: 170 },
+      { section: 'gallery', x: 40, y: 702, width: 540, height: 190 },
+      { section: 'testimonials', x: 40, y: 908, width: 460, height: 160 },
+      { section: 'communities', x: 40, y: 1084, width: 500, height: 106 },
     ],
   },
 };
@@ -83,9 +123,19 @@ export function guidePattern(id) {
   return GUIDE_PATTERNS[id] || GUIDE_PATTERNS[DEFAULT_GUIDE_PATTERN];
 }
 
-/** Human label for a guide, used by the Layers panel and Properties title. */
+/** Human label for a guide card's section, never a raw id. */
+export function guideSectionLabel(section) {
+  return GUIDE_SECTIONS[section] || 'Guide';
+}
+
+/** Human label for a guide pattern, used by the Layers panel and Properties. */
 export function guideLabel(id) {
   return `Guide — ${guidePattern(id).label}`;
+}
+
+/** True when a component is any kind of Creator Studio guide object. */
+export function isGuideComponent(component) {
+  return !!component && GUIDE_COMPONENT_TYPES.has(component.type);
 }
 
 const COMPONENT_SELECTORS = {
@@ -98,6 +148,18 @@ const COMPONENT_SELECTORS = {
   testimonials: '#testimonials-module',
   communities: '#community-module',
 };
+
+/**
+ * CREATOR-09: types the PUBLIC renderer must never draw, whatever else is true of
+ * them. The guide types are already absent from `CONTENT_COMPONENT_TYPES` and
+ * from `COMPONENT_SELECTORS`, so they are skipped incidentally; this set makes
+ * the exclusion explicit and greppable, so a future change to either registry
+ * cannot accidentally make a guide card public.
+ */
+export const PUBLIC_RENDER_EXCLUDED_TYPES = new Set([
+  GUIDE_CARD_COMPONENT_TYPE,
+  LEGACY_GUIDE_COMPONENT_TYPE,
+]);
 
 /** Elements created for user-content components, keyed by component id. */
 const contentElements = new Map();
@@ -328,6 +390,11 @@ export function applyProfileDesign(profile) {
     }
 
     layout.components.forEach(component => {
+      // CREATOR-09: explicit public exclusion. A guide card is a Studio-only
+      // wireframe and must never reach a real profile, a published design, a
+      // marketplace listing or an installed theme/asset.
+      if (PUBLIC_RENDER_EXCLUDED_TYPES.has(component.type)) return;
+
       if (CONTENT_COMPONENT_TYPES.has(component.type)) {
         renderContentComponent(component, content);
         return;

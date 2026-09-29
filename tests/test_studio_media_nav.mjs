@@ -560,12 +560,21 @@ test('CREATOR-08 guide patterns are a small, closed, safe registry', async () =>
   check(design.GUIDE_PATTERN_IDS.length === 3, 'exactly three patterns, not a giant hard-coded block');
   for (const id of design.GUIDE_PATTERN_IDS) {
     const pattern = design.guidePattern(id);
-    check(Array.isArray(pattern.blocks) && pattern.blocks.length > 0, `pattern "${id}" has blocks`);
-    for (const block of pattern.blocks) {
-      // Every label is a plain string: no markup, no style, no URL.
-      check(typeof block.label === 'string' && block.label.length > 0, `block label is plain text`);
-      check(!/[<>]/.test(block.label), `block label carries no markup, got "${block.label}"`);
-      check(typeof block.height === 'number' && Number.isFinite(block.height), 'block height is numeric');
+    // CREATOR-09: a pattern is a list of CARD PLACEMENTS, each naming one real
+    // profile section and its geometry in design coordinates.
+    check(Array.isArray(pattern.cards) && pattern.cards.length > 0, `pattern "${id}" has cards`);
+    for (const card of pattern.cards) {
+      check(design.GUIDE_SECTION_IDS.includes(card.section), `card section "${card.section}" is a real profile section`);
+      for (const key of ['x', 'y', 'width', 'height']) {
+        check(typeof card[key] === 'number' && Number.isFinite(card[key]), `card ${key} is numeric`);
+      }
+      // A card carries no content of any kind: no text, no URL, no markup.
+      check(Object.keys(card).length === 5, `card carries only placement data, got ${Object.keys(card)}`);
+    }
+    // Every card stays on the 960x1200 design canvas.
+    for (const card of pattern.cards) {
+      check(card.x >= 0 && card.y >= 0 && card.x + card.width <= 960 && card.y + card.height <= 1200,
+        `card "${card.section}" stays inside the 960x1200 canvas`);
     }
   }
 
@@ -574,15 +583,23 @@ test('CREATOR-08 guide patterns are a small, closed, safe registry', async () =>
   check(design.guidePattern(undefined).id === 'default', 'a missing pattern falls back to default');
   check(design.guideLabel('classic') === 'Guide — Classic Profile', `layers label is readable, got "${design.guideLabel('classic')}"`);
 
-  // The guide is a studio-only type: it must not be renderable as profile content.
-  check(design.GUIDE_COMPONENT_TYPE === 'profile_guide', 'dedicated guide type');
-  check(!design.CONTENT_COMPONENT_TYPES.has('profile_guide'), 'the guide is NOT a public content component');
-  check(!Object.keys(design.COMPONENT_SELECTORS || {}).includes('profile_guide'),
-    'the guide has no public profile selector, so the renderer skips it');
+  // CREATOR-09: a guide CARD is a studio-only type: it must not be renderable as
+  // profile content, and the public renderer must exclude it explicitly.
+  check(design.GUIDE_CARD_COMPONENT_TYPE === 'profile_guide_card', 'dedicated guide-card type');
+  check(design.LEGACY_GUIDE_COMPONENT_TYPE === 'profile_guide', 'the legacy guide type is kept only for migration');
+  for (const type of [design.GUIDE_CARD_COMPONENT_TYPE, design.LEGACY_GUIDE_COMPONENT_TYPE]) {
+    check(!design.CONTENT_COMPONENT_TYPES.has(type), `${type} is NOT a public content component`);
+    check(design.PUBLIC_RENDER_EXCLUDED_TYPES.has(type), `${type} is explicitly excluded from public rendering`);
+  }
+  check(design.GUIDE_SECTION_IDS.length === 8, 'the guide covers exactly the 8 real profile sections');
+  for (const section of ['profile_photo', 'name', 'alias', 'bio', 'personal_info', 'gallery', 'testimonials', 'communities']) {
+    check(design.GUIDE_SECTION_IDS.includes(section), `guide section "${section}" exists`);
+    check(server.GUIDE_SECTIONS.has(section), `guide section "${section}" is allowed server-side`);
+  }
 
-  // The server accepts only known pattern ids.
-  check(!server.GUIDE_PATTERNS.has('__proto__'), 'prototype keys are not patterns');
-  check(!server.GUIDE_PATTERNS.has('<script>'), 'markup is not a pattern');
+  // The server accepts only known section ids.
+  check(!server.GUIDE_SECTIONS.has('__proto__'), 'prototype keys are not sections');
+  check(!server.GUIDE_SECTIONS.has('<script>'), 'markup is not a section');
 });
 
 test('pointer -> design point ignores viewer pan and divides out zoom', async () => {

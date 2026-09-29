@@ -497,6 +497,94 @@ test('viewer transform composes pan and zoom independently', async () => {
   check(viewer.viewerTransform({ zoom: 1.5, panX: 10.4, panY: -20.6 }) === 'translate(10px, -21px) scale(1.5)', 'pans and scales together');
 });
 
+test('CREATOR-08 zoom steps, clamps and formats cleanly', async () => {
+  check(viewer.DEFAULT_ZOOM === 1, 'default zoom is 1');
+  check(viewer.ZOOM_STEP === 0.1, 'step is 10%');
+
+  // 100% -> 110% -> 120%
+  check(viewer.stepZoom(1, 'in') === 1.1, 'one step in from 100%');
+  check(viewer.stepZoom(viewer.stepZoom(1, 'in'), 'in') === 1.2, 'two steps in');
+  // 100% -> 90% -> 80%
+  check(viewer.stepZoom(1, 'out') === 0.9, 'one step out from 100%');
+  check(viewer.stepZoom(viewer.stepZoom(1, 'out'), 'out') === 0.8, 'two steps out');
+
+  // Repeated stepping must not accumulate float noise.
+  let z = 1;
+  for (let i = 0; i < 10; i += 1) z = viewer.stepZoom(z, 'in');
+  check(z === 2, `ten steps in reaches exactly 200%, got ${z}`);
+  for (let i = 0; i < 10; i += 1) z = viewer.stepZoom(z, 'out');
+  check(z === 1, `and back to exactly 100%, got ${z}`);
+
+  // Bounds: 25%..300%.
+  check(viewer.clampZoom(0.01) === viewer.MIN_ZOOM, `floors at 25%, got ${viewer.clampZoom(0.01)}`);
+  check(viewer.clampZoom(99) === viewer.MAX_ZOOM, `caps at 300%, got ${viewer.clampZoom(99)}`);
+  let low = 1;
+  for (let i = 0; i < 40; i += 1) low = viewer.stepZoom(low, 'out');
+  check(low === viewer.MIN_ZOOM, `stepping out bottoms out at 25%, got ${low}`);
+  let high = 1;
+  for (let i = 0; i < 40; i += 1) high = viewer.stepZoom(high, 'in');
+  check(high === viewer.MAX_ZOOM, `stepping in tops out at 300%, got ${high}`);
+  check(viewer.stepZoom(1, 'nonsense') === 1, 'an unknown direction is a no-op');
+
+  // Clean percentages, never float artifacts.
+  check(viewer.zoomPercent(1) === '100%', '100%');
+  check(viewer.zoomPercent(0.75) === '75%', '75%');
+  check(viewer.zoomPercent(1.25) === '125%', '125%');
+  check(viewer.zoomPercent(2) === '200%', '200%');
+  check(viewer.zoomPercent(viewer.stepZoom(1, 'in')) === '110%', '110% from a step');
+  check(viewer.zoomPercent(viewer.MIN_ZOOM) === '25%', '25% at the minimum');
+  check(viewer.zoomPercent(viewer.MAX_ZOOM) === '300%', '300% at the maximum');
+  for (const ratio of [0.3333333, 1.7777777, 2.0000001]) {
+    check(!/\d\.\d/.test(viewer.zoomPercent(ratio)), `${ratio} renders without decimals`);
+  }
+
+  // Reset restores zoom 1 and a neutral pan — viewer state only.
+  const reset = viewer.defaultViewerState();
+  check(reset.zoom === 1, 'reset zoom is 1');
+  check(reset.pan.x === 0 && reset.pan.y === 0, 'reset pan is neutral before clamping');
+
+  // Zoom is viewer state: the transform is the only thing it feeds.
+  check(viewer.viewerTransform({ zoom: 2, panX: 0, panY: 0 }) === 'translate(0px, 0px) scale(2)',
+    'zoom reaches only the viewer transform');
+});
+
+test('CREATOR-08 guide patterns are a small, closed, safe registry', async () => {
+  const design = await import(mod('web/js/profileDesign.js'));
+  const server = await import(mod('server/profileDesign.js'));
+
+  // All three required patterns exist with the documented labels.
+  for (const id of ['default', 'minimal', 'classic']) {
+    check(design.GUIDE_PATTERN_IDS.includes(id), `pattern "${id}" exists client-side`);
+    check(server.GUIDE_PATTERNS.has(id), `pattern "${id}" is allowed server-side`);
+  }
+  check(design.GUIDE_PATTERN_IDS.length === 3, 'exactly three patterns, not a giant hard-coded block');
+  for (const id of design.GUIDE_PATTERN_IDS) {
+    const pattern = design.guidePattern(id);
+    check(Array.isArray(pattern.blocks) && pattern.blocks.length > 0, `pattern "${id}" has blocks`);
+    for (const block of pattern.blocks) {
+      // Every label is a plain string: no markup, no style, no URL.
+      check(typeof block.label === 'string' && block.label.length > 0, `block label is plain text`);
+      check(!/[<>]/.test(block.label), `block label carries no markup, got "${block.label}"`);
+      check(typeof block.height === 'number' && Number.isFinite(block.height), 'block height is numeric');
+    }
+  }
+
+  // An unknown id falls back instead of throwing or rendering something raw.
+  check(design.guidePattern('nope').id === 'default', 'an unknown pattern falls back to default');
+  check(design.guidePattern(undefined).id === 'default', 'a missing pattern falls back to default');
+  check(design.guideLabel('classic') === 'Guide — Classic Profile', `layers label is readable, got "${design.guideLabel('classic')}"`);
+
+  // The guide is a studio-only type: it must not be renderable as profile content.
+  check(design.GUIDE_COMPONENT_TYPE === 'profile_guide', 'dedicated guide type');
+  check(!design.CONTENT_COMPONENT_TYPES.has('profile_guide'), 'the guide is NOT a public content component');
+  check(!Object.keys(design.COMPONENT_SELECTORS || {}).includes('profile_guide'),
+    'the guide has no public profile selector, so the renderer skips it');
+
+  // The server accepts only known pattern ids.
+  check(!server.GUIDE_PATTERNS.has('__proto__'), 'prototype keys are not patterns');
+  check(!server.GUIDE_PATTERNS.has('<script>'), 'markup is not a pattern');
+});
+
 test('pointer -> design point ignores viewer pan and divides out zoom', async () => {
   // The rect already reflects the applied pan+scale, so only zoom is divided.
   // This is what keeps "pan the viewer" from corrupting component X/Y.
@@ -510,19 +598,30 @@ test('pointer -> design point ignores viewer pan and divides out zoom', async ()
 
 group('Profile Viewer Wiring (source)');
 
-test('the Profile Viewer control bar is gone, with no replacement', async () => {
+test('CREATOR-08: zoom controls exist, but no viewer SIZING controls do', async () => {
   const { readFileSync } = await import('node:fs');
   const src = readFileSync(resolve('web/js/creatorStudio.js'), 'utf8');
-  check(!src.includes('studio-viewer-bar'), 'viewer bar markup is removed');
+
+  // CREATOR-08 reintroduces a compact zoom bar. The CREATOR-07 ban still stands
+  // for everything that resized the VIEWER or panned it by direction.
+  check(src.includes('id="studio-viewer-controls"'), 'compact zoom control bar is rendered');
+  check(src.includes('id="studio-zoom-in"'), 'zoom in is rendered');
+  check(src.includes('id="studio-zoom-out"'), 'zoom out is rendered');
+  check(src.includes('id="studio-zoom-reset"'), 'reset is rendered');
+  check(src.includes('studio-zoom-readout'), 'zoom percentage readout is rendered');
+  check(src.includes('zoomBy') && src.includes('resetViewerView'), 'zoom handlers are wired');
+
+  // The old CREATOR-07 controls stay gone — none of them may return.
   check(!src.includes('data-viewer='), 'no data-viewer control attributes remain');
-  check(!src.includes('studio-zoom-readout'), 'zoom percentage readout is removed');
-  check(!src.includes('onViewerBarClick'), 'viewer bar click handler is removed');
-  check(!src.includes('stepZoom') && !src.includes('fitZoom') && !src.includes('zoomPercent'), 'toolbar-only helpers are no longer used');
-  // No zoom / fit / 100% / directional pan button may exist anywhere.
-  for (const gone of ['zoom-in', 'zoom-out', 'data-viewer="fit"', 'data-viewer="actual"', 'pan-left', 'pan-right', 'pan-up', 'pan-down']) {
+  check(!src.includes('fitZoom'), 'no Fit zoom helper');
+  check(!src.includes('onViewerBarClick'), 'old viewer bar click handler is removed');
+  for (const gone of ['data-viewer="fit"', 'data-viewer="actual"', 'pan-left', 'pan-right', 'pan-up', 'pan-down']) {
     check(!src.includes(gone), `${gone} is gone`);
   }
-  // The viewer itself remains.
+
+  // Zoom must never control viewer size, and the viewer must stay the workspace.
+  check(!/zoom[^;\n]*stage\.style\.height/.test(src), 'zoom never sets the stage height');
+  check(!/zoom[^;\n]*studio-col-/.test(src), 'zoom never touches the column widths');
   check(src.includes('id="studio-viewer"'), 'viewer element still rendered');
   check(src.includes('id="studio-canvas-scroll"'), 'canvas still rendered');
 });
@@ -669,9 +768,12 @@ test('lower Layers panel is compact and the viewer keeps the space', async () =>
 test('the viewer fills the workspace and shows no scrollbars', async () => {
   const { readFileSync } = await import('node:fs');
   const css = readFileSync(resolve('web/css/creatorStudio.css'), 'utf8');
-  // Full available area: the viewer box fills the stage, so it always inherits
-  // whatever width the center column currently has.
-  check(/#studio-viewer\s*\{[^}]*inset:\s*0/.test(css), 'viewer fills the stage by default');
+  // CREATOR-08: the viewer fills the stage below the compact zoom bar. It is a
+  // flex item rather than an absolute overlay, so the bar can never cover the
+  // profile canvas.
+  check(/#studio-viewer\s*\{[^}]*position:\s*relative/.test(css), 'viewer is the stage positioning context');
+  check(/#studio-viewer\s*\{[^}]*flex:\s*1 1 auto/.test(css), 'viewer fills the stage below the zoom bar');
+  check(/#studio-viewer-controls\s*\{[^}]*flex:\s*0 0 auto/.test(css), 'the zoom bar does not grow into the viewer');
   check(/#studio-stage\s*\{[^}]*position:\s*relative/.test(css), 'stage is the viewer positioning context');
   // No scrollbars, and none merely hidden behind a styling trick.
   const scroll = css.match(/#studio-canvas-scroll\s*\{[^}]*\}/);

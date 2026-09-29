@@ -21,6 +21,13 @@ export const MAX_ZOOM = 3;
 export const PAN_STEP = 40;
 /** Minimum visible overlap, in screen px, between the design and the viewport. */
 export const PAN_MARGIN = 80;
+/**
+ * CREATOR-08: zoom is reintroduced as a compact viewer control, stepping in
+ * 10% increments. These are VIEWER values — see the module header: nothing
+ * here ever reaches `layout.components[]` or the server.
+ */
+export const ZOOM_STEP = 0.1;
+export const DEFAULT_ZOOM = 1;
 
 /** Smallest viewer the editor will allow, in screen px (vertical only). */
 export const MIN_VIEWER_HEIGHT = 320;
@@ -64,9 +71,32 @@ export function clampZoom(value) {
   return roundZoom(clamp(n, MIN_ZOOM, MAX_ZOOM));
 }
 
-// CREATOR-07: the viewer toolbar is gone, so there is no zoom percentage to
-// format. Zoom itself stays a viewer concept (the document may be larger than
-// the viewer) — only the controls that used to mutate it were removed.
+/**
+ * CREATOR-08: step the zoom by one ZOOM_STEP, clamped to [MIN_ZOOM, MAX_ZOOM].
+ * Pure and DOM-free so the bounds can be unit-tested without a browser.
+ */
+export function stepZoom(zoom, direction) {
+  const delta = direction === 'in' ? ZOOM_STEP : direction === 'out' ? -ZOOM_STEP : 0;
+  return clampZoom(Number(zoom) + delta);
+}
+
+/**
+ * CREATOR-08: the viewer default. Zoom returns to 1 and the pan is re-centred
+ * for the current viewport by the caller through clampPan(). Returns viewer
+ * state only — it can never touch component geometry.
+ */
+export function defaultViewerState() {
+  return { zoom: DEFAULT_ZOOM, pan: { x: 0, y: 0 } };
+}
+
+/**
+ * CREATOR-08: format a zoom ratio as a whole percentage with no floating-point
+ * artifacts — 1 → "100%", 0.75 → "75%", 1.25 → "125%", 2 → "200%".
+ */
+export function zoomPercent(zoom) {
+  return `${Math.round(clampZoom(zoom) * 100)}%`;
+}
+
 /**
  * Keep the design reachable: when it is larger than the viewer the user may pan
  * until only PAN_MARGIN of it remains on screen; when it fits, it is centred.

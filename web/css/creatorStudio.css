@@ -291,13 +291,48 @@
   height: 900px;
   display: flex;
   flex-direction: column;
+  /* `.studio-layout > *` sets a 0.75rem gap for the side panels. The stage is a
+     flex column, so that gap would otherwise insert a stray 12px band between
+     the zoom bar and the viewer. The bar separates itself with its own padding. */
+  gap: 0;
 }
-/* CREATOR-07: the viewer is the workspace. It fills the stage by default and is
-   resized by dragging its own edges, so it is the positioning context for the
-   grips and is taken out of flow so a drag can move any one of its edges. */
+/* CREATOR-08: the compact zoom bar sits above the viewer as a non-growing flex
+   item, so it never covers the profile canvas and never steals pointer events
+   from editing. It affects zoom/pan only — never the viewer's size. */
+#studio-viewer-controls {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0 0 0.5rem;
+}
+.studio-zoom-btn {
+  min-width: 2rem;
+  height: 1.75rem;
+  padding: 0 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.studio-zoom-reset { min-width: 3.6rem; font-size: 0.72rem; }
+.studio-zoom-readout {
+  min-width: 3.2rem;
+  text-align: center;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--studio-muted);
+  user-select: none;
+}
+
+/* CREATOR-07: the viewer is the workspace — it fills the stage by default.
+   CREATOR-08: it is a flex item below the zoom bar rather than an absolutely
+   positioned overlay, so the bar cannot cover the design. */
 #studio-viewer {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   /* Clips at every level, so neither the canvas nor the grips can produce a
@@ -337,6 +372,69 @@
 }
 .studio-viewer-height-grip[hidden] { display: none; }
 .studio-viewer-height-grip:hover { background: rgba(94, 234, 212, 0.18); }
+
+/* ── Profile Guide (CREATOR-08) ───────────────────────────────────────────────
+   A layout SKETCH, deliberately unlike real profile content: dashed soft
+   borders, a low-opacity wash and muted labels, so it never reads as a finished
+   profile and never competes with the components being placed on top of it.
+   The guide covers the whole canvas, so it is click-through until it is
+   explicitly selected (from the canvas edge or the Layers panel). That keeps
+   normal editing — placing, selecting and dragging real components — working
+   exactly as before. */
+.design-profile_guide {
+  pointer-events: none;
+  opacity: 0.75;
+}
+.design-profile_guide.studio-comp-selected {
+  pointer-events: auto;
+  opacity: 1;
+}
+.studio-guide-inner {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px;
+  box-sizing: border-box;
+  border: 2px dashed rgba(71, 85, 105, 0.55);
+  border-radius: 10px;
+  background: rgba(148, 163, 184, 0.10);
+  overflow: hidden;
+}
+.studio-guide-title {
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: rgba(51, 65, 85, 0.75);
+  padding-bottom: 4px;
+}
+.studio-guide-block {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border: 1px dashed rgba(71, 85, 105, 0.45);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.28);
+  min-height: 18px;
+  overflow: hidden;
+}
+.studio-guide-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(51, 65, 85, 0.72);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.studio-guide-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
 
 @media (max-width: 760px) {
   /* Touch-first: a slightly deeper grab area, still invisible. */

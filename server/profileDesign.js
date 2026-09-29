@@ -36,7 +36,21 @@ export const DESIGN_COMPONENT_TYPES = new Set([
   'image',
   'card',
   'sticker',
+  'profile_guide',
 ]);
+
+/**
+ * CREATOR-08: the server-known guide patterns for a `profile_guide` component.
+ *
+ * A guide is a STUDIO editing aid, but once inserted it is an ordinary design
+ * object that is validated, stored and editable. Its only configuration is a
+ * pattern id drawn from this allowlist, so a stored design can select a
+ * built-in layout and nothing more — never markup, CSS, script, or an
+ * arbitrary string. The guide is never rendered on the public profile: the
+ * client profile renderer has no selector for this type and skips it.
+ */
+export const GUIDE_PATTERNS = new Set(['default', 'minimal', 'classic']);
+export const DEFAULT_GUIDE_PATTERN = 'default';
 
 /**
  * Recognized-but-unbuilt components. They are rejected today so a design can
@@ -196,6 +210,24 @@ function validateComponentRotateStyle(component, errors) {
  */
 function validateContentConfig(component, errors) {
   const { id, type, config } = component;
+  // CREATOR-08: the guide gets its own strict contract (a single allowlisted
+  // pattern id) and must be checked BEFORE the content-type early return below.
+  if (type === 'profile_guide') {
+    if (config === null || config === undefined) {
+      errors.push(`Component "${id}" is a profile_guide and requires a config object`);
+      return;
+    }
+    if (!isPlainObject(config)) return; // shape errors already reported
+    for (const key of Object.keys(config)) {
+      if (key !== 'pattern') errors.push(`Component "${id}" config has unknown field: ${key}`);
+    }
+    const pattern = config.pattern;
+    if (typeof pattern !== 'string' || !GUIDE_PATTERNS.has(pattern)) {
+      errors.push(`Component "${id}" config.pattern must be one of: ${[...GUIDE_PATTERNS].join(', ')}`);
+    }
+    return;
+  }
+
   if (type !== 'text' && type !== 'image' && type !== 'card' && type !== 'sticker') return;
 
   if (config === null || config === undefined) {

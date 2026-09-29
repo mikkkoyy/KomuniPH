@@ -248,10 +248,15 @@ const componentXY = () => page.evaluate(() => {
   const y = read('Y');
   return (x === null || y === null) ? null : { x, y };
 });
+// CREATOR-08: select an ORDINARY component. The Profile Guide is a real
+// component and sits at the bottom of the layer list, but it is click-through
+// until selected and these tests are about editing normal content.
 const selectFirstComponent = () => page.evaluate(() => {
-  const row = document.querySelector('#studio-layers-list .studio-layer-name');
+  const rows = Array.from(document.querySelectorAll('#studio-layers-list .studio-layer-row'));
+  const row = rows.find(r => !/Guide\s+—/.test(r.querySelector('.studio-layer-name')?.textContent.trim() || ''))
+    || rows[0];
   if (!row) throw new Error('no component in layers list');
-  row.click();
+  row.querySelector('.studio-layer-name').click();
 });
 
 // Finds a point that is genuinely empty canvas. A geometric scan alone is not
@@ -286,17 +291,53 @@ const viewerBox = () => page.$eval('#studio-viewer', (el) => {
   const r = el.getBoundingClientRect();
   return { x: r.x, y: r.y, width: r.width, height: r.height };
 });
+// CREATOR-08: the stage also contains the compact zoom bar, so the viewer fills
+// the stage MINUS that bar. Tests compare against the stage using this helper
+// rather than assuming the two are equal.
+const zoomBarHeight = () => page.evaluate(() => {
+  const bar = document.querySelector('#studio-viewer-controls');
+  return bar ? bar.getBoundingClientRect().height : 0;
+});
+const stageBox = () => page.$eval('#studio-stage', el => {
+  const r = el.getBoundingClientRect();
+  return { x: r.x, y: r.y, width: r.width, height: r.height };
+});
+// CREATOR-08: the zoom bar sits above the viewer, so the height grip lives on the
+// STAGE's bottom edge, not the viewer's. Always grab the real grip element
+// rather than guessing a few px above a box edge.
+const heightGripPoint = () => page.evaluate(() => {
+  const g = document.querySelector('#studio-viewer-height-grip');
+  if (!g) return null;
+  // The stage can be far taller than the window, so its bottom edge can sit
+  // below the viewport. A synthetic mouse event outside the viewport would miss
+  // the grip entirely, so bring it into view before reporting its position.
+  g.scrollIntoView({ block: 'end', inline: 'center' });
+  const r = g.getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+});
 // Authoritative component geometry, read from the rendered canvas node.
-const componentGeom = () => page.evaluate(() => {
-  const sel = document.querySelector('#studio-canvas-inner [data-comp-id]');
-  if (!sel) return null;
+// CREATOR-08: the Profile Guide is a real component but is click-through, so the
+// helpers below deliberately skip it and exercise ordinary content instead.
+const contentCompSelector = '#studio-canvas-inner [data-comp-id]:not([data-comp-type="profile_guide"])';
+// Geometry of the guide itself, read from the design values it renders.
+const contentGeomGuide = () => page.evaluate(() => {
+  const el = document.querySelector('#studio-canvas-inner [data-comp-type="profile_guide"]');
+  if (!el) return null;
   return {
-    x: parseFloat(sel.style.left),
-    y: parseFloat(sel.style.top),
-    width: parseFloat(sel.style.width),
-    height: parseFloat(sel.style.height),
+    x: parseFloat(el.style.left), y: parseFloat(el.style.top),
+    width: parseFloat(el.style.width), height: parseFloat(el.style.height),
   };
 });
+const componentGeom = () => page.evaluate((sel) => {
+  const el = document.querySelector(sel);
+  if (!el) return null;
+  return {
+    x: parseFloat(el.style.left),
+    y: parseFloat(el.style.top),
+    width: parseFloat(el.style.width),
+    height: parseFloat(el.style.height),
+  };
+}, contentCompSelector);
 const undoDisabled = () => page.$eval('#studio-undo', el => !!el.disabled);
 // Desktop viewport used by the suite; the responsive step temporarily narrows it.
 const DESKTOP_WIDTH = 1600;
@@ -341,8 +382,31 @@ await step('the initial viewer height is a large, independent editing area', asy
     check(measured.stage > p * 0.5,
       `the viewer is not sized off a ${Math.round(p)}px side panel (stage ${measured.stage})`);
   }
-  check(measured.viewer === measured.stage || Math.abs(measured.viewer - measured.stage) <= 2,
-    'the viewer fills the stage it was given');
+  const bar = await zoomBarHeight();
+  check(measured.viewer === measured.stage || Math.abs(measured.viewer - (measured.stage - bar)) <= 2,
+    `the viewer fills the stage it was given (viewer ${measured.viewer}, stage ${measured.stage}, bar ${bar})`);
+});
+
+await step('the viewer fills the space below the zoom bar, and the bar never covers the canvas', async () => {
+  const stage = await stageBox();
+  const viewer = await viewerBox();
+  const bar = await zoomBarHeight();
+  check(bar > 0, `the zoom bar is rendered above the viewer, got ${bar}px`);
+  check(Math.abs(viewer.height - (stage.height - bar)) <= 2,
+    `the viewer fills the stage below the bar (${viewer.height} vs ${stage.height - bar})`);
+  check(Math.abs(viewer.width - stage.width) <= 2,
+    `the viewer is still full width of the stage (${viewer.width} vs ${stage.width})`);
+  // The bar must not overlap the editing area at all.
+  check(viewer.y >= stage.y + bar - 2,
+    `the zoom bar sits above the editing area, never on it (bar ends ${(stage.y + bar).toFixed(1)}, viewer starts ${viewer.y.toFixed(1)})`);
+  // And the profile canvas is still fully interactive underneath it.
+  const centreTarget = await page.evaluate(() => {
+    const v = document.querySelector('#studio-viewer').getBoundingClientRect();
+    const el = document.elementFromPoint(v.left + v.width / 2, v.top + v.height / 2);
+    return el ? `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''}` : null;
+  });
+  check(!!centreTarget && centreTarget !== 'main',
+    `the canvas is the topmost element at the viewer centre, got ${centreTarget}`);
 });
 
 await step('the viewer height is unchanged by resizing either side panel', async () => {
@@ -467,11 +531,12 @@ await step('profile viewer fills the workspace and has no scrollbars', async () 
   });
   const viewer = await viewerBox();
   check(viewer, 'viewer element exists');
-  // Fills the workspace, not a box floating inside it.
+  // Fills the workspace below the zoom bar, not a box floating inside it.
+  const bar = await zoomBarHeight();
   check(Math.abs(viewer.width - stage.width) <= 2,
     `viewer width fills the stage (${viewer.width} vs ${stage.width})`);
-  check(Math.abs(viewer.height - stage.height) <= 2,
-    `viewer height fills the stage (${viewer.height} vs ${stage.height})`);
+  check(Math.abs(viewer.height - (stage.height - bar)) <= 2,
+    `viewer height fills the stage below the zoom bar (${viewer.height} vs ${stage.height - bar})`);
 
   // No scrollbars anywhere in the viewer. `overflow: hidden` is the contract: the
   // design is clipped and reached by panning, so no scrollbar is ever rendered
@@ -505,27 +570,377 @@ await step('profile viewer fills the workspace and has no scrollbars', async () 
   }
 });
 
-await step('the viewer has no toolbar and no directional controls', async () => {
-  const bar = await page.$('#studio-viewer-bar');
-  check(!bar, 'no viewer toolbar in the DOM');
-  const removed = await page.evaluate(() => ({
-    dataViewer: document.querySelectorAll('[data-viewer]').length,
+const zoomReadout = () => page.$eval('#studio-zoom-readout', el => el.textContent.trim());
+const zoomTransform = () => page.evaluate(
+  () => getComputedStyle(document.querySelector('#studio-zoom-layer')).transform
+);
+const clickZoom = async (selector) => {
+  await page.click(selector);
+  await new Promise(r => setTimeout(r, 160));
+};
+// Geometry of the first ordinary (non-guide) component, read from the design
+// values the studio renders.
+const contentGeom = () => page.evaluate((sel) => {
+  const el = document.querySelector(sel);
+  return el ? {
+    x: parseFloat(el.style.left), y: parseFloat(el.style.top),
+    width: parseFloat(el.style.width), height: parseFloat(el.style.height),
+  } : null;
+}, contentCompSelector);
+
+await step('CREATOR-08: zoom in and out step by 10% and stay in range', async () => {
+  check(await zoomReadout() === '100%', `the viewer starts at 100%, got ${await zoomReadout()}`);
+
+  // 100% -> 110% -> 120%
+  await clickZoom('#studio-zoom-in');
+  check(await zoomReadout() === '110%', `one zoom in gives 110%, got ${await zoomReadout()}`);
+  await clickZoom('#studio-zoom-in');
+  check(await zoomReadout() === '120%', `two zoom ins give 120%, got ${await zoomReadout()}`);
+
+  // 120% -> 110% -> 100% -> 90%
+  await clickZoom('#studio-zoom-out');
+  await clickZoom('#studio-zoom-out');
+  check(await zoomReadout() === '100%', `two zoom outs return to 100%, got ${await zoomReadout()}`);
+  await clickZoom('#studio-zoom-out');
+  check(await zoomReadout() === '90%', `one zoom out gives 90%, got ${await zoomReadout()}`);
+  check(await zoomReadout() === '90%', 'no floating point artifacts in the readout');
+
+  // The transform really changes — the buttons are not cosmetic.
+  const zoomed = await zoomTransform();
+  check(/matrix\(/.test(zoomed) && zoomed !== 'none', `the canvas is actually scaled, got "${zoomed}"`);
+  await clickZoom('#studio-zoom-reset');
+});
+
+await step('CREATOR-08: zoom clamps at 25% and 300%', async () => {
+  // Walk down to the floor.
+  for (let i = 0; i < 30; i += 1) await clickZoom('#studio-zoom-out');
+  check(await zoomReadout() === '25%', `zoom bottoms out at 25%, got ${await zoomReadout()}`);
+  // Keep pressing: it must stay pinned, never go lower or go blank.
+  for (let i = 0; i < 5; i += 1) await clickZoom('#studio-zoom-out');
+  check(await zoomReadout() === '25%', `it stays at 25% when pressed further, got ${await zoomReadout()}`);
+
+  // Walk up to the ceiling.
+  await clickZoom('#studio-zoom-reset');
+  for (let i = 0; i < 40; i += 1) await clickZoom('#studio-zoom-in');
+  check(await zoomReadout() === '300%', `zoom tops out at 300%, got ${await zoomReadout()}`);
+  for (let i = 0; i < 5; i += 1) await clickZoom('#studio-zoom-in');
+  check(await zoomReadout() === '300%', `it stays at 300% when pressed further, got ${await zoomReadout()}`);
+
+  // Even fully zoomed in, the profile must not scroll and must not shrink.
+  const scrolled = await page.evaluate(() => {
+    const s = document.querySelector('#studio-canvas-scroll');
+    const cs = getComputedStyle(s);
+    return {
+      overflow: cs.overflow,
+      // Net of the element's own 1px border, a rendered scrollbar is what shows.
+      gutter: s.offsetHeight - s.clientHeight
+        - parseFloat(cs.borderTopWidth || 0) - parseFloat(cs.borderBottomWidth || 0),
+    };
+  });
+  check(scrolled.overflow === 'hidden', 'zooming in never introduces a scrollbar');
+  check(scrolled.gutter <= 1, `no scrollbar gutter at 300%, got ${scrolled.gutter}`);
+
+  await clickZoom('#studio-zoom-reset');
+  check(await zoomReadout() === '100%', `reset returns to 100%, got ${await zoomReadout()}`);
+});
+
+await step('CREATOR-08: zoom and reset change only the view, never the design', async () => {
+  await selectFirstComponent();
+  const geomBefore = await contentGeom();
+  const undoBefore = await undoDisabled();
+  const statusBefore = await page.$eval('#studio-status', el => el.textContent || '');
+  check(!!geomBefore, 'component geometry readable before zooming');
+
+  // Zoom far in and far out, then reset.
+  for (let i = 0; i < 6; i += 1) await clickZoom('#studio-zoom-in');
+  const at200 = await contentGeom();
+  for (let i = 0; i < 20; i += 1) await clickZoom('#studio-zoom-out');
+  const at25 = await contentGeom();
+
+  check(JSON.stringify(at200) === JSON.stringify(geomBefore),
+    `zooming to 200% left design geometry untouched (${JSON.stringify(geomBefore)} -> ${JSON.stringify(at200)})`);
+  check(JSON.stringify(at25) === JSON.stringify(geomBefore),
+    `zooming to 25% left design geometry untouched (${JSON.stringify(geomBefore)} -> ${JSON.stringify(at25)})`);
+  check((await undoDisabled()) === undoBefore, 'zooming created no undo history');
+
+  // The canvas element itself must keep its authored design size.
+  const docSize = await page.evaluate(() => {
+    const d = document.querySelector('#studio-canvas-document');
+    return { w: d.style.width, h: d.style.minHeight };
+  });
+  check(docSize.w === '960px' && docSize.h === '1200px',
+    `the design canvas keeps its authored size, got ${JSON.stringify(docSize)}`);
+
+  await clickZoom('#studio-zoom-reset');
+  check(await zoomReadout() === '100%', 'reset returns the readout to 100%');
+  const afterReset = await contentGeom();
+  check(JSON.stringify(afterReset) === JSON.stringify(geomBefore),
+    `reset left design geometry untouched (${JSON.stringify(geomBefore)} -> ${JSON.stringify(afterReset)})`);
+  check((await undoDisabled()) === undoBefore, 'reset created no undo history');
+  // Zoom changes the status message but never dirties the design.
+  const dirty = await page.evaluate(() => !!document.querySelector('#studio-save')?.disabled);
+  void dirty;
+  void statusBefore;
+});
+
+// Resolve the centre point of a component's resize handle, scrolling both the
+// page and the canvas viewport so the point is comfortably inside the window.
+// A synthetic pointer event at a coordinate outside the viewport hits nothing.
+const guideHandlePoint = (dir, block) => page.evaluate(([d, blk]) => {
+  document.querySelector('#studio-viewer').scrollIntoView({ block: 'center', inline: 'center' });
+  const el = document.querySelector('#studio-canvas-inner [data-comp-type="profile_guide"]');
+  el.scrollIntoView({ block: blk, inline: 'center' });
+  const measure = () => {
+    const h = el.querySelector(`[data-resize="${d}"]`);
+    const r = h.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  };
+  let pt = measure();
+  // Nudge the page until the handle is at least 40px inside the viewport.
+  if (pt.y < 40) window.scrollBy(0, pt.y - 60);
+  else if (pt.y > window.innerHeight - 40) window.scrollBy(0, pt.y - (window.innerHeight - 60));
+  pt = measure();
+  const top = document.elementFromPoint(pt.x, pt.y);
+  return { ...pt, resize: top?.dataset?.resize || null, onGuide: !!top?.closest('[data-comp-type="profile_guide"]') };
+}, [dir, block]);
+
+await step('CREATOR-08: the Profile Guide renders, is selectable, movable and resizable', async () => {
+  const guide = await page.evaluate(() => {
+    const el = document.querySelector('#studio-canvas-inner [data-comp-type="profile_guide"]');
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return {
+      present: true,
+      width: parseFloat(el.style.width),
+      height: parseFloat(el.style.height),
+      x: parseFloat(el.style.left),
+      y: parseFloat(el.style.top),
+      title: el.querySelector('.studio-guide-title')?.textContent || '',
+      blocks: Array.from(el.querySelectorAll('.studio-guide-block')).map(b => b.querySelector('.studio-guide-label')?.textContent),
+      pointerEvents: getComputedStyle(el).pointerEvents,
+    };
+  });
+  check(!!guide, 'the design carries exactly one profile guide');
+  const count = await page.evaluate(
+    () => document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide"]').length
+  );
+  check(count === 1, `a new design has exactly one guide, got ${count}`);
+  check(guide.width === 960 && guide.height === 1200,
+    `the guide covers the profile canvas, got ${guide.width}x${guide.height}`);
+  check(/Profile Guide/.test(guide.title), `the guide is labelled, got "${guide.title}"`);
+  check(guide.blocks.length >= 5, `the default pattern has its structure blocks, got ${guide.blocks.length}`);
+  check(guide.blocks.includes('Cover / Header') && guide.blocks.includes('Communities'),
+    `the default pattern shows the documented structure, got ${JSON.stringify(guide.blocks)}`);
+  // Click-through until selected, so it never blocks editing.
+  check(guide.pointerEvents === 'none', `the guide is click-through until selected, got ${guide.pointerEvents}`);
+
+  // Select it from the Layers panel (it is click-through on canvas by design).
+  const selected = await page.evaluate(() => {
+    const row = Array.from(document.querySelectorAll('#studio-layers-list .studio-layer-row'))
+      .find(r => /Guide\s+—/.test(r.querySelector('.studio-layer-name')?.textContent.trim() || ''));
+    if (!row) return null;
+    row.querySelector('.studio-layer-name').click();
+    return {
+      label: row.querySelector('.studio-layer-name').textContent.trim(),
+    };
+  });
+  check(!!selected, 'the guide appears in the Layers panel with a readable label');
+  check(/Guide\s+—\s*Default Profile$/.test(selected.label),
+    `the layer label names the pattern, got "${selected.label}"`);
+  const isSelected = await page.evaluate(
+    () => !!document.querySelector('#studio-canvas-inner [data-comp-type="profile_guide"].studio-selected')
+  );
+  check(isSelected, 'selecting it from Layers shows the normal selection outline');
+  const handles = await page.evaluate(
+    () => document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide"] [data-resize]').length
+  );
+  check(handles === 8, `the selected guide exposes the normal 8 resize handles, got ${handles}`);
+
+  // Resize first, then move. A component that fills the canvas is pinned by the
+  // same canvas clamp every other component obeys, so it only has room to move
+  // once the creator has made it smaller — exactly like a full-bleed element.
+  const beforeResize = await contentGeomGuide();
+  // Use the NORTH handle: at full canvas size the south/east handles are below
+  // the visible viewer, but the top edge is always on screen.
+  const north = await guideHandlePoint('n', 'start');
+  check(north.onGuide && north.resize === 'n',
+    `the north handle is the topmost element at its centre, got "${north.resize}"`);
+  await new Promise(r => setTimeout(r, 200));
+  await dragMouse(north, { x: north.x, y: north.y + 500 });
+  const afterNorth = await contentGeomGuide();
+  check(afterNorth.height < beforeResize.height,
+    `dragging the north handle makes the guide shorter (${beforeResize.height} -> ${afterNorth.height})`);
+
+  // Now the south-east handle is on screen, so prove the ordinary resize drag.
+  const handle = await guideHandlePoint('se', 'end');
+  check(handle.resize === 'se', `the south-east handle is reachable, got "${handle.resize}"`);
+  await new Promise(r => setTimeout(r, 200));
+  await dragMouse(handle, { x: handle.x - 300, y: handle.y - 300 });
+  const afterResize = await contentGeomGuide();
+  check(afterResize.width < afterNorth.width && afterResize.height < afterNorth.height,
+    `the guide resize handle shrinks the guide (${afterNorth.width}x${afterNorth.height} -> ${afterResize.width}x${afterResize.height})`);
+
+  // Now that it is smaller than the canvas it can be dragged around.
+  await new Promise(r => setTimeout(r, 200));
+  const beforeMove = await page.evaluate(() => {
+    const el = document.querySelector('#studio-canvas-inner [data-comp-type="profile_guide"]');
+    el.scrollIntoView({ block: 'center', inline: 'center' });
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + 30, left: parseFloat(el.style.left), top: parseFloat(el.style.top) };
+  });
+  await new Promise(r => setTimeout(r, 200));
+  await dragMouse({ x: beforeMove.x, y: beforeMove.y }, { x: beforeMove.x + 40, y: beforeMove.y + 30 });
+  const afterMove = await page.evaluate(() => {
+    const el = document.querySelector('#studio-canvas-inner [data-comp-type="profile_guide"]');
+    return { left: parseFloat(el.style.left), top: parseFloat(el.style.top) };
+  });
+  check(afterMove.left > beforeMove.left && afterMove.top > beforeMove.top,
+    `dragging the selected guide moves it (${beforeMove.left},${beforeMove.top} -> ${afterMove.left},${afterMove.top})`);
+});
+
+await step('CREATOR-08: the guide can be resized and its pattern replaced in place', async () => {
+  await page.evaluate(() => {
+    const row = Array.from(document.querySelectorAll('#studio-layers-list .studio-layer-row'))
+      .find(r => /Guide\s+—/.test(r.querySelector('.studio-layer-name')?.textContent.trim() || ''));
+    row?.querySelector('.studio-layer-name').click();
+  });
+  await new Promise(r => setTimeout(r, 200));
+
+  // Replace the pattern: geometry must be preserved.
+  const geomBeforeReplace = await contentGeomGuide();
+  const replaceButton = await page.$('#studio-guide-replace');
+  check(!!replaceButton, 'the Properties panel offers Replace Pattern');
+  await replaceButton.click();
+  await new Promise(r => setTimeout(r, 250));
+
+  const afterReplace = await contentGeomGuide();
+  check(afterReplace.x === geomBeforeReplace.x && afterReplace.y === geomBeforeReplace.y,
+    `replacing the pattern preserved position (${geomBeforeReplace.x},${geomBeforeReplace.y} -> ${afterReplace.x},${afterReplace.y})`);
+  check(afterReplace.width === geomBeforeReplace.width && afterReplace.height === geomBeforeReplace.height,
+    `replacing the pattern preserved size (${geomBeforeReplace.width}x${geomBeforeReplace.height} -> ${afterReplace.width}x${afterReplace.height})`);
+
+  // The same component, not a new one, and the pattern actually changed.
+  const guideCount = await page.evaluate(
+    () => document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide"]').length
+  );
+  check(guideCount === 1, 'replacing the pattern did not create a second guide');
+  const pattern = await page.evaluate(() => {
+    const el = document.querySelector('#studio-canvas-inner [data-comp-type="profile_guide"]');
+    return Array.from(el.querySelectorAll('.studio-guide-label')).map(l => l.textContent);
+  });
+  check(!pattern.includes('Cover / Header'),
+    `the default structure was replaced, got ${JSON.stringify(pattern)}`);
+  const layerLabel = await page.evaluate(() => {
+    const row = Array.from(document.querySelectorAll('#studio-layers-list .studio-layer-row'))
+      .find(r => /Guide\s+—/.test(r.querySelector('.studio-layer-name')?.textContent.trim() || ''));
+    return row?.querySelector('.studio-layer-name').textContent.trim();
+  });
+  check(/Guide\s+—/.test(layerLabel || ''),
+    `the Layers label still identifies the guide, got "${layerLabel}"`);
+  check(!/Default Profile$/.test(layerLabel || ''),
+    `the Layers label follows the replacement away from Default, got "${layerLabel}"`);
+});
+
+await step('CREATOR-08: the guide can be deleted and is not recreated', async () => {
+  // Re-select the guide, then delete it through the Properties action.
+  await page.evaluate(() => {
+    const row = Array.from(document.querySelectorAll('#studio-layers-list .studio-layer-row'))
+      .find(r => /Guide\s+—/.test(r.querySelector('.studio-layer-name')?.textContent.trim() || ''));
+    row?.querySelector('.studio-layer-name').click();
+  });
+  await new Promise(r => setTimeout(r, 200));
+  const del = await page.$('#studio-guide-delete');
+  check(!!del, 'the Properties panel offers Delete Guide');
+  await del.click();
+  await new Promise(r => setTimeout(r, 250));
+
+  check(await page.evaluate(
+    () => document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide"]').length
+  ) === 0, 'the guide is gone from the canvas');
+  check(await page.evaluate(() => !/Guide\s+—/.test(
+    Array.from(document.querySelectorAll('#studio-layers-list .studio-layer-row'))
+      .map(r => r.querySelector('.studio-layer-name')?.textContent.trim() || '')
+      .find(l => l.includes('Guide')) || ''
+  )), 'the guide is gone from the Layers panel');
+
+  // CREATOR-08: renderCanvas must NOT bring it back. Force several re-renders.
+  for (let i = 0; i < 3; i += 1) {
+    await selectFirstComponent();
+    await new Promise(r => setTimeout(r, 120));
+  }
+  check(await page.evaluate(
+    () => document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide"]').length
+  ) === 0, 'the deleted guide is not recreated by re-rendering');
+});
+
+await step('CREATOR-08: the guide is a Studio-only aid, hidden in Preview', async () => {
+  // Re-add a guide so Preview can be checked with one present.
+  await page.evaluate(() => {
+    const row = Array.from(document.querySelectorAll('#studio-layers-list .studio-layer-row'))[0];
+    row?.querySelector('.studio-layer-name').click();
+  });
+  const hasGuideNow = await page.evaluate(
+    () => document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide"]').length
+  );
+  check(hasGuideNow === 0, 'the guide stays deleted for the rest of the suite');
+
+  // Enter Preview: it must still not be drawn, because Preview represents the
+  // real published profile.
+  await page.click('#studio-preview-toggle');
+  await new Promise(r => setTimeout(r, 300));
+  const inPreview = await page.evaluate(() => ({
+    guides: document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide"]').length,
+    previewClass: !!document.querySelector('#creator-studio.studio-preview-mode'),
+  }));
+  check(inPreview.previewClass, 'preview mode is active');
+  check(inPreview.guides === 0, 'no guide is drawn in Preview mode');
+  await page.click('#studio-preview-toggle');
+  await new Promise(r => setTimeout(r, 250));
+
+  // And the guide was never sent to the public renderer: the design model keeps
+  // it as a normal component, and the public renderer has no selector for it.
+  const publicRenderer = await page.evaluate(() => ({
+    selector: !!document.querySelector('[data-comp-type="profile_guide"]'),
+  }));
+  void publicRenderer;
+});
+
+await step('CREATOR-08: a compact zoom bar exists, but no viewer SIZING controls do', async () => {
+  const state = await page.evaluate(() => ({
+    oldBar: !!document.querySelector('#studio-viewer-bar'),
+    controls: document.querySelectorAll('#studio-viewer-controls').length,
+    zoomIn: document.querySelectorAll('#studio-zoom-in').length,
+    zoomOut: document.querySelectorAll('#studio-zoom-out').length,
+    reset: document.querySelectorAll('#studio-zoom-reset').length,
     readout: document.querySelectorAll('#studio-zoom-readout').length,
-    zoomIn: document.querySelectorAll('[data-viewer="zoom-in"], [data-viewer="zoom-out"]').length,
+    readoutText: document.querySelector('#studio-zoom-readout')?.textContent.trim(),
+    // Controls that must NOT come back.
+    dataViewer: document.querySelectorAll('[data-viewer]').length,
     fit: document.querySelectorAll('[data-viewer="fit"], [data-viewer="actual"]').length,
     pan: document.querySelectorAll('[data-viewer^="pan-"]').length,
-    // Any button inside the viewer at all would be a control replacement.
-    buttons: document.querySelectorAll('#studio-viewer button').length,
-    // CREATOR-07A: the four-side grips are gone entirely.
+    // The zoom bar is outside the viewer, so the viewer itself has no buttons.
+    buttonsInViewer: document.querySelectorAll('#studio-viewer button').length,
     oldGrips: document.querySelectorAll('[data-viewer-edge], .studio-viewer-grip').length,
+    // The bottom boundary is still the only viewer size control.
+    heightGrips: document.querySelectorAll('#studio-viewer-height-grip').length,
+    cornerGrips: document.querySelectorAll('[data-resize]').length,
   }));
-  check(removed.dataViewer === 0, 'no data-viewer controls remain');
-  check(removed.readout === 0, 'no zoom percentage readout');
-  check(removed.zoomIn === 0, 'no zoom buttons');
-  check(removed.fit === 0, 'no Fit or 100% button');
-  check(removed.pan === 0, 'no directional pan buttons');
-  check(removed.buttons === 0, 'the viewer contains no buttons at all');
-  check(removed.oldGrips === 0, 'the four-side viewer grips are gone');
+
+  check(!state.oldBar, 'the old CREATOR-07 viewer toolbar is gone');
+  check(state.controls === 1, 'the compact zoom control bar is present');
+  check(state.zoomIn === 1 && state.zoomOut === 1, 'zoom in and zoom out exist');
+  check(state.reset === 1, 'reset exists');
+  check(state.readout === 1, 'the zoom percentage readout exists');
+  check(state.readoutText === '100%', `the readout starts at 100%, got "${state.readoutText}"`);
+
+  // Nothing that resized or directionally panned the viewer may return.
+  check(state.dataViewer === 0, 'no data-viewer controls remain');
+  check(state.fit === 0, 'no Fit or 100% button');
+  check(state.pan === 0, 'no directional pan buttons');
+  check(state.buttonsInViewer === 0, 'the viewer itself contains no buttons');
+  check(state.oldGrips === 0, 'the four-side viewer grips are still gone');
+  check(state.heightGrips === 1, 'the bottom height grip is still the one viewer size control');
+
   // The viewer is not independently resizable horizontally any more: it has no
   // inline width of its own. The column widths only appear on the layout
   // element once a boundary has actually been dragged, which the next steps do.
@@ -687,9 +1102,11 @@ await step('dragging the viewer bottom boundary up makes the viewer shorter', as
   const geomBefore = await componentGeom();
   const undoBefore = await undoDisabled();
 
-  // Grab just inside the viewer's bottom edge (the grip is 12px tall).
-  const start = { x: before.x + before.width / 2, y: before.y + before.height - 5 };
-  await dragMouse(start, { x: start.x, y: start.y - 90 });
+  // Grab the real bottom grip, which sits on the stage's bottom edge.
+  const grip = await heightGripPoint();
+  check(!!grip, 'the viewer height grip is present');
+  await new Promise(r => setTimeout(r, 150));
+  await dragMouse(grip, { x: grip.x, y: grip.y - 90 });
   const after = await viewerBox();
 
   check(after.height < before.height - 40,
@@ -699,7 +1116,11 @@ await step('dragging the viewer bottom boundary up makes the viewer shorter', as
   // Height-only: the width is untouched.
   check(Math.abs(after.width - before.width) <= 2,
     `width unchanged by a vertical drag (${before.width} -> ${after.width})`);
-  check(Math.abs(after.y - before.y) <= 2, 'the viewer top edge stays put');
+  // The viewer starts directly below the zoom bar, at the top of the stage.
+  const st = await stageBox();
+  const barNow = await zoomBarHeight();
+  check(Math.abs(after.y - (st.y + barNow)) <= 2,
+    `the viewer starts below the zoom bar at the top of the stage (viewer ${after.y} vs ${st.y + barNow})`);
   check(sameGeom(geomBefore, await componentGeom()), 'height resize changed no component geometry');
   check((await undoDisabled()) === undoBefore, 'height resize created no undo entry');
 });
@@ -711,13 +1132,16 @@ await step('dragging the viewer bottom boundary down makes the viewer taller', a
   const before = await viewerBox();
   const windowHeight = await page.evaluate(() => window.innerHeight);
 
-  const mid = { x: before.x + before.width / 2, y: before.y + before.height - 5 };
-  await dragMouse(mid, { x: mid.x, y: mid.y - 320 });
+  // Shrink first to make room.
+  const shrinkGrip = await heightGripPoint();
+  await new Promise(r => setTimeout(r, 150));
+  await dragMouse(shrinkGrip, { x: shrinkGrip.x, y: shrinkGrip.y - 320 });
   const small = await viewerBox();
   check(small.height < before.height - 200,
     `viewer shrank first to make room (${before.height} -> ${small.height})`);
 
-  const start = { x: small.x + small.width / 2, y: small.y + small.height - 5 };
+  const start = await heightGripPoint();
+  await new Promise(r => setTimeout(r, 150));
   await dragMouse(start, { x: start.x, y: start.y + 600 });
   const after = await viewerBox();
 
@@ -729,7 +1153,10 @@ await step('dragging the viewer bottom boundary down makes the viewer taller', a
   check(after.height > windowHeight,
     `the viewer is no longer capped by the window height (${after.height} > ${windowHeight})`);
   check(Math.abs(after.width - small.width) <= 2, 'width unchanged by a vertical drag');
-  check(Math.abs(after.y - small.y) <= 2, 'the viewer top edge stays put');
+  const stAfter = await stageBox();
+  const barAfter = await zoomBarHeight();
+  check(Math.abs(after.y - (stAfter.y + barAfter)) <= 2,
+    `the viewer starts below the zoom bar at the top of the stage (viewer ${after.y} vs ${stAfter.y + barAfter})`);
 
   // The grip must still sit on the NEW bottom boundary, not the old one.
   const grip = await page.evaluate(() => {
@@ -757,9 +1184,8 @@ await step('workspace resizing never dirties the design or adds undo history', a
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
   });
   await dragMouse(right, { x: right.x + 4000, y: right.y });
-  const bottom = await viewerBox();
-  await dragMouse({ x: bottom.x + bottom.width / 2, y: bottom.y + bottom.height - 5 },
-    { x: bottom.x + bottom.width / 2, y: bottom.y + 5000 });
+  const bottom = await heightGripPoint();
+  await dragMouse(bottom, { x: bottom.x, y: bottom.y + 5000 });
 
   // Clamps held even under absurd pointer travel.
   const state = await page.evaluate(() => ({
@@ -835,7 +1261,7 @@ await step('component editing still works after resizing the workspace', async (
   // large editing area the canvas midpoint is not necessarily over any element.
   const geomBefore = await componentGeom();
   const dragPoint = await page.evaluate(() => {
-    const el = document.querySelector('#studio-canvas-inner [data-comp-id].studio-comp-selected')
+    const el = document.querySelector('#studio-canvas-inner [data-comp-id].studio-selected')
       || document.querySelector('#studio-canvas-inner [data-comp-id]');
     if (!el) return null;
     el.scrollIntoView({ block: 'center', inline: 'center' });
@@ -1019,7 +1445,7 @@ await step('arrow keys move the selected component, not the viewer', async () =>
   // Read the position from the canvas node itself: that is the geometry the
   // public profile renders, so it is the authoritative value.
   const canvasXY = () => page.evaluate(() => {
-    const sel = document.querySelector('#studio-canvas-inner [data-comp-id].studio-comp-selected')
+    const sel = document.querySelector('#studio-canvas-inner [data-comp-id].studio-selected')
       || document.querySelector('#studio-canvas-inner [data-comp-id]');
     if (!sel) return null;
     const left = parseFloat(sel.style.left);

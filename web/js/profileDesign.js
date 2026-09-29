@@ -18,6 +18,76 @@
 
 export const CONTENT_COMPONENT_TYPES = new Set(['text', 'image', 'card', 'sticker']);
 
+/**
+ * CREATOR-08: `profile_guide` is a Creator Studio editing aid — a visual sketch
+ * of the profile's usable structure. It is a real, editable design component
+ * (it moves, resizes, appears in Layers and is persisted with the design), but
+ * it is a STUDIO-ONLY type: it is deliberately absent from
+ * `CONTENT_COMPONENT_TYPES` and from `COMPONENT_SELECTORS`, so the public
+ * profile renderer skips it and the guide can never appear on a real profile
+ * or in Preview mode.
+ */
+export const GUIDE_COMPONENT_TYPE = 'profile_guide';
+
+/**
+ * The server-known guide patterns. A stored design may only reference one of
+ * these ids, so a guide can never carry arbitrary markup, CSS or script — it
+ * selects a built-in layout description and nothing else.
+ */
+export const GUIDE_PATTERNS = {
+  default: {
+    id: 'default',
+    label: 'Default Profile',
+    blocks: [
+      { label: 'Cover / Header', height: 150 },
+      { label: 'Profile Photo', height: 180, width: 180 },
+      { label: 'Name / Alias', height: 70 },
+      { label: 'Bio / About', height: 110 },
+      { label: 'Personal Information', height: 140 },
+      { label: 'Photo Gallery', height: 190 },
+      { label: 'Testimonials', height: 160 },
+      { label: 'Communities', height: 160 },
+    ],
+  },
+  minimal: {
+    id: 'minimal',
+    label: 'Minimal Profile',
+    blocks: [
+      { label: 'Profile Photo', height: 150, width: 150 },
+      { label: 'Name', height: 64 },
+      { label: 'Bio', height: 100 },
+      { label: 'Main Content', height: 200 },
+      { label: 'Gallery', height: 170 },
+    ],
+  },
+  classic: {
+    id: 'classic',
+    label: 'Classic Profile',
+    blocks: [
+      { label: 'Header', height: 130 },
+      { label: 'Identity', height: 150 },
+      { label: 'About Me', height: 120 },
+      { label: 'Personal Information', height: 150 },
+      { label: 'Gallery', height: 180 },
+      { label: 'Testimonials', height: 160 },
+      { label: 'Communities', height: 150 },
+    ],
+  },
+};
+
+export const GUIDE_PATTERN_IDS = Object.keys(GUIDE_PATTERNS);
+export const DEFAULT_GUIDE_PATTERN = 'default';
+
+/** Resolve a stored pattern id, falling back to the default. Never throws. */
+export function guidePattern(id) {
+  return GUIDE_PATTERNS[id] || GUIDE_PATTERNS[DEFAULT_GUIDE_PATTERN];
+}
+
+/** Human label for a guide, used by the Layers panel and Properties title. */
+export function guideLabel(id) {
+  return `Guide — ${guidePattern(id).label}`;
+}
+
 const COMPONENT_SELECTORS = {
   profile_photo: '.profile-header-photo-column',
   name: '#profile-name',

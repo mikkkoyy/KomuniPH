@@ -155,10 +155,90 @@ group('Validation & registry');
 let uidA;
 let tokenA;
 
-test('unknown component type is rejected', async () => {
-  uidA = createUserWithProfile('design-a');
-  tokenA = tokenFor(uidA);
+// CREATOR-08: a profile_guide is a persisted, validated design component, so the
+// server must hold it to exactly the same contract as every other type.
+const guide = (config, overrides = {}) => ({
+  id: 'g1', type: 'profile_guide', x: 0, y: 0, width: 960, height: 1200,
+  rotation: 0, zIndex: 0, visible: true, locked: false, config, ...overrides,
+});
+
+test('CREATOR-08: a valid profile_guide is accepted and round-trips its pattern', async () => {
+  // A dedicated user, so these designs never pollute tokenA's design list that
+  // the CRUD tests count.
+  const guideUid = createUserWithProfile('design-guide');
+  const guideToken = tokenFor(guideUid);
   const r = await api('POST', '/api/profile/design', {
+    token: guideToken,
+    body: { name: 'Guide', layout: { canvas: { width: 960, minHeight: 1200 }, components: [guide({ pattern: 'classic' })] } },
+  });
+  check(r.status === 201 || r.status === 200, `expected success, got ${r.status}: ${JSON.stringify(r.data)}`);
+  const saved = r.data?.design ?? r.data;
+  const comp = saved?.layout?.components?.[0];
+  check(comp?.type === 'profile_guide', 'the guide is stored as its own type');
+  check(comp?.config?.pattern === 'classic', `the pattern persists, got ${JSON.stringify(comp?.config)}`);
+  check(comp?.width === 960 && comp?.height === 1200, 'guide geometry persists');
+});
+
+test('CREATOR-08: only known guide patterns are accepted', async () => {
+  const guideToken = tokenFor(createUserWithProfile('design-guide-2'));
+  for (const pattern of ['default', 'minimal', 'classic']) {
+    const ok = await api('POST', '/api/profile/design', {
+      token: guideToken,
+      body: { name: `G-${pattern}`, layout: { canvas: { width: 960, minHeight: 1200 }, components: [guide({ pattern })] } },
+    });
+    check(ok.status === 201 || ok.status === 200, `pattern "${pattern}" is accepted, got ${ok.status}`);
+  }
+  for (const bad of ['neon', 'DEFAULT', '__proto__', 'constructor', 'toString', '', 1, null, true, { toString: 'x' }, ['default']]) {
+    const r = await api('POST', '/api/profile/design', {
+      token: guideToken,
+      body: { name: 'BadGuide', layout: { canvas: { width: 960, minHeight: 1200 }, components: [guide({ pattern: bad })] } },
+    });
+    check(r.status === 400, `pattern ${JSON.stringify(bad)} is rejected, got ${r.status}`);
+  }
+});
+
+test('CREATOR-08: a guide cannot smuggle extra config, markup or script', async () => {
+  const guideToken = tokenFor(createUserWithProfile('design-guide-3'));
+  const hostile = [
+    { pattern: 'default', html: '<script>alert(1)</script>' },
+    { pattern: 'default', css: 'background:url(javascript:alert(1))' },
+    { pattern: 'default', onClick: 'alert(1)' },
+    { pattern: '<script>alert(1)</script>' },
+    { pattern: 'default', blocks: [{ label: '<img src=x onerror=alert(1)>' }] },
+  ];
+  for (const config of hostile) {
+    const r = await api('POST', '/api/profile/design', {
+      token: guideToken,
+      body: { name: 'HostileGuide', layout: { canvas: { width: 960, minHeight: 1200 }, components: [guide(config)] } },
+    });
+    check(r.status === 400, `${JSON.stringify(config).slice(0, 60)} is rejected, got ${r.status}`);
+  }
+  // A guide must carry a config object rather than silently defaulting.
+  for (const config of [null, undefined, 'default', 5, []]) {
+    const r = await api('POST', '/api/profile/design', {
+      token: guideToken,
+      body: { name: 'NoCfgGuide', layout: { canvas: { width: 960, minHeight: 1200 }, components: [guide(config)] } },
+    });
+    check(r.status === 400, `guide config ${JSON.stringify(config)} is rejected, got ${r.status}`);
+  }
+});
+
+test('CREATOR-08: guide geometry is validated like any other component', async () => {
+  const guideToken = tokenFor(createUserWithProfile('design-guide-4'));
+  for (const overrides of [
+    { width: 4 }, { height: 0 }, { x: 99999 }, { rotation: 400 },
+    { zIndex: 1.5 }, { width: '960' }, { height: null },
+  ]) {
+    const r = await api('POST', '/api/profile/design', {
+      token: guideToken,
+      body: { name: 'BadGeom', layout: { canvas: { width: 960, minHeight: 1200 }, components: [guide({ pattern: 'default' }, overrides)] } },
+    });
+    check(r.status === 400, `guide geometry ${JSON.stringify(overrides)} is rejected, got ${r.status}`);
+  }
+});
+
+test('unknown component type is rejected', async () => {
+  if (!tokenA) { uidA = createUserWithProfile('design-a'); tokenA = tokenFor(uidA); }  const r = await api('POST', '/api/profile/design', {
     token: tokenA,
     body: { name: 'Bad', layout: { components: [{ id: 'c1', type: 'banana', x: 0, y: 0, width: 100, height: 100, zIndex: 0, visible: true, locked: false }] } },
   });
@@ -589,7 +669,10 @@ test('registries expose the controlled contract for clients', async () => {
   for (const type of expected) {
     check(profileDesign.DESIGN_COMPONENT_TYPES.has(type), `missing controlled type: ${type}`);
   }
-  check(profileDesign.DESIGN_COMPONENT_TYPES.size === 12, 'registry must contain the 8 controlled + 4 content types');
+  // CREATOR-08 adds `profile_guide`, so the registry is 8 controlled + 4
+  // content + 1 guide.
+  check(profileDesign.DESIGN_COMPONENT_TYPES.size === 13, 'registry must contain the 8 controlled + 4 content types + the guide');
+  check(profileDesign.DESIGN_COMPONENT_TYPES.has('profile_guide'), 'the guide type is registered');
 });
 
 // ════════════════════════════════════════════════════════════════════════════

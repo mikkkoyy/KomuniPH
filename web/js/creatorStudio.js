@@ -20,9 +20,18 @@ import {
   CONTENT_COMPONENT_TYPES,
   applyGeometryToElement,
   applyCommonStyleToElement,
+  GUIDE_COMPONENT_TYPE,
+  GUIDE_PATTERN_IDS,
+  DEFAULT_GUIDE_PATTERN,
+  guidePattern,
+  guideLabel,
 } from './profileDesign.js';
 import {
   stepPan,
+  stepZoom,
+  zoomPercent,
+  defaultViewerState,
+  clampZoom,
   clampPan,
   viewerTransform,
   designPoint,
@@ -54,8 +63,23 @@ const CONTENT_SECTIONS = [
   { type: 'sticker', label: 'Sticker', hint: 'A decorative image', w: 160, h: 160, config: { imageUrl: '', fit: 'contain' } },
 ];
 
-const CONTROLLED_TYPES = new Set(CONTROLLED_SECTIONS.map(s => s.type));
+/**
+ * CREATOR-08: the Profile Guide. It is a real, editable design component — it
+ * moves, resizes, appears in Layers and is saved with the design — but it is a
+ * STUDIO-ONLY aid that never renders on the public profile. New designs get
+ * exactly one default guide; it is never re-created by renderCanvas(), so a
+ * deleted guide stays deleted and a saved one stays as the creator left it.
+ */
+const GUIDE_SECTION = {
+  type: GUIDE_COMPONENT_TYPE,
+  label: 'Profile Guide',
+  hint: 'A layout sketch to design against — Studio only',
+  w: 960,
+  h: 1200,
+  config: { pattern: DEFAULT_GUIDE_PATTERN },
+};
 const ALL_SECTIONS = [...CONTROLLED_SECTIONS, ...CONTENT_SECTIONS];
+const CONTROLLED_TYPES = new Set(CONTROLLED_SECTIONS.map(s => s.type));
 
 const SECTION_ICONS = {
   profile_photo: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.2" r="3.4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 19c1-3.2 3.9-5 7-5s6 1.8 7 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><rect x="3.5" y="3.5" width="17" height="17" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>`,
@@ -119,6 +143,8 @@ function roundInt(value) { return Math.round(value); }
 function newId() { idCounter += 1; return `c${Date.now().toString(36)}${idCounter.toString(36)}`; }
 function labelOf(comp) {
   const meta = ALL_SECTIONS.find(s => s.type === comp.type);
+  // CREATOR-08: the guide shows its current pattern, never an internal id.
+  if (comp.type === GUIDE_COMPONENT_TYPE) return guideLabel(comp.config && comp.config.pattern);
   if (comp.type === 'text') {
     const preview = String((comp.config && comp.config.text) || '').slice(0, 24);
     return `Text — ${preview || '…'}`;
@@ -226,6 +252,15 @@ export function renderCreatorStudioPage() {
           <div id="studio-content-list" class="studio-element-list"></div>
         </aside>
         <div id="studio-stage">
+          <!-- CREATOR-08: a compact zoom control bar sits ABOVE the viewer, so it
+               never covers the profile canvas and never steals pointer events
+               from editing. It controls zoom/pan only — never viewer size. -->
+          <div id="studio-viewer-controls" role="group" aria-label="Profile Viewer zoom">
+            <button type="button" id="studio-zoom-out" class="btn btn-secondary studio-zoom-btn" title="Zoom out (10%)" aria-label="Zoom out">−</button>
+            <span id="studio-zoom-readout" class="studio-zoom-readout" role="status" aria-live="polite" title="Current zoom">100%</span>
+            <button type="button" id="studio-zoom-in" class="btn btn-secondary studio-zoom-btn" title="Zoom in (10%)" aria-label="Zoom in">+</button>
+            <button type="button" id="studio-zoom-reset" class="btn btn-secondary studio-zoom-btn studio-zoom-reset" title="Reset zoom to 100% and re-centre">Reset</button>
+          </div>
           <div id="studio-viewer">
             <div id="studio-canvas-scroll">
               <div id="studio-canvas-inner"></div>
@@ -444,23 +479,59 @@ function startPanelResize(edge, event) {
 }
 
 function startViewerHeightResize(event) {
+  const stage = stageElement();
   const viewer = viewerElement();
-  if (!viewer || isSingleColumn()) return;
+  if (!stage || !viewer || isSingleColumn()) return;
+  // Measure the STAGE, because that is the box whose height this state owns.
+  // The viewer fills the stage below the zoom bar, so a delta applied to the
+  // stage is exactly the delta the creator sees on the viewer's bottom edge.
   drag = {
     mode: 'viewer-height',
     id: null,
     pointerClientY: event.clientY,
     startClientY: event.clientY,
-    startHeight: viewer.getBoundingClientRect().height,
+    startHeight: stage.getBoundingClientRect().height,
   };
   root?.classList.add('studio-workspace-resizing');
   setStatus('Resizing the viewer height — the saved design is unchanged.');
 }
 
 
+/**
+ * CREATOR-08: build the editable Profile Guide. Every node is created with
+ * element APIs and `textContent` from the server-known pattern registry — never
+ * innerHTML — so a stored pattern id can express labels and nothing else.
+ */
+function buildGuideNode(el, comp) {
+  const pattern = guidePattern(comp.config && comp.config.pattern);
+  const inner = document.createElement('div');
+  inner.className = 'studio-guide-inner';
+
+  const title = document.createElement('div');
+  title.className = 'studio-guide-title';
+  title.textContent = `Profile Guide — ${pattern.label}`;
+  inner.appendChild(title);
+
+  for (const block of pattern.blocks) {
+    const row = document.createElement('div');
+    row.className = 'studio-guide-block';
+    // A block is sized as a fraction of the guide box so it stays proportional
+    // when the creator resizes the guide.
+    row.style.height = `${(block.height / 1200) * 100}%`;
+    const label = document.createElement('span');
+    label.className = 'studio-guide-label';
+    label.textContent = block.label;
+    row.appendChild(label);
+    inner.appendChild(row);
+  }
+  el.appendChild(inner);
+}
+
 function buildContentNode(el, comp) {
   const config = comp.config || {};
-  if (comp.type === 'image' || comp.type === 'sticker') {
+  if (comp.type === GUIDE_COMPONENT_TYPE) {
+    buildGuideNode(el, comp);
+  } else if (comp.type === 'image' || comp.type === 'sticker') {
     const inner = document.createElement('div');
     inner.className = 'design-image-inner';
     const img = document.createElement('img');
@@ -513,6 +584,9 @@ function appendHandles(el) {
 function buildComponentNode(comp) {
   const el = document.createElement('div');
   el.dataset.compId = comp.id;
+  // CREATOR-08: expose the type so the guide can be identified in the DOM
+  // without matching on its label or class.
+  el.dataset.compType = comp.type;
 
   if (CONTROLLED_TYPES.has(comp.type)) {
     const meta = CONTROLLED_SECTIONS.find(s => s.type === comp.type);
@@ -551,7 +625,14 @@ function renderCanvas() {
     empty.textContent = 'Your profile is empty. Click a section or "+" in the Elements panel to place it, or drag it onto the canvas.';
     doc.appendChild(empty);
   }
-  ordered.forEach(comp => doc.appendChild(buildComponentNode(comp)));
+  // CREATOR-08: the guide is a Studio-only aid. Preview represents the real
+  // published profile, so the guide is not drawn there — exactly as the public
+  // profile renderer skips it. The component itself is untouched and still
+  // saved with the design.
+  const visible = previewMode
+    ? ordered.filter(comp => comp.type !== GUIDE_COMPONENT_TYPE)
+    : ordered;
+  visible.forEach(comp => doc.appendChild(buildComponentNode(comp)));
 
   const zoomLayer = document.createElement('div');
   zoomLayer.id = 'studio-zoom-layer';
@@ -690,16 +771,17 @@ function singleLineField(comp, path, { max, trim = false } = {}) {
   return input;
 }
 
-function selectField(comp, path, options) {
+function selectField(comp, path, options, { labels = [] } = {}) {
   const select = document.createElement('select');
   const empty = document.createElement('option');
   empty.value = '';
   empty.textContent = 'Default';
   select.appendChild(empty);
-  options.forEach(option => {
+  options.forEach((option, index) => {
     const el = document.createElement('option');
     el.value = option;
-    el.textContent = option;
+    // CREATOR-08: a guide shows readable pattern names, not raw ids.
+    el.textContent = labels[index] || option;
     select.appendChild(el);
   });
   select.value = getPath(comp, path) ?? '';
@@ -992,6 +1074,39 @@ function componentProperties(frag, comp) {
   frag.appendChild(fieldRow('Shadow blur', numberField(comp, 'style.shadowBlur', { min: 0, max: 200 })));
   frag.appendChild(fieldRow('Shadow color', colorField(comp, 'style.shadowColor')));
 
+  if (comp.type === GUIDE_COMPONENT_TYPE) {
+    frag.appendChild(sectionTitle('Guide Pattern'));
+    frag.appendChild(fieldRow('Pattern', selectField(comp, 'config.pattern', GUIDE_PATTERN_IDS, {
+      labels: GUIDE_PATTERN_IDS.map(id => guidePattern(id).label),
+    })));
+    const hint = document.createElement('p');
+    hint.className = 'studio-prop-hint';
+    hint.textContent = 'A layout sketch of the profile structure. It is saved with your design, is editable, and never appears on your public profile.';
+    frag.appendChild(hint);
+
+    // Replacing swaps the pattern in place, keeping position, size, rotation and
+    // z-index — the guide is never recreated as a new component.
+    const actions = document.createElement('div');
+    actions.className = 'studio-prop-row studio-guide-actions';
+    const replace = document.createElement('button');
+    replace.type = 'button';
+    replace.id = 'studio-guide-replace';
+    replace.className = 'btn btn-secondary';
+    replace.textContent = 'Replace Pattern';
+    replace.title = 'Cycle to the next guide pattern';
+    replace.addEventListener('click', () => { replaceGuidePattern(comp.id); renderProperties(); });
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.id = 'studio-guide-delete';
+    del.className = 'btn btn-secondary';
+    del.textContent = 'Delete Guide';
+    del.title = 'Remove this guide from the design';
+    del.addEventListener('click', () => { removeComponent(comp.id); });
+    actions.appendChild(replace);
+    actions.appendChild(del);
+    frag.appendChild(actions);
+  }
+
   if (CONTENT_COMPONENT_TYPES.has(comp.type)) {
     const section = comp.type === 'text' ? 'Text content'
       : comp.type === 'card' ? 'Card content'
@@ -1054,7 +1169,86 @@ function renderAll() {
   renderCanvas();
   renderLayers();
   renderProperties();
+  renderZoomReadout();
   updateToolbar();
+}
+
+// ── Guide operations (CREATOR-08) ────────────────────────────────────────────
+/**
+ * Build the initial guide component for a brand-new design. It is inserted ONCE
+ * at creation time only — never from renderCanvas() — so a guide the creator
+ * deletes stays deleted and a guide they repositioned is not undone by a re-render.
+ */
+function makeDefaultGuide() {
+  // Uses DEFAULT_CANVAS directly rather than canvas(): this runs while a design
+  // is being CREATED, before currentDesign exists, so it must not read the
+  // module's current design.
+  return {
+    id: newId(),
+    type: GUIDE_COMPONENT_TYPE,
+    x: 0,
+    y: 0,
+    width: DEFAULT_CANVAS.width,
+    height: DEFAULT_CANVAS.minHeight,
+    rotation: 0,
+    zIndex: 0,
+    visible: true,
+    locked: false,
+    config: { pattern: DEFAULT_GUIDE_PATTERN },
+  };
+}
+
+/** A fresh design layout: the default canvas plus exactly one default guide. */
+function newDesignLayout() {
+  return { canvas: { ...DEFAULT_CANVAS }, components: [makeDefaultGuide()] };
+}
+
+/**
+ * Replace a guide's pattern IN PLACE. Geometry, rotation, z-index and selection
+ * are untouched — only the internal visual pattern changes, and the component
+ * is never recreated.
+ */
+function replaceGuidePattern(id) {
+  const comp = findComp(id);
+  if (!comp || comp.type !== GUIDE_COMPONENT_TYPE) return;
+  pushHistory();
+  const index = GUIDE_PATTERN_IDS.indexOf(comp.config && comp.config.pattern);
+  const next = GUIDE_PATTERN_IDS[(index + 1) % GUIDE_PATTERN_IDS.length];
+  comp.config = { ...(comp.config || {}), pattern: next };
+  markChanged(`Guide pattern changed to ${guidePattern(next).label}. Position and size were kept.`);
+}
+
+// ── Zoom controls (CREATOR-08) ────────────────────────────────────────────────
+// Zoom and pan are VIEWER state. Every function here touches only `zoom` /
+// `viewerPan` and re-renders the canvas: none of them can reach a component,
+// mark the design dirty, push history, or trigger Save/Publish.
+function renderZoomReadout() {
+  const readout = root?.querySelector('#studio-zoom-readout');
+  if (readout) readout.textContent = zoomPercent(zoom);
+}
+
+/** Apply a new zoom and keep the pan legal for the new scale. Viewer-only. */
+function setZoom(next, message) {
+  zoom = clampZoom(next);
+  clampViewerPan();
+  renderCanvas();
+  renderZoomReadout();
+  if (message) setStatus(message);
+}
+
+function zoomBy(direction) {
+  setZoom(stepZoom(zoom, direction));
+}
+
+/** CREATOR-08: Reset restores zoom 1 and re-centres the pan. Nothing else. */
+function resetViewerView() {
+  const { zoom: z, pan } = defaultViewerState();
+  zoom = z;
+  viewerPan = { ...pan };
+  clampViewerPan();
+  renderCanvas();
+  renderZoomReadout();
+  setStatus('View reset to 100% and re-centred. The saved design is unchanged.');
 }
 
 // ── Layer operations ─────────────────────────────────────────────────────────
@@ -1839,7 +2033,7 @@ async function createNewDesign() {
     setStatus('Creating a new design…');
     const result = await designApi.createDesign({
       name: 'Untitled Design',
-      layout: { canvas: { ...DEFAULT_CANVAS }, components: [] },
+      layout: newDesignLayout(),
     });
     return result.design;
   });
@@ -1859,6 +2053,10 @@ async function createNewDesign() {
 function attachEvents() {
   root.querySelector('#studio-sections-list').addEventListener('click', onElementListClick);
   root.querySelector('#studio-content-list').addEventListener('click', onElementListClick);
+  // CREATOR-08: zoom controls. Viewer state only — no design mutation.
+  root.querySelector('#studio-zoom-in').addEventListener('click', () => zoomBy('in'));
+  root.querySelector('#studio-zoom-out').addEventListener('click', () => zoomBy('out'));
+  root.querySelector('#studio-zoom-reset').addEventListener('click', resetViewerView);
   root.querySelector('#studio-canvas-inner').addEventListener('pointerdown', onStagePointerDown);
   root.querySelector('#studio-canvas-inner').addEventListener('dragover', event => event.preventDefault());
   root.querySelector('#studio-canvas-inner').addEventListener('drop', onCanvasDrop);
@@ -1944,7 +2142,7 @@ export async function initCreatorStudioPage() {
     if (!pick) {
       const created = await designApi.createDesign({
         name: 'My Design',
-        layout: { canvas: { ...DEFAULT_CANVAS }, components: [] },
+        layout: newDesignLayout(),
       });
       designs = [created.design];
       pick = created.design;

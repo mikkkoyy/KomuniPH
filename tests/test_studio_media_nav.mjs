@@ -391,25 +391,80 @@ test('zoom is clamped to the supported range', async () => {
   check(viewer.clampZoom('nonsense') === 1, 'invalid falls back to 1');
 });
 
-test('zoom in/out step by 10% and stop at the limits', async () => {
-  check(viewer.stepZoom(1, 1) === 1.1, 'zoom in steps to 1.1');
-  check(viewer.stepZoom(1, -1) === 0.9, 'zoom out steps to 0.9');
-  check(viewer.stepZoom(viewer.MAX_ZOOM, 1) === viewer.MAX_ZOOM, 'no zoom in past MAX');
-  check(viewer.stepZoom(viewer.MIN_ZOOM, -1) === viewer.MIN_ZOOM, 'no zoom out past MIN');
-  check(viewer.zoomPercent(1.25) === '125%', 'percent formatting');
-  check(viewer.zoomPercent(0.5) === '50%', 'percent formatting (down)');
+test('viewer box is clamped to the minimum and to the available space', async () => {
+  const min = viewer.clampViewerRect({ width: 10, height: 10 });
+  check(min.width === viewer.MIN_VIEWER_WIDTH, `width floors at the minimum, got ${min.width}`);
+  check(min.height === viewer.MIN_VIEWER_HEIGHT, `height floors at the minimum, got ${min.height}`);
+  // Never larger than the stage, so resizing cannot create a scrollbar.
+  const capped = viewer.clampViewerRect({ width: 99999, height: 99999 }, { boundsWidth: 800, boundsHeight: 600 });
+  check(capped.width === 800 && capped.height === 600, `capped to the workspace, got ${capped.width}x${capped.height}`);
+  // When the stage is smaller than the minimum, the minimum still wins.
+  const tiny = viewer.clampViewerRect({ width: 9999, height: 9999 }, { boundsWidth: 100, boundsHeight: 100 });
+  check(tiny.width === viewer.MIN_VIEWER_WIDTH, 'minimum outranks a tiny stage');
+  // The box is always fully inside the stage, so it can never overflow.
+  const inside = viewer.clampViewerRect({ x: -500, y: -500, width: 400, height: 300 }, { boundsWidth: 800, boundsHeight: 600 });
+  check(inside.x === 0 && inside.y === 0, 'a negative origin is pulled back to the stage');
+  const far = viewer.clampViewerRect({ x: 9999, y: 9999, width: 400, height: 300 }, { boundsWidth: 800, boundsHeight: 600 });
+  check(far.x === 400 && far.y === 300, `origin clamped so the box stays in bounds, got ${far.x},${far.y}`);
+  check(far.x + far.width <= 800 && far.y + far.height <= 600, 'clamped box stays inside the stage');
+  // A box below the minimum is grown first, so the origin bound accounts for it.
+  const grown = viewer.clampViewerRect({ x: 9999, y: 0, width: 300, height: 300 }, { boundsWidth: 800, boundsHeight: 600 });
+  check(grown.width === viewer.MIN_VIEWER_WIDTH, 'below-minimum width is grown');
+  check(grown.x === 800 - viewer.MIN_VIEWER_WIDTH, `origin bound uses the enforced width, got ${grown.x}`);
+  check(viewer.clampViewerRect({ width: NaN, height: NaN }).width === viewer.MIN_VIEWER_WIDTH, 'NaN is safe');
+  check(viewer.clampViewerRect({ width: 640.4, height: 480.6 }).width === 640, 'sizes round to whole px');
 });
 
-test('fit to screen shows the whole design and never upscales past 100%', async () => {
-  // 1000x800 viewport, 960x1200 design -> height is the tighter axis.
-  const fit = viewer.fitZoom({ viewportW: 1000, viewportH: 800, canvasW: 960, canvasH: 1200 });
-  check(fit < 1, `shrinks a design taller than the viewer, got ${fit}`);
-  check(1200 * fit <= 800, 'scaled design height fits the viewport');
-  // A design far smaller than the viewport is not blown up.
-  const tiny = viewer.fitZoom({ viewportW: 2000, viewportH: 2000, canvasW: 100, canvasH: 100 });
-  check(tiny === 1, 'never upscales past 100%');
-  // Degenerate input must not produce NaN.
-  check(viewer.fitZoom({ viewportW: 0, viewportH: 0, canvasW: 0, canvasH: 0 }) === 1, 'degenerate fit is safe');
+test('dragging an edge moves that edge and leaves the opposite one alone', async () => {
+  // Start inset from the stage origin so the west/north edges have room to move.
+  const startRect = { x: 200, y: 200, width: 800, height: 600 };
+  const base = { startRect, startClientX: 500, startClientY: 400, clientX: 500, clientY: 400 };
+  const bounds = { boundsWidth: 1600, boundsHeight: 1200 };
+
+  // East edge: the right boundary follows the pointer, the left stays put.
+  const right = viewer.viewerRectFromDrag({ ...base, ...bounds, mode: 'e', clientX: 560 });
+  check(right.width === 860, `right edge grows the width, got ${right.width}`);
+  check(right.x === 200, 'right edge leaves the left edge alone');
+  check(right.height === 600 && right.y === 200, 'right edge leaves the height alone');
+
+  // West edge: the left boundary follows the pointer, the right stays put.
+  const left = viewer.viewerRectFromDrag({ ...base, ...bounds, mode: 'w', clientX: 440 });
+  check(left.x === 140, `left edge origin follows the pointer, got ${left.x}`);
+  check(left.width === 860, `left edge grows the width, got ${left.width}`);
+  check(left.x + left.width === 1000, 'left edge keeps the right edge anchored');
+
+  const bottom = viewer.viewerRectFromDrag({ ...base, ...bounds, mode: 's', clientY: 470 });
+  check(bottom.height === 670, `bottom edge grows the height, got ${bottom.height}`);
+  check(bottom.width === 800, 'bottom edge leaves the width alone');
+  const top = viewer.viewerRectFromDrag({ ...base, ...bounds, mode: 'n', clientY: 360 });
+  check(top.y === 160 && top.height === 640, `top edge origin and height, got ${top.y},${top.height}`);
+  check(top.y + top.height === 800, 'top edge keeps the bottom edge anchored');
+
+  // A corner changes both axes at once.
+  const corner = viewer.viewerRectFromDrag({ ...base, ...bounds, mode: 'se', clientX: 540, clientY: 450 });
+  check(corner.width === 840 && corner.height === 650, `corner changes both axes, got ${corner.width}x${corner.height}`);
+  check(corner.x === 200 && corner.y === 200, 'se corner keeps the top-left anchored');
+  const nw = viewer.viewerRectFromDrag({ ...base, ...bounds, mode: 'nw', clientX: 560, clientY: 430 });
+  check(nw.width === 740 && nw.height === 570, `nw corner shrinks both axes, got ${nw.width}x${nw.height}`);
+  check(nw.x === 260 && nw.y === 230, `nw corner moves the origin with the pointer, got ${nw.x},${nw.y}`);
+  check(nw.x + nw.width === 1000 && nw.y + nw.height === 800, 'nw corner anchors the opposite corner');
+});
+
+test('a resize drag cannot shrink past the minimum or grow past the stage', async () => {
+  const startRect = { x: 0, y: 0, width: 400, height: 400 };
+  const base = { startRect, startClientX: 500, startClientY: 400, clientX: 500, clientY: 400 };
+  const collapsed = viewer.viewerRectFromDrag({ ...base, mode: 'se', clientX: 0, clientY: 0, boundsWidth: 1600, boundsHeight: 1200 });
+  check(collapsed.width === viewer.MIN_VIEWER_WIDTH, `width floors, got ${collapsed.width}`);
+  check(collapsed.height === viewer.MIN_VIEWER_HEIGHT, `height floors, got ${collapsed.height}`);
+  const overflow = viewer.viewerRectFromDrag({ ...base, mode: 'se', clientX: 99999, clientY: 99999, boundsWidth: 900, boundsHeight: 700 });
+  check(overflow.width === 900 && overflow.height === 700, `capped at the stage, got ${overflow.width}x${overflow.height}`);
+  // Pushing the west edge out of the stage stops at the origin instead of going negative.
+  const out = viewer.viewerRectFromDrag({ ...base, mode: 'w', clientX: -99999, boundsWidth: 800, boundsHeight: 600 });
+  check(out.x === 0, `west edge cannot leave the stage, got x=${out.x}`);
+  check(out.width <= 800, 'west edge cannot outgrow the stage');
+  // An unknown mode must not produce NaN geometry.
+  const unknown = viewer.viewerRectFromDrag({ ...base, mode: '', clientX: 600, clientY: 500, boundsWidth: 800, boundsHeight: 600 });
+  check(Number.isFinite(unknown.width) && Number.isFinite(unknown.height), 'unknown edge stays finite');
 });
 
 test('pan is bounded so the design can never be dragged out of reach', async () => {
@@ -442,18 +497,37 @@ test('pointer -> design point ignores viewer pan and divides out zoom', async ()
 
 group('Profile Viewer Wiring (source)');
 
-test('studio renders the adjustable Profile Viewer bar', async () => {
+test('the Profile Viewer control bar is gone, with no replacement', async () => {
   const { readFileSync } = await import('node:fs');
   const src = readFileSync(resolve('web/js/creatorStudio.js'), 'utf8');
-  check(src.includes('id="studio-viewer-bar"'), 'viewer bar is rendered');
-  check(src.includes('Profile Viewer'), 'viewer bar is labelled');
-  check(src.includes('data-viewer="zoom-in"') && src.includes('data-viewer="zoom-out"'), 'zoom -/+ controls');
-  check(src.includes('data-viewer="fit"'), 'fit-to-screen control');
-  check(src.includes('data-viewer="actual"'), '100% actual-size control');
-  for (const dir of ['pan-left', 'pan-right', 'pan-up', 'pan-down']) {
-    check(src.includes(`data-viewer="${dir}"`), `pan control ${dir}`);
+  check(!src.includes('studio-viewer-bar'), 'viewer bar markup is removed');
+  check(!src.includes('data-viewer='), 'no data-viewer control attributes remain');
+  check(!src.includes('studio-zoom-readout'), 'zoom percentage readout is removed');
+  check(!src.includes('onViewerBarClick'), 'viewer bar click handler is removed');
+  check(!src.includes('stepZoom') && !src.includes('fitZoom') && !src.includes('zoomPercent'), 'toolbar-only helpers are no longer used');
+  // No zoom / fit / 100% / directional pan button may exist anywhere.
+  for (const gone of ['zoom-in', 'zoom-out', 'data-viewer="fit"', 'data-viewer="actual"', 'pan-left', 'pan-right', 'pan-up', 'pan-down']) {
+    check(!src.includes(gone), `${gone} is gone`);
   }
-  check(src.includes('studio-zoom-readout'), 'zoom percentage readout');
+  // The viewer itself remains.
+  check(src.includes('id="studio-viewer"'), 'viewer element still rendered');
+  check(src.includes('id="studio-canvas-scroll"'), 'canvas still rendered');
+});
+
+test('the viewer exposes four edge grips and four corner grips', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(resolve('web/js/creatorStudio.js'), 'utf8');
+  for (const edge of ['n', 's', 'w', 'e']) {
+    check(src.includes(`data-viewer-edge="${edge}"`), `${edge} edge grip is rendered`);
+  }
+  for (const corner of ['nw', 'ne', 'sw', 'se']) {
+    check(src.includes(`data-viewer-edge="${corner}"`), `${corner} corner grip is rendered`);
+  }
+  check(src.includes('studio-viewer-grip'), 'grips carry the grip class');
+  // A grip is not inside the canvas, so a viewer drag can never become a
+  // component drag and vice versa.
+  check(src.includes("closest('[data-viewer-edge]')"), 'grips are detected by delegation');
+  check(src.includes('startViewerResize(grip.dataset.viewerEdge, event)'), 'grip drag starts a viewer resize');
 });
 
 test('viewer state is kept out of the saved design layout', async () => {
@@ -462,11 +536,32 @@ test('viewer state is kept out of the saved design layout', async () => {
   // Viewer coordinates live in module state, never inside layout.
   check(/let\s+zoom\s*=/.test(src), 'zoom is module state');
   check(/let\s+viewerPan\s*=/.test(src), 'viewerPan is module state');
+  check(/let\s+viewerSize\s*=/.test(src), 'viewerSize is module state');
   const layoutWrites = src.match(/viewerPan\.[xy]\s*=[^=]/g) || [];
   check(layoutWrites.every(w => /^\s*viewerPan\.[xy]\s*=/.test(w)), 'viewerPan is only ever assigned directly');
+  // Viewer size is applied to the element, never to the design payload.
+  check(src.includes('viewer.style.width'), 'viewer size is applied to the DOM');
+  check(!/viewerSize[^;]*\bcomp\./.test(src), 'viewer size is never written to a component');
   // Panning must never mark the design dirty.
   check(/const wasPan = drag\.mode === 'pan';/.test(src), 'pointer-up distinguishes a pan');
   check(/if \(wasPan\) \{[\s\S]*?return;[\s\S]*?\}\s*dirty = true;/.test(src), 'pan returns before dirty = true');
+});
+
+test('resizing the viewer is not an edit', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(resolve('web/js/creatorStudio.js'), 'utf8');
+  check(src.includes("mode: 'viewer-resize'"), 'viewer resize drag mode exists');
+  check(src.includes('if (drag.mode === \'viewer-resize\')'), 'pointer move handles the resize separately');
+  // It must bail out of the dirty/history path exactly like a pan does.
+  check(/const wasViewerResize = drag\.mode === 'viewer-resize';/.test(src), 'pointer-up distinguishes a viewer resize');
+  check(/if \(wasViewerResize\) \{[\s\S]*?return;[\s\S]*?\}\s*if \(wasPan\)/.test(src), 'resize returns before dirty = true');
+  // No history entry is pushed for a viewer resize.
+  check(!/startViewerResize[\s\S]{0,400}?pushHistory\(/.test(src), 'resizing pushes no undo entry');
+  // The resize branch must not reference component geometry at all.
+  const branch = src.match(/if \(drag\.mode === 'viewer-resize'\) \{[\s\S]*?\n  \}/);
+  check(!!branch, 'resize branch found');
+  check(!/\bcomp\.(x|y|width|height|zIndex)\s*=/.test(branch ? branch[0] : ''), 'resize writes no component geometry');
+  check(!/history\.|pushHistory\(/.test(branch ? branch[0] : ''), 'resize touches no history');
 });
 
 test('empty-canvas drag pans the viewer and component drag still moves components', async () => {
@@ -503,6 +598,44 @@ test('lower Layers panel is compact and the viewer keeps the space', async () =>
   check(/\.studio-panel\s*\{[^}]*min-height:\s*480px/.test(css), 'side panels keep 480px editing height');
   // The viewer takes the flexible majority.
   check(/#studio-canvas-scroll\s*\{[^}]*flex:\s*1 1 auto/.test(css), 'viewer grows to fill the stage');
+});
+
+test('the viewer fills the workspace and shows no scrollbars', async () => {
+  const { readFileSync } = await import('node:fs');
+  const css = readFileSync(resolve('web/css/creatorStudio.css'), 'utf8');
+  // Full available area: the viewer box fills the stage on both axes.
+  check(/#studio-viewer\s*\{[^}]*inset:\s*0/.test(css), 'viewer fills the stage by default');
+  check(/#studio-stage\s*\{[^}]*position:\s*relative/.test(css), 'stage is the viewer positioning context');
+  // No scrollbars, and none merely hidden behind a styling trick.
+  const scroll = css.match(/#studio-canvas-scroll\s*\{[^}]*\}/);
+  check(!!scroll, 'canvas rule found');
+  check(/overflow:\s*hidden/.test(scroll ? scroll[0] : ''), 'viewer clips instead of scrolling');
+  // No scroll container anywhere inside the viewer box itself. (The side editor
+  // panels and the Layers list scroll on purpose; the viewer must not.)
+  for (const rule of css.match(/#studio-(?:stage|viewer|canvas-scroll|canvas-inner|zoom-layer|canvas-document)[^{]*\{[^}]*\}/g) || []) {
+    check(!/overflow(-[xy])?:\s*(auto|scroll)/.test(rule), `no scroll container in ${rule.split('{')[0].trim()}`);
+  }
+  // The inner canvas fills the viewer so the whole box is grabbable empty canvas.
+  check(/#studio-canvas-inner\s*\{[^}]*min-height:\s*100%/.test(css), 'inner canvas fills the viewer height');
+  // Cursor contract for each grip: the first cursor declared in the rule that
+  // owns the edge selector is the one that applies to it.
+  const cursorFor = (edge) => {
+    const at = css.indexOf(`data-viewer-edge="${edge}"`);
+    if (at < 0) return null;
+    const forward = css.slice(at, at + 400);
+    const end = forward.indexOf('}');
+    return (forward.slice(0, end < 0 ? undefined : end).match(/cursor:\s*([a-z-]+)/) || [])[1] || null;
+  };
+  for (const [edge, cursor] of [['n', 'ns-resize'], ['s', 'ns-resize'], ['w', 'ew-resize'], ['e', 'ew-resize'],
+                                ['nw', 'nwse-resize'], ['se', 'nwse-resize'], ['ne', 'nesw-resize'], ['sw', 'nesw-resize']]) {
+    check(cursorFor(edge) === cursor, `${edge} grip uses ${cursor}, got ${cursorFor(edge)}`);
+  }
+  // No visible resize affordance: the grips stay unstyled boxes.
+  check(!/\.studio-viewer-grip\s*\{[^}]*background:\s*(?!none)/.test(css), 'grips have no visible fill');
+  check(!/\.studio-viewer-grip\s*\{[^}]*border:\s*(?!0|none)/.test(css), 'grips have no visible border');
+  // The removed toolbar leaves no CSS behind.
+  check(!css.includes('.studio-viewer-bar'), 'viewer bar CSS removed');
+  check(!css.includes('.studio-viewer-btn'), 'viewer button CSS removed');
 });
 
 // ── Teardown ─────────────────────────────────────────────────────────────

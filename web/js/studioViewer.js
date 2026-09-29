@@ -1,5 +1,5 @@
 /**
- * KomuniPH Creator Studio — Profile Viewer geometry (CREATOR-06).
+ * KomuniPH Creator Studio — Profile Viewer geometry (CREATOR-06, CREATOR-07).
  *
  * The Creator Studio edits two INDEPENDENT coordinate systems:
  *
@@ -9,7 +9,7 @@
  *   2. Viewer coordinates  (zoom, panX, panY, viewer width/height)
  *      How the editor *looks at* the design while editing. Purely ephemeral:
  *      nothing here is written to the design, and nothing here is sent to the
- *      server. Changing zoom/pan must never move a component.
+ *      server. Changing zoom/pan/resize must never move a component.
  *
  * Keeping the viewer math in its own DOM-free module means the separation is
  * enforced by the module boundary rather than by convention, and the arithmetic
@@ -18,12 +18,13 @@
 
 export const MIN_ZOOM = 0.25;
 export const MAX_ZOOM = 3;
-export const ZOOM_STEP = 0.1;
 export const PAN_STEP = 40;
 /** Minimum visible overlap, in screen px, between the design and the viewport. */
 export const PAN_MARGIN = 80;
-/** Breathing room left around the design when computing "fit to screen". */
-export const FIT_PADDING = 24;
+
+/** Smallest viewer the editor will allow, in screen px. */
+export const MIN_VIEWER_WIDTH = 320;
+export const MIN_VIEWER_HEIGHT = 240;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -44,31 +45,9 @@ export function clampZoom(value) {
   return roundZoom(clamp(n, MIN_ZOOM, MAX_ZOOM));
 }
 
-/** Zoom in (+1) / zoom out (-1) by one step. */
-export function stepZoom(current, direction) {
-  const base = clampZoom(current);
-  const next = base + (direction < 0 ? -ZOOM_STEP : ZOOM_STEP);
-  return clampZoom(next);
-}
-
-/** Human-readable percentage, e.g. 1.25 -> "125%". */
-export function zoomPercent(value) {
-  return `${Math.round(clampZoom(value) * 100)}%`;
-}
-
-/**
- * Largest zoom that shows the whole design inside the viewer.
- * Uses whichever axis is the tighter constraint, and never exceeds the
- * viewport (never upscales past 100% to fill empty space).
- */
-export function fitZoom({ viewportW, viewportH, canvasW, canvasH, padding = FIT_PADDING }) {
-  const usableW = Number(viewportW) - padding * 2;
-  const usableH = Number(viewportH) - padding * 2;
-  if (!(usableW > 0) || !(usableH > 0) || !(canvasW > 0) || !(canvasH > 0)) return 1;
-  const scale = Math.min(usableW / canvasW, usableH / canvasH, 1);
-  return clampZoom(scale);
-}
-
+// CREATOR-07: the viewer toolbar is gone, so there is no zoom percentage to
+// format. Zoom itself stays a viewer concept (the document may be larger than
+// the viewer) — only the controls that used to mutate it were removed.
 /**
  * Keep the design reachable: when it is larger than the viewer the user may pan
  * until only PAN_MARGIN of it remains on screen; when it fits, it is centred.
@@ -114,4 +93,73 @@ export function designPoint({ clientX, clientY, rect, zoom }) {
     x: (clientX - rect.left) / clampZoom(zoom),
     y: (clientY - rect.top) / clampZoom(zoom),
   };
+}
+
+// ── Direct edge resize (CREATOR-07) ──────────────────────────────────────────
+//
+// The viewer is its own resize control: the user drags the viewer's own edges
+// and corners. These helpers are pure so the hit-testing and clamping can be
+// verified without a browser. The viewer's size is editor workspace state — it
+// is never written to the profile design.
+
+/**
+ * Clamp a proposed viewer box to the editor's limits.
+ *
+ * The viewer is a rectangle at (x, y) inside the stage, so both the size and the
+ * position are clamped: the size to [minimum, stage] and the origin so the box
+ * always stays fully inside the stage. Keeping it in-bounds is what guarantees
+ * a viewer resize can never introduce a scrollbar.
+ */
+export function clampViewerRect(
+  { x = 0, y = 0, width, height },
+  { minWidth = MIN_VIEWER_WIDTH, minHeight = MIN_VIEWER_HEIGHT, boundsWidth = Infinity, boundsHeight = Infinity } = {},
+) {
+  const w = Math.round(clamp(Number(width) || minWidth, minWidth, Math.max(minWidth, boundsWidth)));
+  const h = Math.round(clamp(Number(height) || minHeight, minHeight, Math.max(minHeight, boundsHeight)));
+  return {
+    width: w,
+    height: h,
+    // A stage smaller than the minimum pins the box at the origin.
+    x: Math.round(clamp(Number(x) || 0, 0, Math.max(0, boundsWidth - w))),
+    y: Math.round(clamp(Number(y) || 0, 0, Math.max(0, boundsHeight - h))),
+  };
+}
+
+/**
+ * New viewer box after dragging `mode` (an edgeHitTest result) by the pointer.
+ *
+ * The edge under the cursor follows it and the opposite edge stays put, so
+ * dragging the west edge rightwards grows the viewer leftwards rather than
+ * silently moving only the right edge.
+ */
+export function viewerRectFromDrag({
+  mode,
+  startRect,
+  startClientX,
+  startClientY,
+  clientX,
+  clientY,
+  ...limits
+}) {
+  const start = startRect || {};
+  const edge = String(mode || '');
+  const dx = (Number(clientX) || 0) - (Number(startClientX) || 0);
+  const dy = (Number(clientY) || 0) - (Number(startClientY) || 0);
+
+  const startX = Number(start.x) || 0;
+  const startY = Number(start.y) || 0;
+  const startWidth = Number(start.width) || 0;
+  const startHeight = Number(start.height) || 0;
+
+  let x = startX;
+  let y = startY;
+  let width = startWidth;
+  let height = startHeight;
+
+  if (edge.includes('e')) width = startWidth + dx;
+  else if (edge.includes('w')) { x = startX + dx; width = startWidth - dx; }
+  if (edge.includes('s')) height = startHeight + dy;
+  else if (edge.includes('n')) { y = startY + dy; height = startHeight - dy; }
+
+  return clampViewerRect({ x, y, width, height }, limits);
 }

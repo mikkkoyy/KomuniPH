@@ -144,13 +144,17 @@
 /* CREATOR-07A: the two side columns are the adjustable part of the workspace.
    They are driven by custom properties so a boundary drag can change one panel
    while the center column absorbs the difference — the viewer itself never
-   needs a horizontal resize of its own. */
+   needs a horizontal resize of its own.
+   CREATOR-07B: `align-items: start` is load-bearing. Stretching would let the
+   tallest side panel define the row height, and the stage is in that row, so the
+   panels' height would silently become the Profile Viewer's height. The stage
+   now carries its own explicit height and the panels scroll inside theirs. */
 .studio-layout {
   position: relative;
   display: grid;
   grid-template-columns: var(--studio-col-left, 300px) minmax(0, 1fr) var(--studio-col-right, 370px);
   gap: 1rem;
-  align-items: stretch;
+  align-items: start;
 }
 .studio-layout > * { gap: 0.75rem; }
 
@@ -179,13 +183,16 @@
   -webkit-user-select: none;
   cursor: inherit;
 }
+/* CREATOR-07B: the side panels are their OWN scroll areas. Their height must
+   never become the workspace height, so they are capped and scroll internally
+   rather than stretching the grid row that the stage sits in. */
 .studio-panel {
   background: var(--studio-cp-panel);
   border: 1px solid var(--studio-line);
   border-radius: var(--studio-radius);
   padding: 1.1rem;
   min-height: 480px;
-  max-height: calc(100vh - 140px);
+  max-height: 100%;
   overflow: auto;
 }
 .studio-panel h2 {
@@ -273,10 +280,15 @@
 }
 
 /* ── Stage / canvas ────────────────────────────────────────────────────────── */
+/* CREATOR-07B: the stage owns its height. This default matches
+   DEFAULT_VIEWER_HEIGHT in web/js/studioViewer.js so the first paint is already
+   a large editing area; the script then keeps the inline height in sync. It is
+   a deliberate size, never a function of the panels or of the window. */
 #studio-stage {
   position: relative;
   min-width: 0;
-  min-height: 0;
+  min-height: 320px;
+  height: 900px;
   display: flex;
   flex-direction: column;
 }
@@ -626,9 +638,9 @@
     grid-template-columns: 1fr;
   }
   .studio-panel { max-height: none; overflow: visible; }
-  /* Stacked layout: the stage has no row height to stretch into, so give it an
-     explicit one. The viewer still fills it and still clips instead of scrolling. */
-  #studio-stage { height: 60vh; min-height: 320px; }
+  /* Stacked layout: the desktop column handles are hidden, but the Profile
+     Viewer keeps a genuinely usable editing height instead of a 60vh sliver. */
+  #studio-stage { height: 900px; min-height: 320px; }
 }
 
 /* ── Image Source control (CREATOR-06 upload + preview) ────────────────────── */

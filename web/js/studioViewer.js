@@ -23,17 +23,27 @@ export const PAN_STEP = 40;
 export const PAN_MARGIN = 80;
 
 /** Smallest viewer the editor will allow, in screen px (vertical only). */
-export const MIN_VIEWER_HEIGHT = 240;
+export const MIN_VIEWER_HEIGHT = 320;
+/**
+ * The Profile Viewer's own starting editing height, in screen px.
+ *
+ * This is a DELIBERATE Creator Studio workspace size, not a derived number: it
+ * is never computed from the side panels' height, from the window height, or
+ * from a `viewportHeight - chrome` estimate (CREATOR-07B). The design canvas is
+ * 960x1200, so 900px shows most of a profile at a comfortable size and makes the
+ * viewer — not the Properties/Sections panels — the main editing area.
+ */
+export const DEFAULT_VIEWER_HEIGHT = 900;
+/**
+ * Hard ceiling on the viewer height, in screen px. It exists only to stop an
+ * unbounded drag producing an absurd box; it is deliberately far larger than
+ * the default so the viewer is never made short by a viewport calculation.
+ */
+export const MAX_VIEWER_HEIGHT = 4000;
 /** Smallest a side editor panel may be squeezed to, in screen px. */
 export const MIN_PANEL_WIDTH = 220;
 /** The center column never shrinks below this, so the viewer stays usable. */
 export const MIN_CENTER_WIDTH = 360;
-/**
- * Approximate vertical space outside the stage (toolbar, status bar, Layers
- * panel) that the viewer height has to leave alone, so growing the viewer
- * cannot push the page into a vertical scrollbar.
- */
-export const VIEWER_HEIGHT_CHROME = 200;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -161,12 +171,19 @@ export function columnWidthsFromDrag({
 }
 
 /**
- * Clamp the viewer height. The maximum is derived from the window height so a
- * tall viewer cannot push the studio into a vertical scrollbar.
+ * Clamp the viewer height to a usable editing range.
+ *
+ * CREATOR-07B: this is deliberately INDEPENDENT of the side panels and of the
+ * window. It takes no `viewportHeight`, because a `viewportHeight - chrome`
+ * ceiling is what made the viewer unexpectedly short on smaller screens. The
+ * only limits are the usability floor and a generous hard ceiling, so the user —
+ * not the surrounding layout — decides how tall the editing area is.
  */
-export function clampViewerHeight(value, { min = MIN_VIEWER_HEIGHT, viewportHeight, chrome = VIEWER_HEIGHT_CHROME } = {}) {
-  const max = Number.isFinite(viewportHeight) && viewportHeight > 0
-    ? Math.max(min, viewportHeight - chrome)
-    : Infinity;
-  return Math.round(clamp(Number(value) || min, min, max));
+export function clampViewerHeight(
+  value,
+  { min = MIN_VIEWER_HEIGHT, max = MAX_VIEWER_HEIGHT, fallback = DEFAULT_VIEWER_HEIGHT } = {},
+) {
+  const n = Number(value);
+  const resolved = Number.isFinite(n) && n > 0 ? n : fallback;
+  return Math.round(clamp(resolved, min, Math.max(min, max)));
 }

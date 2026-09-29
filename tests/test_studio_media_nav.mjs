@@ -448,19 +448,36 @@ test('column drag cannot starve the center column or a panel minimum', async () 
   check(Number.isFinite(unknown.left) && Number.isFinite(unknown.right), 'stays finite');
 });
 
-test('viewer height is clamped so a tall viewer cannot add a scrollbar', async () => {
+test('viewer height is independent of the panels and of the window (CREATOR-07B)', async () => {
   check(viewer.clampViewerHeight(10) === viewer.MIN_VIEWER_HEIGHT, 'floors at the minimum height');
   check(viewer.clampViewerHeight(600) === 600, 'a sensible height is kept exactly');
-  // The maximum leaves room for the toolbar, status and Layers panel.
-  const tall = viewer.clampViewerHeight(99999, { viewportHeight: 1000 });
-  check(tall === 1000 - viewer.VIEWER_HEIGHT_CHROME, `tall viewer is capped, got ${tall}`);
-  // A short window cannot make the maximum fall below the minimum.
-  const cramped = viewer.clampViewerHeight(99999, { viewportHeight: 100 });
-  check(cramped === viewer.MIN_VIEWER_HEIGHT, 'minimum outranks a short window');
   check(viewer.clampViewerHeight(640.6) === 641, 'heights round to whole px');
-  check(viewer.clampViewerHeight(NaN) === viewer.MIN_VIEWER_HEIGHT, 'NaN is safe');
-  // Without a known viewport the height is not constrained upwards.
-  check(viewer.clampViewerHeight(99999) === 99999, 'unbounded without a viewport height');
+
+  // CREATOR-07B: the default is a deliberate editing size, not a derived one.
+  // It must be a real workspace height, and must be a large fraction of the
+  // 1200px design canvas rather than a short viewport-minus-chrome estimate.
+  check(viewer.DEFAULT_VIEWER_HEIGHT >= 800,
+    `default viewer height is a large editing area, got ${viewer.DEFAULT_VIEWER_HEIGHT}`);
+  check(viewer.DEFAULT_VIEWER_HEIGHT < 1200,
+    `default viewer height shows most of the 1200px design, got ${viewer.DEFAULT_VIEWER_HEIGHT}`);
+
+  // The old `viewportHeight - chrome` ceiling is gone entirely: passing one must
+  // not shorten the viewer, and a short window must not cap it either.
+  check(!('VIEWER_HEIGHT_CHROME' in viewer), 'the viewport-chrome constant is removed');
+  const ignored = viewer.clampViewerHeight(1500, { viewportHeight: 400 });
+  check(ignored === 1500, `a short window does not shorten the viewer, got ${ignored}`);
+  const tall = viewer.clampViewerHeight(99999);
+  check(tall === viewer.MAX_VIEWER_HEIGHT, `an absurd drag hits the hard ceiling, got ${tall}`);
+
+  // A non-numeric or unusable value falls back to the deliberate default rather
+  // than to the minimum, so a bad value can never silently collapse the viewer.
+  check(viewer.clampViewerHeight(NaN) === viewer.DEFAULT_VIEWER_HEIGHT, 'NaN falls back to the default');
+  check(viewer.clampViewerHeight(undefined) === viewer.DEFAULT_VIEWER_HEIGHT, 'undefined falls back to the default');
+  check(viewer.clampViewerHeight(0) === viewer.DEFAULT_VIEWER_HEIGHT, 'zero falls back to the default');
+
+  // The floor still outranks an explicit ceiling below it.
+  const cramped = viewer.clampViewerHeight(900, { min: 300, max: 100 });
+  check(cramped === 300, `the minimum outranks a too-small ceiling, got ${cramped}`);
 });
 
 test('pan is bounded so the design can never be dragged out of reach', async () => {
@@ -544,6 +561,21 @@ test('workspace state is kept out of the saved design layout', async () => {
   check(src.includes("setProperty('--studio-col-left'"), 'panel widths go to CSS custom properties');
   check(!/panelWidths[^;]*\bcomp\./.test(src), 'panel widths are never written to a component');
   check(!/viewerHeight[^;]*\bcomp\./.test(src), 'viewer height is never written to a component');
+
+  // CREATOR-07B: the stage height is never derived from the window, and it is
+  // never left unset (an unset height would let the grid row decide it).
+  check(!/viewportHeight:\s*window\.innerHeight/.test(src), 'no viewport-derived viewer height');
+  check(!/stage\.style\.height\s*=\s*''/.test(src), 'the stage height is never released to the layout');
+  const heightWrites = src.match(/stage\.style\.height\s*=/g) || [];
+  check(heightWrites.length >= 2, 'every layout branch assigns the stage height');
+  check(/let\s+viewerHeight\s*=\s*DEFAULT_VIEWER_HEIGHT/.test(src),
+    'the viewer height starts from the deliberate default, not null');
+  // A window resize must not re-derive the viewer height.
+  check(/function clampWorkspaceToWindow\(\)\s*\{[\s\S]*?applyWorkspaceState\(\);\s*\}/.test(src),
+    'clampWorkspaceToWindow exists');
+  const windowClamp = src.match(/function clampWorkspaceToWindow\(\)\s*\{[\s\S]*?\n\}/);
+  check(windowClamp && !/viewerHeight\s*=/.test(windowClamp[0]),
+    'the window resize handler never reassigns the viewer height');
   // Panning must never mark the design dirty.
   check(/const wasPan = drag\.mode === 'pan';/.test(src), 'pointer-up distinguishes a pan');
   check(/if \(wasPan\) \{[\s\S]*?return;[\s\S]*?\}\s*dirty = true;/.test(src), 'pan returns before dirty = true');
@@ -585,7 +617,17 @@ test('panel resizing is disabled in the single-column layout', async () => {
     'height resize refuses to start when stacked');
   // And the handles are hidden rather than left dangling over the stack.
   check(src.includes('el.hidden = true'), 'handles are hidden in single-column mode');
-  check(src.includes("stage.style.height = ''"), 'the stage height is released back to the stylesheet');
+  // CREATOR-07B: only the COLUMN widths are released to the stylesheet. The
+  // viewer height is independent workspace state and is kept, so stacking is
+  // never a reason to shrink the editing area.
+  const singleColumn = src.match(/if \(isSingleColumn\(\)\) \{[\s\S]*?\n  \}/);
+  check(!!singleColumn, 'single-column branch found');
+  check(singleColumn && singleColumn[0].includes("removeProperty('--studio-col-left')"),
+    'column widths are released back to the stylesheet');
+  check(singleColumn && /stage\.style\.height\s*=\s*`\$\{clampViewerHeight/.test(singleColumn[0]),
+    'the viewer keeps its own height in single-column mode');
+  check(singleColumn && !/stage\.style\.height\s*=\s*''/.test(singleColumn[0]),
+    'the stage height is never released to the layout');
 });
 
 test('empty-canvas drag pans the viewer and component drag still moves components', async () => {
@@ -649,6 +691,21 @@ test('the viewer fills the workspace and shows no scrollbars', async () => {
   check(/\.studio-layout\s*\{[^}]*grid-template-columns:\s*var\(--studio-col-left/.test(css),
     'grid columns are driven by --studio-col-left/right');
   check(css.includes('var(--studio-col-right'), 'the right column uses --studio-col-right');
+
+  // CREATOR-07B: the decoupling itself, asserted on the stylesheet. If the grid
+  // ever goes back to `stretch`, or the stage loses its own height, the side
+  // panels' height becomes the Profile Viewer's height again.
+  const layoutRule = css.match(/\.studio-layout\s*\{[^}]*\}/);
+  check(/align-items:\s*start/.test(layoutRule ? layoutRule[0] : ''),
+    'the grid does not stretch, so panel height cannot become viewer height');
+  const stageRule = css.match(/#studio-stage\s*\{[^}]*\}/);
+  check(!!stageRule, 'stage rule found');
+  check(/height:\s*\d+px/.test(stageRule ? stageRule[0] : ''), 'the stage declares its own height');
+  // The panels scroll internally rather than growing the row.
+  const panelRule = css.match(/\.studio-panel\s*\{[^}]*\}/);
+  check(/overflow:\s*auto/.test(panelRule ? panelRule[0] : ''), 'side panels scroll internally');
+  check(!/max-height:\s*calc\(100vh/.test(panelRule ? panelRule[0] : ''),
+    'panel height is not tied to the window height');
   // The viewer keeps no width of its own (min-width is fine; an explicit
   // width would fight the center column).
   const viewerRule = css.match(/#studio-viewer\s*\{[^}]*\}/);

@@ -311,6 +311,155 @@ const dragMouse = async (from, to) => {
 const sameGeom = (a, b) => !!a && !!b
   && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
 
+await step('the initial viewer height is a large, independent editing area', async () => {
+  const measured = await page.evaluate(() => {
+    const stage = document.querySelector('#studio-stage');
+    const viewer = document.querySelector('#studio-viewer');
+    const panels = ['#studio-elements', '#studio-properties-panel']
+      .map(s => document.querySelector(s))
+      .filter(Boolean)
+      .map(el => el.getBoundingClientRect().height);
+    return {
+      stage: stage.getBoundingClientRect().height,
+      stageInline: stage.style.height,
+      viewer: viewer.getBoundingClientRect().height,
+      panels,
+      docHeight: document.documentElement.scrollHeight,
+      windowHeight: window.innerHeight,
+    };
+  });
+
+  // CREATOR-07B: the height is a deliberate editing size, not a sliver derived
+  // from the window or from the side panels.
+  check(measured.stage >= 800,
+    `the viewer starts at a genuinely large editing height, got ${measured.stage}`);
+  check(/^\d+px$/.test(measured.stageInline),
+    `the stage carries an explicit height of its own, got "${measured.stageInline}"`);
+  // The panels must not be what decides it: even when the Properties panel is
+  // far taller than the stage, the stage keeps its own height.
+  for (const p of measured.panels) {
+    check(measured.stage > p * 0.5,
+      `the viewer is not sized off a ${Math.round(p)}px side panel (stage ${measured.stage})`);
+  }
+  check(measured.viewer === measured.stage || Math.abs(measured.viewer - measured.stage) <= 2,
+    'the viewer fills the stage it was given');
+});
+
+await step('the viewer height is unchanged by resizing either side panel', async () => {
+  const before = await viewerBox();
+
+  // Drag the LEFT boundary, which changes the left panel and the center width.
+  const leftStart = await page.$eval('#studio-col-resizer-left', el => {
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  await dragMouse(leftStart, { x: leftStart.x + 90, y: leftStart.y });
+  const afterLeft = await viewerBox();
+  check(afterLeft.width < before.width - 40,
+    `the left boundary drag widened the left panel, so the center narrowed (${before.width} -> ${afterLeft.width})`);
+  check(Math.abs(afterLeft.height - before.height) <= 1,
+    `the LEFT panel resize did NOT change the viewer height (${before.height} -> ${afterLeft.height})`);
+
+  // Drag the RIGHT boundary leftwards, away from the center. The handle follows
+  // the pointer, so the panel on the far side of it — Properties — grows, and
+  // the center column gives up exactly that width. This is the mirror of the
+  // left-boundary drag above.
+  const rightStart = await page.$eval('#studio-col-resizer-right', el => {
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  await dragMouse(rightStart, { x: rightStart.x - 80, y: rightStart.y });
+  const afterRight = await viewerBox();
+  check(afterRight.width < afterLeft.width - 40,
+    `the right boundary drag widened the Properties panel, so the center narrowed (${afterLeft.width} -> ${afterRight.width})`);
+  const propsWidth = await page.$eval('#studio-properties-panel', el => el.getBoundingClientRect().width);
+  check(propsWidth > 370, `the Properties panel actually grew, got ${propsWidth}`);
+  check(Math.abs(afterRight.height - before.height) <= 1,
+    `the RIGHT panel resize did NOT change the viewer height (${before.height} -> ${afterRight.height})`);
+
+  // The viewer is still full width of whatever the center column now is.
+  const stageW = await page.$eval('#studio-stage', el => el.getBoundingClientRect().width);
+  check(Math.abs(afterRight.width - stageW) <= 2,
+    `the viewer still fills the center column (${afterRight.width} vs ${stageW})`);
+});
+
+await step('the viewer height does not depend on how much content the Properties panel holds', async () => {
+  // The real-world trigger for the bug: a long Properties panel must not be able
+  // to squeeze the Profile Viewer. Select a component and read the height both
+  // before and after, and also compare against the panel's own height.
+  await selectFirstComponent();
+  const before = await viewerBox();
+  const panelBefore = await page.$eval('#studio-properties-panel', el => el.getBoundingClientRect().height);
+  check(panelBefore > before.height,
+    `the Properties panel is taller than the viewer, which is exactly the risky case (panel ${Math.round(panelBefore)} vs viewer ${Math.round(before.height)})`);
+  check(Math.abs(before.height - panelBefore) > 20,
+    'the viewer height is NOT equal to the panel height, so the two are decoupled');
+});
+
+await step('a profile taller than the viewer is reached by panning, not scaled or scrolled', async () => {
+  // CREATOR-07B section 7: the design keeps its real dimensions even when it is
+  // far taller than the visible viewer.
+  const state = await page.evaluate(() => {
+    const doc = document.querySelector('#studio-canvas-document');
+    const layer = document.querySelector('#studio-zoom-layer');
+    const viewer = document.querySelector('#studio-viewer').getBoundingClientRect();
+    const scroll = document.querySelector('#studio-canvas-scroll');
+    const cs = getComputedStyle(scroll);
+    return {
+      docW: doc.getBoundingClientRect().width,
+      docH: doc.getBoundingClientRect().height,
+      inlineH: doc.style.minHeight,
+      inlineW: doc.style.width,
+      transform: getComputedStyle(layer).transform,
+      viewerH: viewer.height,
+      overflow: cs.overflow,
+      // A rendered scrollbar steals space from the content box. `overflow:
+      // hidden` means content may legitimately be larger than the box without
+      // any reachable scrollbar, so measure the gutter net of the element's own
+      // 1px border rather than comparing content extent to box extent.
+      gutterY: scroll.offsetHeight - scroll.clientHeight
+        - parseFloat(cs.borderTopWidth || 0) - parseFloat(cs.borderBottomWidth || 0),
+      gutterX: scroll.offsetWidth - scroll.clientWidth
+        - parseFloat(cs.borderLeftWidth || 0) - parseFloat(cs.borderRightWidth || 0),
+    };
+  });
+
+  // The design stays at its authored 960x1200 — it is NOT shrunk to fit.
+  check(state.inlineW === '960px', `the design keeps its authored width, got "${state.inlineW}"`);
+  check(state.inlineH === '1200px', `the design keeps its authored height, got "${state.inlineH}"`);
+  // No auto-fit: the transform is identity, not a scale-down.
+  check(/matrix\(1,\s*0,\s*0,\s*1,\s*0,\s*0\)/.test(state.transform) || state.transform === 'none',
+    `the design is not automatically scaled down to fit, transform is "${state.transform}"`);
+  // Still clipped, never scrolled.
+  check(state.overflow === 'hidden', 'the viewer still clips instead of scrolling');
+  check(state.gutterY <= 1 && state.gutterX <= 1,
+    `no scrollbar gutter is rendered in the viewer (x ${state.gutterX}, y ${state.gutterY})`);
+  check(state.docH > state.viewerH,
+    `the design really is taller than the viewer (${state.docH} vs ${state.viewerH})`);
+
+  // Panning must still be able to reach the lower part of the profile.
+  const before = await viewerTransform();
+  const panned = await page.evaluate(() => {
+    const scroll = document.querySelector('#studio-canvas-scroll');
+    const s = scroll.getBoundingClientRect();
+    // A point well below the visible area is covered by the design, so pan
+    // vertically from inside the viewer.
+    for (let y = s.top + 30; y < s.bottom - 30; y += 6) {
+      const el = document.elementFromPoint(s.left + s.width / 2, y);
+      if (el && el.closest('#studio-canvas-scroll') && !el.closest('[data-comp-id]')) {
+        return { x: s.left + s.width / 2, y };
+      }
+    }
+    return null;
+  });
+  check(!!panned, 'found empty canvas inside the viewer to pan from');
+  if (panned) {
+    await dragMouse(panned, { x: panned.x, y: panned.y - 150 });
+    const after = await viewerTransform();
+    check(after !== before, `vertical panning still works in a large viewer ("${before}" -> "${after}")`);
+  }
+});
+
 await step('profile viewer fills the workspace and has no scrollbars', async () => {
   const stage = await page.$eval('#studio-stage', el => {
     const r = el.getBoundingClientRect();
@@ -427,7 +576,12 @@ await step('workspace resize handles are the topmost element at their boundary',
   check(hit[1].width >= 8, `right column hit area is at least 8px, got ${hit[1].width}`);
   check(hit[2].height >= 8, `viewer bottom hit area is at least 8px, got ${hit[2].height}`);
   for (const h of hit) {
-    check(h.background === 'rgba(0, 0, 0, 0)', `${h.selector} is invisible, got ${h.background}`);
+    // Move the pointer well away first: a handle the cursor is parked on shows
+    // its hover tint, which is expected and would otherwise read as "visible".
+    await page.mouse.move(5, 5);
+    await new Promise(r => setTimeout(r, 80));
+    const bg = await page.$eval(h.selector, el => getComputedStyle(el).backgroundColor);
+    check(bg === 'rgba(0, 0, 0, 0)', `${h.selector} is invisible when not hovered, got ${bg}`);
   }
 });
 
@@ -551,27 +705,41 @@ await step('dragging the viewer bottom boundary up makes the viewer shorter', as
 });
 
 await step('dragging the viewer bottom boundary down makes the viewer taller', async () => {
-  const cap = await page.evaluate(() => window.innerHeight);
-  // Make room first: the height is deliberately capped so a tall viewer cannot
-  // push the studio into a vertical scrollbar, so shrink well clear of the cap
-  // before testing that it grows again.
-  const mid = await page.evaluate(() => {
-    const r = document.querySelector('#studio-viewer').getBoundingClientRect();
-    return { x: r.x + r.width / 2, y: r.y + r.height - 5 };
-  });
+  // CREATOR-07B: the old viewport-minus-chrome cap is gone, so a downward drag
+  // is free to make the viewer genuinely taller than the window. Shrink first to
+  // give the drag room, then grow well past the previous cap.
+  const before = await viewerBox();
+  const windowHeight = await page.evaluate(() => window.innerHeight);
+
+  const mid = { x: before.x + before.width / 2, y: before.y + before.height - 5 };
   await dragMouse(mid, { x: mid.x, y: mid.y - 320 });
   const small = await viewerBox();
+  check(small.height < before.height - 200,
+    `viewer shrank first to make room (${before.height} -> ${small.height})`);
 
   const start = { x: small.x + small.width / 2, y: small.y + small.height - 5 };
-  await dragMouse(start, { x: start.x, y: start.y + 120 });
+  await dragMouse(start, { x: start.x, y: start.y + 600 });
   const after = await viewerBox();
 
-  check(after.height > small.height + 60,
-    `viewer became taller (${small.height} -> ${after.height}, cap ${cap})`);
-  check(Math.abs((after.height - small.height) - 120) <= 6,
-    `height changed by about the pointer delta (${small.height} -> ${after.height})`);
+  check(after.height > small.height + 400,
+    `a downward drag made the viewer visibly taller (${small.height} -> ${after.height})`);
+  check(Math.abs((after.height - small.height) - 600) <= 6,
+    `height tracked the pointer delta (${small.height} -> ${after.height})`);
+  // The real proof the viewport cap is gone: taller than the window itself.
+  check(after.height > windowHeight,
+    `the viewer is no longer capped by the window height (${after.height} > ${windowHeight})`);
   check(Math.abs(after.width - small.width) <= 2, 'width unchanged by a vertical drag');
   check(Math.abs(after.y - small.y) <= 2, 'the viewer top edge stays put');
+
+  // The grip must still sit on the NEW bottom boundary, not the old one.
+  const grip = await page.evaluate(() => {
+    const g = document.querySelector('#studio-viewer-height-grip');
+    const v = document.querySelector('#studio-viewer').getBoundingClientRect();
+    const r = g.getBoundingClientRect();
+    return { gripBottom: r.bottom, viewerBottom: v.bottom, centre: r.top + r.height / 2 };
+  });
+  check(Math.abs(grip.gripBottom - grip.viewerBottom) <= 2,
+    `the grip follows the actual bottom boundary (grip ${grip.gripBottom.toFixed(1)} vs viewer ${grip.viewerBottom.toFixed(1)})`);
 });
 
 await step('workspace resizing never dirties the design or adds undo history', async () => {
@@ -606,10 +774,15 @@ await step('workspace resizing never dirties the design or adds undo history', a
   check(state.right >= 219, `properties panel respects its minimum (${state.right})`);
   check(state.viewerW >= 359, `center column keeps its minimum (${state.viewerW})`);
   check(state.viewerW <= state.layout + 2, 'the three columns still fit the layout');
-  check(state.viewerH >= 239, `viewer respects its minimum height (${state.viewerH})`);
-  // A tall viewer must not push the studio into a vertical scrollbar.
-  check(state.viewerH <= state.innerH - 150,
-    `viewer height leaves room for the rest of the studio (${state.viewerH} vs ${state.innerH})`);
+  check(state.viewerH >= 319, `viewer respects its minimum height (${state.viewerH})`);
+  // CREATOR-07B: an absurd downward drag stops at the hard ceiling, and that
+  // ceiling is a fixed workspace constant — NOT a viewport-minus-chrome figure.
+  // The old behaviour capped the viewer at innerHeight - chrome, which is what
+  // made the editing area unexpectedly short.
+  check(state.viewerH <= 4001,
+    `an absurd drag stops at the fixed hard ceiling, got ${state.viewerH}`);
+  check(state.viewerH > state.innerH,
+    `the viewer is genuinely taller than the window, proving no viewport cap (${state.viewerH} > ${state.innerH})`);
 
   check(sameGeom(geomBefore, await componentGeom()), 'no component geometry changed across resizes');
   check((await undoDisabled()) === undoBefore, 'no undo entry created across resizes');
@@ -657,14 +830,23 @@ await step('component editing still works after resizing the workspace', async (
   check(Math.abs(viewerAfter.width - viewerBefore.width) <= 2,
     'arrow-key component move does not resize the viewer');
 
-  // Component dragging still works.
+  // Component dragging still works. Drag the COMPONENT's own centre rather than
+  // the canvas centre: the design canvas is 1200px tall, so once the viewer is a
+  // large editing area the canvas midpoint is not necessarily over any element.
   const geomBefore = await componentGeom();
-  const canvasBox = await page.$eval('#studio-canvas-document', el => {
+  const dragPoint = await page.evaluate(() => {
+    const el = document.querySelector('#studio-canvas-inner [data-comp-id].studio-comp-selected')
+      || document.querySelector('#studio-canvas-inner [data-comp-id]');
+    if (!el) return null;
+    el.scrollIntoView({ block: 'center', inline: 'center' });
     const r = el.getBoundingClientRect();
-    return { x: r.x, y: r.y, width: r.width, height: r.height };
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
   });
-  const start = { x: canvasBox.x + canvasBox.width / 2, y: canvasBox.y + canvasBox.height / 2 };
-  await dragMouse(start, { x: start.x + 25, y: start.y + 15 });
+  await new Promise(r => setTimeout(r, 200));
+  check(!!dragPoint, 'component has a draggable centre in view');
+  if (dragPoint) {
+    await dragMouse(dragPoint, { x: dragPoint.x + 25, y: dragPoint.y + 15 });
+  }
   const geomAfter = await componentGeom();
   check(!!geomAfter, 'component still present after drag');
   const moved = geomBefore && geomAfter && (geomBefore.x !== geomAfter.x || geomBefore.y !== geomAfter.y);
@@ -747,6 +929,7 @@ await step('single-column mode hides the handles and drops the side columns', as
       rightHidden: !!(right && (right.hidden || getComputedStyle(right).display === 'none')),
       gripHidden: !!(grip && (grip.hidden || getComputedStyle(grip).display === 'none')),
       stageInlineHeight: stage ? stage.style.height : null,
+      stageHeight: stage ? stage.getBoundingClientRect().height : null,
       columns: getComputedStyle(document.querySelector('#studio-layout')).gridTemplateColumns.split(' ').length,
     };
   });
@@ -754,7 +937,17 @@ await step('single-column mode hides the handles and drops the side columns', as
   check(stacked.leftHidden, 'left column resizer is hidden when stacked');
   check(stacked.rightHidden, 'right column resizer is hidden when stacked');
   check(stacked.gripHidden, 'viewer height grip is hidden when stacked');
-  check(stacked.stageInlineHeight === '', `pinned stage height is released, got "${stacked.stageInlineHeight}"`);
+  // CREATOR-07B: stacking drops the desktop HANDLES, not the editing height. The
+  // viewer must still be a usable editing area on a small screen.
+  check(/^\d+px$/.test(stacked.stageInlineHeight || ''),
+    `the stage keeps an explicit height when stacked, got "${stacked.stageInlineHeight}"`);
+  check(stacked.stageHeight >= 320,
+    `the viewer keeps a useful minimum height when stacked, got ${stacked.stageHeight}`);
+  // And no horizontal page overflow on a small screen.
+  const overflowX = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+  );
+  check(overflowX <= 1, `no horizontal page overflow when stacked, got ${overflowX}px`);
 
   // Back to desktop for the screenshot step.
   await page.setViewport({ width: DESKTOP_WIDTH, height: DESKTOP_HEIGHT });

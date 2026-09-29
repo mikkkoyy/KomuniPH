@@ -32,6 +32,7 @@ import {
   MIN_PANEL_WIDTH,
   MIN_CENTER_WIDTH,
   MIN_VIEWER_HEIGHT,
+  DEFAULT_VIEWER_HEIGHT,
 } from './studioViewer.js';
 
 // ── Component catalog (mirrors the server registries) ────────────────────────
@@ -81,13 +82,15 @@ let selectedId = null;
 // the editor looks at the design and are never written to the design itself.
 let zoom = 1;
 let viewerPan = { x: 0, y: 0 };
-// CREATOR-07A: workspace layout is editor state only, never design data.
+// CREATOR-07A/07B: workspace layout is editor state only, never design data.
 // `panelWidths` holds the two side-column widths (null = the responsive CSS
-// defaults) and `viewerHeight` the viewer's vertical size (null = fill the
-// stage). The viewer has no width of its own: it always fills the center column,
-// so the panels own the horizontal space.
+// defaults) and `viewerHeight` the viewer's vertical size. The viewer has no
+// width of its own: it always fills the center column, so the panels own the
+// horizontal space. CREATOR-07B: the height is seeded with a DELIBERATE default
+// instead of `null`, so the stage always has a height of its own and can never
+// inherit the side panels' height.
 let panelWidths = null;
-let viewerHeight = null;
+let viewerHeight = DEFAULT_VIEWER_HEIGHT;
 let dirty = false;
 let busy = false;
 let previewMode = false;
@@ -347,13 +350,19 @@ function applyWorkspaceState() {
   if (!layout || !stage) return;
 
   if (isSingleColumn()) {
-    // Hand control back entirely to the responsive stylesheet.
+    // The COLUMN widths go back to the responsive stylesheet, but the viewer
+    // keeps its own height: the stacked layout is not a reason to shrink the
+    // editing area, only a reason to drop desktop-style handles.
     layout.style.removeProperty('--studio-col-left');
     layout.style.removeProperty('--studio-col-right');
-    stage.style.height = '';
+    stage.style.height = `${clampViewerHeight(viewerHeight, {
+      min: MIN_VIEWER_HEIGHT,
+      fallback: DEFAULT_VIEWER_HEIGHT,
+    })}px`;
     layout.querySelectorAll('.studio-col-resizer').forEach(el => { el.hidden = true; });
     const grip = layout.querySelector('#studio-viewer-height-grip');
     if (grip) grip.hidden = true;
+    clampViewerPan();
     return;
   }
 
@@ -384,18 +393,23 @@ function applyWorkspaceState() {
   if (leftHandle && leftPanel) leftHandle.style.left = midpoint(leftPanel.getBoundingClientRect().right, stageBox.left);
   if (rightHandle && rightPanel) rightHandle.style.right = `${layoutBox.right - (stageBox.right + rightPanel.getBoundingClientRect().left) / 2}px`;
 
-  if (viewerHeight) {
-    stage.style.height = `${clampViewerHeight(viewerHeight, { min: MIN_VIEWER_HEIGHT, viewportHeight: window.innerHeight })}px`;
-  } else {
-    stage.style.height = '';
-  }
+  // CREATOR-07B: the stage ALWAYS gets an explicit height, and that height comes
+  // from the viewer's own workspace state only. It is never derived from the
+  // side panels (which are separate grid items that scroll internally) and never
+  // from the window, so a taller Properties or Profile Sections panel can never
+  // make the Profile Viewer half-height.
+  stage.style.height = `${clampViewerHeight(viewerHeight, {
+    min: MIN_VIEWER_HEIGHT,
+    fallback: DEFAULT_VIEWER_HEIGHT,
+  })}px`;
   clampViewerPan();
 }
 
 /**
- * A window resize can invalidate a pinned layout, so re-clamp both panels
- * against the new width and the viewer against the new height. The center
- * column keeps its minimum, so this can only shrink what no longer fits.
+ * A window resize can invalidate a pinned COLUMN layout, so re-clamp the two
+ * panels against the new width. The viewer height is deliberately NOT touched:
+ * it is independent workspace state, and resizing the window is not a request to
+ * change how tall the editing area is (CREATOR-07B).
  */
 function clampWorkspaceToWindow() {
   const layout = layoutElement();
@@ -1271,9 +1285,12 @@ function onPointerMove(event) {
   }
 
   if (drag.mode === 'viewer-height') {
+    // Dragging DOWN (larger clientY) makes the viewer TALLER, and dragging UP
+    // makes it shorter. The height is measured from the viewer's real rendered
+    // box, so the grip always tracks the actual bottom boundary.
     viewerHeight = clampViewerHeight(drag.startHeight + (event.clientY - drag.startClientY), {
       min: MIN_VIEWER_HEIGHT,
-      viewportHeight: window.innerHeight,
+      fallback: DEFAULT_VIEWER_HEIGHT,
     });
     applyWorkspaceState();
     renderCanvas();

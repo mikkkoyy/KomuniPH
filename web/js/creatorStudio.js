@@ -53,6 +53,16 @@ import {
   resolveAnimation,
   numOr,
 } from './profileDesign.js';
+// CREATOR-12: the Profile Background Effect registry (built-ins, engines and the
+// per-effect config schema) and the SHARED renderer. The Studio preview and the
+// public profile both go through this renderer, so they cannot diverge.
+import {
+  BUILTIN_EFFECTS,
+  BUILTIN_EFFECT_IDS,
+  ENGINE_SCHEMAS,
+} from './backgroundEffects.js';
+import { applyProfileBackgroundEffect } from './backgroundEffectRenderer.js';
+import { creatorEffectApi } from './api.js';
 import {
   stepPan,
   stepZoom,
@@ -191,6 +201,66 @@ function backgroundImageUrl() {
 let pendingBackgroundUrl = '';
 
 /**
+ * CREATOR-12: a staged `.kpeffect` import, held OUTSIDE the design.
+ *
+ * Importing validates and installs a package; it does not apply it. Keeping the
+ * staged effect here — and discarding it on a design swap — is what stops an
+ * import from silently becoming the profile's live effect, and stops it
+ * following a creator to a different design.
+ */
+let pendingEffect = null;
+let pendingInstalledEffects = null;
+let pendingEffectImportError = '';
+
+/** Effect rows the server says are installed and published for this creator. */
+function installedEffects() {
+  return Array.isArray(pendingInstalledEffects) ? pendingInstalledEffects : [];
+}
+
+/** The validated engine + default config for an effect id, builtin or creator. */
+function effectDefinitionFor(effectId) {
+  const builtin = BUILTIN_EFFECTS[effectId];
+  if (builtin) return { engine: builtin.engine, config: builtin.defaultConfig };
+  const row = installedEffects().find(r => r.effect_id === effectId);
+  if (!row) return null;
+  let definition = {};
+  try { definition = JSON.parse(row.definition_json || '{}'); } catch { definition = {}; }
+  return {
+    engine: row.engine || definition.engine,
+    config: definition.config || {},
+  };
+}
+
+/** A creator effect needs its INSTALLED definition to render at all. */
+function installedEffectDefinition(effectId) {
+  const row = installedEffects().find(r => r.effect_id === effectId);
+  if (!row) return null;
+  let definition = {};
+  try { definition = JSON.parse(row.definition_json || '{}'); } catch { definition = {}; }
+  return { ...row, definition_json: JSON.stringify(definition) };
+}
+
+/** Load (or reload) the creator's installed effects from the server. */
+async function refreshInstalledEffects() {
+  try {
+    const result = await creatorEffectApi.list();
+    pendingInstalledEffects = (result && result.creator) || [];
+  } catch {
+    // A failed list must never break the Studio; it just means no creator
+    // effects are selectable right now.
+    pendingInstalledEffects = [];
+  }
+}
+
+/** Stage an effect choice without applying it. */
+function stageEffect(choice) {
+  const def = effectDefinitionFor(choice.effectId);
+  pendingEffect = { ...choice, engine: def ? def.engine : undefined };
+  pendingEffectImportError = '';
+  renderProperties();
+}
+
+/**
  * A failed upload message, shown once on the next render and then cleared, so a
  * failure is visible in the panel rather than only in the transient status text.
  */
@@ -200,6 +270,10 @@ let pendingUploadError = '';
 function resetPendingBackground() {
   pendingBackgroundUrl = '';
   pendingUploadError = '';
+  // CREATOR-12: a staged .kpeffect import belongs to the design it was staged
+  // in, exactly as a staged background upload does.
+  pendingEffect = null;
+  pendingEffectImportError = '';
 }
 
 /** The single source of truth for what the Profile Background section shows. */
@@ -1069,6 +1143,49 @@ function buildProfileBackgroundLayer() {
   return layer;
 }
 
+/**
+ * CREATOR-12: the Profile Background Effect preview layer.
+ *
+ * Studio-only chrome, in the same position it occupies on a real profile: above
+ * the background image, below the profile structure and every component. It is a
+ * plain div with `pointer-events: none` and no data-comp-id, so it can never be
+ * selected, dragged, resized, or appear in Layers — individual particles are
+ * renderer internals, not components.
+ *
+ * The `bounds` passed to the renderer are the DESIGN CANVAS size, not the
+ * window, so the preview matches the published geometry rather than merely
+ * looking similar.
+ */
+function buildProfileEffectLayer() {
+  const c = canvas();
+  const layer = document.createElement('div');
+  layer.className = 'studio-profile-effect-layer';
+  layer.id = 'studio-profile-effect-layer';
+  layer.setAttribute('aria-hidden', 'true');
+  layer.style.left = '0px';
+  layer.style.top = '0px';
+  layer.style.width = `${c.width}px`;
+  layer.style.height = `${Math.max(c.minHeight, PROFILE_LAYOUT.background.height)}px`;
+
+  const theme = designTheme();
+  const effect = theme && typeof theme.backgroundEffect === 'object' ? theme.backgroundEffect : null;
+  const active = !!effect && effect.enabled !== false && !!effect.effectId;
+  layer.dataset.profileEffect = active ? effect.effectId : 'none';
+  if (!active) return layer;
+
+  // The renderer needs a live DOM node, so this runs after the layer is attached;
+  // renderCanvas() appends it before the components are built.
+  queueMicrotask(() => {
+    if (!layer.isConnected) return;
+    applyProfileBackgroundEffect(effect, {
+      layer,
+      creatorEffect: installedEffectDefinition(effect.effectId),
+      bounds: { width: c.width, height: Math.max(c.minHeight, PROFILE_LAYOUT.background.height) },
+    });
+  });
+  return layer;
+}
+
 function renderCanvas() {
   const inner = root?.querySelector('#studio-canvas-inner');
   if (!inner || !currentDesign) return;
@@ -1101,6 +1218,11 @@ function renderCanvas() {
   // editing aids, so Preview leaves them out — exactly the exclusion the public
   // profile renderer applies.
   doc.appendChild(buildProfileBackgroundLayer());
+  // CREATOR-12: the Background EFFECT sits between the background image and the
+  // profile, exactly as it does publicly: background image -> effect -> profile
+  // structure and components. Drawing it here (not after the components) is what
+  // guarantees the effect can never paint over the profile.
+  doc.appendChild(buildProfileEffectLayer());
   if (!previewMode) doc.appendChild(buildProfileSkeleton());
 
   // CREATOR-09: guide cards are a Studio-only aid. Preview represents the real
@@ -1280,6 +1402,12 @@ function numberField(comp, path, { min = -Infinity, max = Infinity, step = 'any'
   const input = document.createElement('input');
   input.type = 'number';
   input.step = step;
+  // CREATOR-12: publish the bounds the field already enforces on the value, so
+  // the control is self-describing — the spinner cannot step past a validated
+  // range, and a bounded schema (an effect's config) is visible as a range rather
+  // than being an invisible clamp.
+  if (Number.isFinite(min)) input.min = String(min);
+  if (Number.isFinite(max)) input.max = String(max);
   // CREATOR-09: tag the control with the property it edits so a canvas drag can
   // keep the displayed geometry in step without rebuilding the panel (which
   // would steal focus and interrupt typing).
@@ -1732,6 +1860,316 @@ function profileBackgroundProperties(frag) {
     ? 'These settings control the active Profile Background above. It covers the outer profile area, behind the main profile and every sidebar card, and is saved and published with the design — it is never a normal image card.'
     : 'Size, Position and Repeat apply once a Profile Background is active. The background covers the outer profile area, behind the main profile and every sidebar card — it is never a normal image card.';
   frag.appendChild(hint);
+
+  // CREATOR-12: the Background EFFECT is a separate, independent control. It is
+  // NOT part of the image state above: image-only, effect-only, both and
+  // neither are all valid, and neither one implies the other.
+  backgroundEffectProperties(frag);
+}
+
+// ── CREATOR-12: Profile Background Effect ─────────────────────────────────────
+
+/**
+ * Effect state, derived the same way the background image's state is: ACTIVE
+ * comes from the saved design, a staged import is transient editor state, and an
+ * import never becomes active on its own.
+ */
+function effectState() {
+  const theme = designTheme();
+  const saved = theme && typeof theme.backgroundEffect === 'object' ? theme.backgroundEffect : null;
+  const active = saved && saved.enabled !== false && saved.effectId
+    ? { effectId: saved.effectId, source: saved.source, config: saved.config || {}, engine: saved.engine }
+    : null;
+  const pending = pendingEffect;
+  if (active && pending && pending.effectId !== active.effectId) {
+    return { key: 'replace', active, pending, label: 'REPLACEMENT READY' };
+  }
+  if (active) return { key: 'active', active, pending: null, label: 'ACTIVE' };
+  if (pending) return { key: 'pending', active: null, pending, label: 'IMPORTED — NOT ACTIVE' };
+  return { key: 'none', active: null, pending: null, label: 'NO EFFECT' };
+}
+
+/** The label a creator reads, split into Built-in and Creator. */
+function effectChoiceLabel(effectId) {
+  if (BUILTIN_EFFECTS[effectId]) return `${BUILTIN_EFFECTS[effectId].name} (Built-in)`;
+  const installed = installedEffects().find(e => e.effect_id === effectId);
+  if (installed) return `${installed.name} (Creator${installed.author ? ` — ${installed.author}` : ''})`;
+  return effectId;
+}
+
+/**
+ * CREATOR-12: the Background Effect control.
+ *
+ * Follows the CREATOR-10A pattern deliberately: an explicit state chip, an
+ * action that only appears when it would do something, and a staged import that
+ * is visibly NOT the same thing as the active effect.
+ */
+function backgroundEffectProperties(frag) {
+  const theme = designTheme();
+  const state = effectState();
+
+  const head = document.createElement('div');
+  head.className = 'studio-bg-head';
+  const heading = document.createElement('h3');
+  heading.className = 'studio-prop-section';
+  heading.textContent = 'Background Effect';
+  const chip = document.createElement('span');
+  chip.className = `studio-bg-chip studio-bg-chip-${state.key === 'none' ? 'none' : state.key}`;
+  chip.id = 'studio-effect-state';
+  chip.dataset.state = state.key;
+  chip.textContent = state.key === 'active' ? '✓ ACTIVE' : state.label;
+  head.append(heading, chip);
+  frag.appendChild(head);
+
+  // The active effect, described in words — the effect itself is drawn on the
+  // canvas, so the panel's job is to say which one is live.
+  const activeBox = document.createElement('div');
+  activeBox.className = 'studio-effect-current';
+  activeBox.id = 'studio-effect-current';
+  activeBox.dataset.effectId = state.active ? state.active.effectId : '';
+  if (state.active) {
+    activeBox.textContent = `Active: ${effectChoiceLabel(state.active.effectId)}`;
+  } else {
+    activeBox.textContent = 'No effect is playing on your profile background.';
+  }
+  frag.appendChild(activeBox);
+
+  if (state.pending) {
+    const pendingBox = document.createElement('div');
+    pendingBox.className = 'studio-bg-pending';
+    pendingBox.id = 'studio-effect-pending';
+    pendingBox.dataset.pending = 'true';
+    const label = document.createElement('span');
+    label.className = 'studio-bg-pending-label';
+    label.id = 'studio-effect-pending-label';
+    label.textContent = state.active
+      ? `Imported "${state.pending.name}" — ready to REPLACE the active effect. Not applied yet.`
+      : `Imported "${state.pending.name}" — ready to use as your Profile Background Effect. Not active yet.`;
+    pendingBox.appendChild(label);
+    frag.appendChild(pendingBox);
+  }
+
+  // ── Built-in effects ──
+  const builtinIds = BUILTIN_EFFECT_IDS;
+  const builtinSelect = document.createElement('select');
+  const noneOption = document.createElement('option');
+  noneOption.value = '';
+  noneOption.textContent = 'None';
+  builtinSelect.appendChild(noneOption);
+  for (const id of builtinIds) {
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = `${BUILTIN_EFFECTS[id].name} (Built-in)`;
+    builtinSelect.appendChild(opt);
+  }
+  builtinSelect.value = state.pending && state.pending.source !== 'creator' ? state.pending.effectId : '';
+  builtinSelect.id = 'studio-effect-builtin';
+  builtinSelect.addEventListener('change', () => {
+    if (!builtinSelect.value) return;
+    stageEffect({ effectId: builtinSelect.value, source: 'builtin', name: BUILTIN_EFFECTS[builtinSelect.value].name });
+  });
+  frag.appendChild(fieldRow('Built-in Effects', builtinSelect));
+
+  // ── Creator effects ──
+  const creatorSelect = document.createElement('select');
+  const cNone = document.createElement('option');
+  cNone.value = '';
+  cNone.textContent = 'None';
+  creatorSelect.appendChild(cNone);
+  for (const row of installedEffects()) {
+    const opt = document.createElement('option');
+    opt.value = row.effect_id;
+    opt.textContent = `${row.name} (Creator${row.author ? ` — ${row.author}` : ''})`;
+    creatorSelect.appendChild(opt);
+  }
+  creatorSelect.value = state.pending && state.pending.source === 'creator' ? state.pending.effectId : '';
+  creatorSelect.id = 'studio-effect-creator';
+  creatorSelect.addEventListener('change', () => {
+    if (!creatorSelect.value) return;
+    const row = installedEffects().find(r => r.effect_id === creatorSelect.value);
+    stageEffect({
+      effectId: creatorSelect.value, source: 'creator', name: row ? row.name : creatorSelect.value,
+    });
+  });
+  frag.appendChild(fieldRow('Creator Effects', creatorSelect));
+
+  if (installedEffects().length === 0) {
+    const none = document.createElement('p');
+    none.className = 'studio-prop-hint';
+    none.textContent = 'You have not imported any .kpeffect packages yet. Import one below and it will appear here.';
+    frag.appendChild(none);
+  }
+
+  // ── Apply / Remove ──
+  const row = document.createElement('div');
+  row.className = 'studio-image-row';
+
+  const applyBtn = document.createElement('button');
+  applyBtn.type = 'button';
+  applyBtn.id = 'studio-effect-apply';
+  applyBtn.className = 'btn btn-primary studio-upload-btn';
+  const replacing = state.key === 'replace';
+  applyBtn.textContent = replacing ? 'Replace Background Effect' : 'Set as Background Effect';
+  applyBtn.hidden = !state.pending;
+  applyBtn.disabled = !state.pending;
+  applyBtn.addEventListener('click', () => {
+    if (!pendingEffect) return;
+    pushHistory();
+    const t = designTheme();
+    const def = effectDefinitionFor(pendingEffect.effectId);
+    // The stored effect carries NO engine field. The engine is a property of the
+    // effect itself — fixed for a built-in, and taken from the validated package
+    // for a creator effect — so storing one would let a design assert an engine it
+    // has no right to choose. The server rejects it, and rightly so.
+    t.backgroundEffect = {
+      enabled: true,
+      effectId: pendingEffect.effectId,
+      source: pendingEffect.source,
+      version: 1,
+      config: { ...(def && def.config ? def.config : {}) },
+    };
+    pendingEffect = null;
+    markChanged(replacing
+      ? 'Background effect replaced. It plays behind the whole profile.'
+      : 'Background effect active. It plays behind the whole profile.');
+    renderCanvas();
+    renderProperties();
+  });
+
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.id = 'studio-effect-remove';
+  removeBtn.className = 'btn btn-secondary studio-upload-btn';
+  removeBtn.textContent = 'Remove';
+  removeBtn.hidden = !state.active;
+  removeBtn.disabled = !state.active;
+  removeBtn.title = 'Remove the active background effect. The background image is not affected.';
+  removeBtn.addEventListener('click', () => {
+    const t = designTheme();
+    if (!t.backgroundEffect) return;
+    pushHistory();
+    // Only the effect is removed. The background IMAGE is a separate setting and
+    // must survive untouched.
+    delete t.backgroundEffect;
+    pendingEffect = null;
+    markChanged('Background effect removed. Your background image is unchanged.');
+    renderCanvas();
+    renderProperties();
+  });
+
+  row.append(applyBtn, removeBtn);
+  frag.appendChild(row);
+
+  // ── Import ──
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = '.kpeffect,application/zip';
+  fileInput.hidden = true;
+  fileInput.id = 'studio-effect-file';
+
+  const importBtn = document.createElement('button');
+  importBtn.type = 'button';
+  importBtn.id = 'studio-effect-import';
+  importBtn.className = 'btn btn-secondary studio-upload-btn';
+  importBtn.textContent = 'Import .kpeffect';
+  importBtn.title = 'Import a KomuniPH effect package';
+  importBtn.addEventListener('click', () => fileInput.click());
+
+  const importRow = document.createElement('div');
+  importRow.className = 'studio-image-row';
+  importRow.append(importBtn);
+  frag.appendChild(importRow);
+  frag.appendChild(fileInput);
+
+  const importStatus = document.createElement('p');
+  importStatus.className = 'studio-upload-status';
+  importStatus.id = 'studio-effect-import-status';
+  // A failure speaks in this line rather than only in a separate note, so the
+  // reason is in the same place the creator was looking when it failed.
+  importStatus.textContent = pendingEffectImportError
+    || 'A .kpeffect package is validated on the server before it can be used. Creator packages are data only — they never contain code.';
+  frag.appendChild(importStatus);
+
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files && fileInput.files[0];
+    fileInput.value = '';
+    if (!file) return;
+    importBtn.disabled = true;
+    importStatus.textContent = 'Validating package…';
+    try {
+      const result = await creatorEffectApi.importPackage(file);
+      await refreshInstalledEffects();
+      // Imported is NOT active. The creator chooses when it is used.
+      pendingEffect = {
+        effectId: result.effectId, source: 'creator', name: result.name, engine: result.engine,
+      };
+      pendingEffectImportError = '';
+      importStatus.textContent = `Imported "${result.name}" by ${result.author || 'unknown'}. Choose "Set as Background Effect" to use it.`;
+    } catch (err) {
+      pendingEffect = null;
+      pendingEffectImportError = err.message || 'Effect could not be imported.';
+      importStatus.textContent = pendingEffectImportError;
+    } finally {
+      importBtn.disabled = false;
+    }
+    renderProperties();
+  });
+
+  if (pendingEffectImportError) {
+    const errLine = document.createElement('p');
+    errLine.className = 'studio-prop-hint studio-bg-error';
+    errLine.id = 'studio-effect-import-error';
+    errLine.textContent = pendingEffectImportError;
+    pendingEffectImportError = '';
+    frag.appendChild(errLine);
+  }
+
+  // ── Per-effect settings, from the validated schema only ──
+  // Which effect the settings describe: the staged one if there is one, else the
+  // active one. They come from the effect's own engine schema, so there is no
+  // free-form control and no way to enter a CSS value.
+  const subject = state.pending || state.active;
+  if (subject) {
+    const engine = effectDefinitionFor(subject.effectId)?.engine
+      || BUILTIN_EFFECTS[subject.effectId]?.engine;
+    const schema = ENGINE_SCHEMAS[engine];
+    if (schema) {
+      const cfg = {
+        ...(BUILTIN_EFFECTS[subject.effectId]?.defaultConfig || {}),
+        ...((state.active && state.active.effectId === subject.effectId) ? (state.active.config || {}) : {}),
+      };
+      for (const [key, spec] of Object.entries(schema)) {
+        const path = `backgroundEffect.config.${key}`;
+        if (spec.type === 'number') {
+          frag.appendChild(fieldRow(spec.label || key, numberField(theme, path, {
+            min: spec.min, max: spec.max, step: stepFor(spec),
+          })));
+        } else if (spec.type === 'bool') {
+          frag.appendChild(fieldRow(spec.label || key, toggleField(theme, path)));
+        } else if (spec.type === 'enum') {
+          frag.appendChild(fieldRow(spec.label || key, selectField(theme, path, spec.values)));
+        }
+      }
+      const note = document.createElement('p');
+      note.className = 'studio-prop-hint';
+      note.textContent = `These settings apply to "${effectChoiceLabel(subject.effectId)}". They are saved with the design and play on your public profile.`;
+      frag.appendChild(note);
+    }
+  } else {
+    const hint = document.createElement('p');
+    hint.className = 'studio-prop-hint';
+    hint.textContent = 'An effect is a decorative layer that plays behind your profile, above the background image and below your content. Choose a built-in effect to try one — it can be removed at any time, and your background image is never affected.';
+    frag.appendChild(hint);
+  }
+}
+
+/** A sensible step for a bounded numeric setting. */
+function stepFor(spec) {
+  const range = spec.max - spec.min;
+  if (range <= 2) return 0.05;
+  if (range <= 20) return 0.5;
+  if (range <= 200) return 1;
+  return 10;
 }
 
 function canvasProperties(frag) {
@@ -3239,6 +3677,10 @@ export async function initCreatorStudioPage() {
   window.addEventListener('keydown', keyHandler);
   window.addEventListener('beforeunload', beforeUnload);
   renderElementPanels();
+  // CREATOR-12: load the creator's installed .kpeffect effects before the first
+  // Properties render, so a design that already references one previews instead
+  // of silently showing nothing.
+  await refreshInstalledEffects();
   applyWorkspaceState();
   // CREATOR-10: watch the viewer's real size so the canvas re-centres after a
   // window resize, a side-panel drag, a viewer-height drag, or any other relayout.

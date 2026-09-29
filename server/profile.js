@@ -16,6 +16,7 @@ import { jsonResponse, errorResponse, parseBody } from './utils.js';
 import { getCountries, getCities, getBarangays } from './locations.js';
 import { seedDefaultTheme } from './database.js';
 import { getPublishedDesignForUser, getPublishedDesignByUsername } from './profileDesign.js';
+import { validateBackgroundEffect } from './creatorEffects.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -73,6 +74,7 @@ export function validateThemeConfig(body) {
   const errors = [];
   const allowedFields = new Set([
     'backgroundImage', 'backgroundPosition', 'backgroundRepeat', 'backgroundSize',
+    'backgroundEffect',
     'backgroundGradient', 'backgroundColor', 'textColor', 'mutedTextColor',
     'accentColor', 'cardBackground', 'cardOpacity', 'cardBorderColor', 'cardBorderRadius'
   ]);
@@ -127,6 +129,16 @@ export function validateThemeConfig(body) {
     if (typeof body.cardBorderRadius !== 'number' || body.cardBorderRadius < 0 || body.cardBorderRadius > 100) {
       errors.push('cardBorderRadius must be a number between 0 and 100');
     }
+  }
+
+  // CREATOR-12: the Profile Background EFFECT is a second, independent
+  // theme-level setting beside the background IMAGE. Adding it to this shared
+  // allowlist is deliberate: setting an effect is as much a profile preference as
+  // setting the picture, so the Profile Editor and a Creator Studio design accept
+  // exactly the same shape. It is validated by the same server routine the design
+  // validator uses, so the two paths cannot drift.
+  if (body.backgroundEffect !== undefined) {
+    validateBackgroundEffect(body.backgroundEffect, errors);
   }
 
   return errors;

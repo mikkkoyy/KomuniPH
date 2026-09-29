@@ -6325,3 +6325,75 @@ select:focus {
 /* Children always paint above the card's own heading/body, which are not
    positioned and therefore sit below in stacking order. */
 .design-card-surface > .design-component { z-index: 1; }
+
+/* ---------------------------------------------------------------------------
+   CREATOR-12 - Profile Background Effect layer.
+
+   The stacking invariant, as CSS:
+
+     .profile-background-layer        (the picture, z-index 0)
+     .profile-background-effect-layer (the effect, z-index 1)
+     .profile-content-frame           (the content, z-index 2)
+
+   The effect layer is a FIXED viewport overlay, not a document element, so it
+   can never take part in layout: it cannot add height, cannot push content, and
+   cannot change any design coordinate. `pointer-events: none` means it can never
+   intercept a click meant for a button or a link beneath it, and
+   `aria-hidden` keeps a purely decorative layer out of the accessibility tree.
+   --------------------------------------------------------------------------- */
+
+.profile-background-effect-layer {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  pointer-events: none;
+  z-index: 1;
+  overflow: hidden;
+}
+.profile-background-effect-layer:empty { display: none; }
+.profile-background-effect-layer canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  pointer-events: none;
+}
+.profile-content-frame { z-index: 2; }
+
+.profile-bg-effect-atmosphere,
+.profile-bg-effect-lightning,
+.profile-bg-effect-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.profile-bg-effect-atmosphere > span {
+  position: absolute;
+  display: block;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%, rgba(226, 232, 240, 0.9), rgba(148, 163, 184, 0) 70%);
+}
+@keyframes komuniph-effect-drift {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to   { transform: translate3d(6%, -5%, 0) scale(1.12); }
+}
+@keyframes komuniph-effect-flash {
+  0%, 96% { opacity: 0; }
+  97% { opacity: var(--kp-flash-opacity, 0.7); }
+  99% { opacity: 0; }
+  100% { opacity: 0; }
+}
+
+/*
+  Accessibility. The renderer already renders a still frame when
+  prefers-reduced-motion is set; this is the CSS backstop for the two engines
+  that use a CSS animation, so a motion-sensitive visitor never sees movement
+  even if the layer is rendered by a path that did not check the preference.
+*/
+@media (prefers-reduced-motion: reduce) {
+  .profile-bg-effect-atmosphere > span,
+  .profile-bg-effect-lightning {
+    animation: none !important;
+  }
+}

@@ -18,6 +18,11 @@ import { handleGetProfile, handleGetPublicProfile, handleUpdateProfile, handleUp
 import { handleListDesigns, handleCreateDesign, handleGetDesign, handleUpdateDesign, handlePublishDesign, handleArchiveDesign } from './profileDesign.js';
 import { handleListAssets, handleCreateAsset, handleGetAsset, handleUpdateAsset, handleSubmitAsset, handlePublishAsset, handleArchiveAsset } from './creatorAssets.js';
 import { handleUploadCreatorMedia } from './creatorMedia.js';
+import {
+  handleListCreatorEffects,
+  handleImportCreatorEffect,
+  handleArchiveCreatorEffect,
+} from './creatorEffects.js';
 import { handleListMarketplaceAssets, handleGetMarketplaceAsset, handleListMarketplaceListings, handleCreateListing, handleGetListing, handleUpdateListing, handlePublishListing, handleArchiveListing, handleListOwnListings, handleCreatorSalesSummary, handleGetCoinShopProduct, handleBuyAsset, handleInstallAsset, handleListPurchasedAssets, handleCheckPurchased } from './marketplace.js';
 import { handleGetTestimonials, handleCreateTestimonial, handleDeleteTestimonial, handleGetUserTestimonials } from './testimonials.js';
 import { handleGetPhotos, handleUploadPhoto as handleGalleryUploadPhoto, handleDeletePhoto, handleGetOwnPhotos } from './gallery.js';
@@ -419,6 +424,28 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
       const user = requireAuth(req, res);
       if (!user) return;
       return handleUploadCreatorMedia(req, res, user);
+    }
+
+    // CREATOR-12 Profile Background Effects (auth required). A .kpeffect is an
+    // UNTRUSTED package: every entry, the manifest, the effect definition and
+    // every asset are validated server-side before anything is written, and the
+    // stored definition is declarative data only — no creator JavaScript, CSS or
+    // markup is ever accepted or executed.
+    if (method === 'GET' && path === '/api/creator/effects') {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleListCreatorEffects(req, res, user);
+    }
+    if (method === 'POST' && path === '/api/creator/effects/import') {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleImportCreatorEffect(req, res, user);
+    }
+    const archiveEffectMatch = path.match(/^\/api\/creator\/effects\/([A-Za-z0-9_-]{6,64})\/archive$/);
+    if (method === 'POST' && archiveEffectMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleArchiveCreatorEffect(req, res, user, archiveEffectMatch[1]);
     }
 
     // CREATOR-02 creator assets (auth required). Ownership is derived from the

@@ -23,6 +23,7 @@
     "test:creator10": "node tests/test_creator10_profile_viewer.mjs",
     "test:creator11": "node tests/test_creator11_fonts_animation_masking.mjs",
     "test:creator10a": "node tests/test_creator10a_background_state.mjs",
+    "test:creator12": "node tests/test_creator12_background_effects.mjs",
     "test:coin-gift": "node tests/test_coin_gift.mjs",
     "test:coin-rewards": "node tests/test_coin_rewards.mjs"
   },
@@ -37,7 +38,8 @@
     "jsonwebtoken": "^9.0.0",
     "nodemailer": "^10.0.3",
     "sharp": "^0.35.4",
-    "uuid": "^10.0.0"
+    "uuid": "^10.0.0",
+    "yauzl": "^3.4.0"
   },
   "devDependencies": {
     "pngjs": "^7.0.0",

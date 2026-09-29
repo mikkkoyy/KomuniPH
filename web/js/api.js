@@ -293,6 +293,57 @@ export const profileApi = {
 };
 
 /**
+ * Creator Background Effect API (CREATOR-12).
+ *
+ * `importPackage` is the only place a creator-supplied file enters the system.
+ * The browser sends the bytes and nothing else — no manifest, no effect id, no
+ * engine — because the server must derive all of that from the package itself
+ * after validating it. A client that could name its own effect id or engine
+ * would let a crafted request decide what gets installed.
+ */
+export const creatorEffectApi = {
+  async list() {
+    return apiRequest('/creator/effects');
+  },
+
+  async importPackage(file) {
+    const formData = new FormData();
+    formData.append('package', file);
+
+    const headers = {};
+    if (accessToken) {
+      headers['Authorization'] = `Bearer ${accessToken}`;
+    }
+
+    const response = await fetch(`${API_BASE}/creator/effects/import`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    const contentType = response.headers.get('content-type') || '';
+    const parsedBody = contentType.includes('application/json')
+      ? await response.json().catch(() => null)
+      : null;
+
+    if (!response.ok) {
+      // The server's message is already a plain, creator-safe reason — never a
+      // stack trace — so it is surfaced as-is.
+      const error = new Error(parsedBody?.error?.message || `Import failed with status ${response.status}`);
+      error.status = response.status;
+      error.body = parsedBody;
+      throw error;
+    }
+
+    return parsedBody;
+  },
+
+  async archive(effectRowId) {
+    return apiRequest(`/creator/effects/${effectRowId}/archive`, { method: 'POST' });
+  },
+};
+
+/**
  * Profile Design API (CREATOR-01A)
  */
 export const designApi = {

@@ -6,6 +6,9 @@ import { profileApi, testimonialsApi, galleryApi, albumsApi, authApi, isAuthenti
 import { navigate } from './app.js';
 import { renderGalleryItemHtml, bindGalleryGridLightbox, isOwnUsername, safeDecode, renderAlbumCardsHtml } from './gallery.js'; // PHASE-3 GALLERY-SPLIT-01
 import { applyProfileDesign } from './profileDesign.js'; // CREATOR-01A
+// CREATOR-12: the shared Profile Background Effect renderer. The same module
+// draws the Studio preview and the public profile, so they cannot diverge.
+import { applyProfileBackgroundEffect } from './backgroundEffectRenderer.js';
 
 let currentProfile = null;
 let customizationDirty = false;
@@ -121,6 +124,10 @@ export function renderProfilePage(viewUsername = null, { preview = false } = {})
     return `
       <div class="profile-frame" id="profile-frame" data-view="${isPublicView ? 'public' : 'own'}">
         <div class="profile-background-layer" id="profile-background-layer" aria-hidden="true"></div>
+        <!-- CREATOR-12: the Profile Background EFFECT. A fixed, pointer-events:none
+             overlay between the background picture and the content, so it paints
+             behind the profile without ever touching layout. -->
+        <div class="profile-background-effect-layer" id="profile-background-effect-layer" aria-hidden="true"></div>
         <div class="profile-content-frame">
       <!-- Header -->
       <header class="profile-header" id="profile-header">
@@ -503,6 +510,20 @@ export function applyProfileBackground(profile) {
       bgLayer.style.background = bgColor;
     }
   }
+
+  // CREATOR-12: the Profile Background EFFECT is rendered here, immediately after
+  // the background PICTURE, from the same resolved theme values. Doing it inside
+  // this function rather than at each call site is what guarantees the image and
+  // the effect can never disagree — every path that sets a background (design,
+  // profile editor, live theme drag) gets the effect with it.
+  //
+  // The effect is independent of the image: an effect with no picture, a picture
+  // with no effect, both, or neither all work. Anything unresolvable degrades to
+  // no effect, so a missing or archived creator effect can never break a page.
+  const bgEffect = custom.backgroundEffect || theme.backgroundEffect || null;
+  applyProfileBackgroundEffect(bgEffect, {
+    creatorEffect: (profile && profile.design && profile.design.backgroundEffectDefinition) || null,
+  });
 }
 
 /**

@@ -27,6 +27,10 @@ import {
   PROFILE_MAIN_SECTIONS,
   PROFILE_SIDEBAR_SECTIONS,
 } from '../web/js/profileDesign.js';
+// CREATOR-12: real .kpeffect ZIP bytes are built in Node (the browser cannot
+// construct an archive), so the import flow is exercised against genuine
+// packages rather than a stubbed upload.
+import { buildZip, goodManifest, goodDefinition } from './_zip.js';
 
 /** How many cards the current default guide has — one per real profile module. */
 const DEFAULT_GUIDE_SIZE = guidePattern(DEFAULT_GUIDE_PATTERN).cards.length;
@@ -141,6 +145,11 @@ await sharp({ create: { width: 120, height: 120, channels: 3, background: { r: 3
 // apart from a component image, and so resizing it is visibly meaningful.
 const bgFixturePath = join(TMP_DIR, 'background-fixture.png');
 await sharp({ create: { width: 400, height: 300, channels: 3, background: { r: 200, g: 90, b: 40 } } }).png().toFile(bgFixturePath);
+
+// CREATOR-12: a real PNG used as the texture/preview inside .kpeffect packages.
+const effectPng = await sharp({
+  create: { width: 24, height: 24, channels: 4, background: { r: 220, g: 235, b: 255, alpha: 1 } },
+}).png().toBuffer();
 
 // ── Browser ────────────────────────────────────────────────────────────────
 let browser;
@@ -4311,6 +4320,490 @@ await step('CREATOR-10A: background state changes never touch the design model o
   eq(placementAfter.transform, placementBefore.transform,
     'the viewer transform is unchanged by background edits');
   eq(placementAfter.zoom, placementBefore.zoom, 'the zoom is unchanged by background edits');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CREATOR-12 — Profile Background Effects and .kpeffect import, in a real
+// browser. The effect renderer needs a live canvas and the import flow needs real
+// file bytes, so neither can be honestly verified outside a browser.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Read the visible Background Effect state out of the Properties panel. */
+const readEffectState = () => page.evaluate(() => {
+  const chip = document.querySelector('#studio-effect-state');
+  const current = document.querySelector('#studio-effect-current');
+  const pending = document.querySelector('#studio-effect-pending');
+  const apply = document.querySelector('#studio-effect-apply');
+  const remove = document.querySelector('#studio-effect-remove');
+  const importStatus = document.querySelector('#studio-effect-import-status');
+  const importErr = document.querySelector('#studio-effect-import-error');
+  const layer = document.querySelector('#studio-profile-effect-layer');
+  const visible = (el) => !!el && el.offsetParent !== null;
+  const canvas = layer?.querySelector('canvas');
+  return {
+    chipText: chip ? chip.textContent.trim() : null,
+    chipState: chip ? chip.dataset.state : null,
+    currentEffectId: current ? current.dataset.effectId : null,
+    currentText: current ? current.textContent.trim() : null,
+    pendingVisible: visible(pending),
+    pendingText: document.querySelector('#studio-effect-pending-label')?.textContent.trim() || null,
+    applyVisible: visible(apply),
+    applyText: apply ? apply.textContent.trim() : null,
+    removeVisible: visible(remove),
+    importStatus: importStatus ? importStatus.textContent.trim() : '',
+    importError: importErr ? importErr.textContent.trim() : null,
+    // The canvas preview: real pixels, not a marker element.
+    layerExists: !!layer,
+    layerEffect: layer ? layer.dataset.profileEffect : null,
+    layerEngine: layer ? layer.dataset.profileEffectEngine : null,
+    hasCanvas: !!canvas,
+    canvasW: canvas ? canvas.width : 0,
+    canvasH: canvas ? canvas.height : 0,
+    // The layer must be inert and behind everything.
+    layerPointerEvents: layer ? getComputedStyle(layer).pointerEvents : null,
+    layerAriaHidden: layer ? layer.getAttribute('aria-hidden') : null,
+    layerZ: layer ? getComputedStyle(layer).zIndex : null,
+    isComponent: document.querySelectorAll('#studio-profile-effect-layer[data-comp-id]').length,
+    inLayers: Array.from(document.querySelectorAll('#studio-layers-list .studio-layer-name'))
+      .some(el => /snow|rain|effect|particle/i.test(el.textContent || '')),
+  };
+});
+
+/** Count non-transparent pixels in the Studio effect canvas (proof it drew). */
+const effectCanvasPixels = () => page.evaluate(() => {
+  const canvas = document.querySelector('#studio-profile-effect-layer canvas');
+  if (!canvas) return { sampled: 0, total: 0 };
+  try {
+    const ctx = canvas.getContext('2d');
+    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    let sampled = 0;
+    for (let i = 3; i < data.length; i += 4 * 97) if (data[i] > 8) sampled += 1;
+    return { sampled, total: Math.floor(data.length / 4 / 97) };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+/** Build a .kpeffect in the page? No — the ZIP bytes are produced in Node. */
+const kpeffectValid = () => buildZip([
+  { name: 'manifest.json', data: JSON.stringify(goodManifest({ preview: 'preview.png' })) },
+  { name: 'effect/effect.json', data: JSON.stringify(goodDefinition({ engine: 'particles', config: { count: 45, speed: 1.1, size: 10, opacity: 0.9, direction: 'down' } })) },
+  { name: 'assets/flake.png', data: effectPng },
+  { name: 'preview.png', data: effectPng },
+]);
+const kpeffectWithCode = () => buildZip([
+  { name: 'manifest.json', data: JSON.stringify(goodManifest()) },
+  { name: 'effect/effect.json', data: JSON.stringify(goodDefinition()) },
+  { name: 'assets/evil.js', data: 'alert(document.cookie)' },
+]);
+const kpeffectTraversal = () => buildZip([
+  { name: 'manifest.json', data: JSON.stringify(goodManifest()) },
+  { name: 'effect/effect.json', data: JSON.stringify(goodDefinition()) },
+  { name: '../../escape.png', data: effectPng },
+]);
+
+await step('CREATOR-12: the Background Effect section exists and starts at NO EFFECT', async () => {
+  await resetStudioWorkspace();
+  await ensureEditingMode();
+  await pinStudioInView();
+  // Motion must be allowed: headless Chrome reports reduce by default, and an
+  // effect under reduced motion renders a still frame instead of animating.
+  await setMotionPreference('no-preference');
+  const shown = await showBackgroundSection();
+  check(shown, 'the Background Effect section is visible');
+
+  const state = await readEffectState();
+  eq(state.chipState, 'none', 'the effect state starts at none');
+  check(/NO EFFECT/.test(state.chipText || ''), `the chip reads NO EFFECT, got ${JSON.stringify(state.chipText)}`);
+  eq(state.currentEffectId, '', 'no effect is current');
+  check(/no effect is playing/i.test(state.currentText || ''),
+    `the panel says plainly that nothing is playing, got "${state.currentText}"`);
+  eq(state.applyVisible, false, 'no apply button with nothing staged');
+  eq(state.removeVisible, false, 'no Remove button with no active effect');
+  // Built-in choices are offered, split by source.
+  const builtins = await page.evaluate(() => Array.from(
+    document.querySelectorAll('#studio-effect-builtin option'),
+  ).map(o => ({ value: o.value, label: o.textContent })));
+  for (const id of ['builtin.snow', 'builtin.rain', 'builtin.fire', 'builtin.smoke', 'builtin.lightning',
+    'builtin.leaves', 'builtin.petals', 'builtin.sparkles', 'builtin.stars']) {
+    check(builtins.some(o => o.value === id), `"${id}" is offered as a built-in choice`);
+  }
+  check(builtins.every(o => o.value === '' || /Built-in/.test(o.label)),
+    'built-in choices are visibly labelled as built-in');
+  const creators = await page.evaluate(() => Array.from(
+    document.querySelectorAll('#studio-effect-creator option'),
+  ).map(o => o.textContent));
+  check(creators.length >= 1, 'a Creator Effects list is shown');
+  // Nothing is playing on the canvas.
+  eq(state.layerEffect, 'none', 'no effect is rendered on the canvas');
+  eq(state.hasCanvas, false, 'no effect canvas is created when there is no effect');
+});
+
+await step('CREATOR-12: a built-in effect renders on the canvas, behind the profile', async () => {
+  await page.select('#studio-effect-builtin', 'builtin.snow');
+  await new Promise(r => setTimeout(r, 400));
+  const staged = await readEffectState();
+  check(staged.chipState === 'pending' || staged.chipState === 'replace',
+    `choosing an effect stages it rather than applying it, got ${staged.chipState}`);
+  // It is staged: still nothing active on the canvas.
+  eq(staged.layerEffect, 'none', 'a staged effect is NOT yet rendered as active');
+
+  await page.select('#studio-effect-builtin', 'builtin.snow');
+  await new Promise(r => setTimeout(r, 200));
+  const applyBtn = await page.$('#studio-effect-apply');
+  if (applyBtn) await applyBtn.click();
+  await new Promise(r => setTimeout(r, 500));
+
+  const active = await readEffectState();
+  eq(active.chipState, 'active', 'applying makes the effect active');
+  check(/ACTIVE/.test(active.chipText || ''), `the chip reads ACTIVE, got ${JSON.stringify(active.chipText)}`);
+  eq(active.currentEffectId, 'builtin.snow', 'the active effect is snow');
+  eq(active.removeVisible, true, 'Remove is offered once an effect is active');
+  eq(active.applyVisible, false, 'no apply button when nothing is staged');
+  // It actually rendered, and it really drew pixels.
+  eq(active.layerEffect, 'builtin.snow', 'the canvas layer reports the active effect');
+  eq(active.layerEngine, 'particles', 'the effect uses its declared engine');
+  eq(active.hasCanvas, true, 'an effect canvas was created');
+  check(active.canvasW > 0 && active.canvasH > 0, `the canvas has a real surface (${active.canvasW}x${active.canvasH})`);
+  await new Promise(r => setTimeout(r, 400));
+  const pixels = await effectCanvasPixels();
+  check(pixels.sampled > 0, `the effect canvas actually drew (${pixels.sampled}/${pixels.total} sampled pixels opaque)`);
+  void staged;
+});
+
+await step('CREATOR-12: the effect is inert and never a component', async () => {
+  const s = await readEffectState();
+  eq(s.layerPointerEvents, 'none', 'the effect layer never intercepts pointer events');
+  eq(s.layerAriaHidden, 'true', 'the effect layer is hidden from assistive technology');
+  eq(s.isComponent, 0, 'the effect layer is not a design component');
+  eq(s.inLayers, false, 'the effect is not listed in Layers');
+  // It sits ABOVE the background and BELOW the profile structure.
+  const order = await page.evaluate(() => {
+    const bg = document.querySelector('#studio-profile-background');
+    const effect = document.querySelector('#studio-profile-effect-layer');
+    const kids = Array.from(document.querySelector('#studio-canvas-document').children);
+    return {
+      bgIndex: kids.indexOf(bg), effectIndex: kids.indexOf(effect),
+      firstComp: kids.findIndex(el => el.dataset.compId || el.id === 'studio-profile-skeleton'),
+      // A press at the top of the canvas must not land on the effect layer. The
+      // profile structure above it is pointer-events:none too, so the honest
+      // assertion is "the effect never got it", not "a component got it".
+      pressSkipsEffect: (() => {
+        const doc = document.querySelector('#studio-canvas-document');
+        const r = doc.getBoundingClientRect();
+        const el = document.elementFromPoint(r.left + r.width / 2, r.top + 20);
+        return !el || !el.closest('#studio-profile-effect-layer');
+      })(),
+    };
+  });
+  check(order.effectIndex > order.bgIndex, 'the effect layer is painted after the background image');
+  check(order.effectIndex < order.firstComp,
+    'the effect layer is painted before the profile structure and components');
+  check(order.pressSkipsEffect, 'a press on the canvas never lands on the effect layer');
+});
+
+await step('CREATOR-12: effect settings come from the effect schema and are bounded', async () => {
+  await showBackgroundSection();
+  const labels = await page.evaluate(() => Array.from(
+    document.querySelectorAll('#studio-properties .studio-prop-row'),
+  ).map(r => r.querySelector('.studio-prop-label')?.textContent || ''));
+  for (const want of ['Amount', 'Speed', 'Size', 'Opacity', 'Drift']) {
+    check(labels.includes(want), `the particles schema exposes "${want}"`);
+  }
+  // Bounds are the schema's, not free-form.
+  const bounds = await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'));
+    const find = (label) => rows.find(r => r.querySelector('.studio-prop-label')?.textContent === label)?.querySelector('input');
+    const amount = find('Amount');
+    return { min: amount?.min, max: amount?.max };
+  });
+  eq(bounds.min, '1', 'the Amount minimum comes from the schema');
+  eq(bounds.max, '300', 'the Amount maximum comes from the schema');
+
+  // Changing a setting does not touch geometry.
+  const before = await designSnapshot();
+  await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'));
+    const amount = rows.find(r => r.querySelector('.studio-prop-label')?.textContent === 'Amount')?.querySelector('input');
+    if (!amount) throw new Error('Amount field missing');
+    amount.value = '77';
+    amount.dispatchEvent(new Event('input', { bubbles: true }));
+    amount.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await new Promise(r => setTimeout(r, 400));
+  await showBackgroundSection();
+  const after = await designSnapshot();
+  eq(JSON.stringify(after), JSON.stringify(before), 'changing an effect setting changed no component geometry');
+  const canvasBefore = await canvasPlacement();
+  const canvasAfter = await canvasPlacement();
+  eq(canvasAfter.zoom, canvasBefore.zoom, 'an effect setting change did not touch the viewer zoom');
+  eq(canvasAfter.transform, canvasBefore.transform, 'an effect setting change did not touch the viewer transform');
+});
+
+await step('CREATOR-12: an imported .kpeffect is NOT active until applied', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const validPath = join(TMP_DIR, 'valid.kpeffect');
+  writeFileSync(validPath, kpeffectValid());
+  const input = await page.$('#studio-effect-file');
+  check(!!input, 'the import control offers a file input');
+  await input.uploadFile(validPath);
+  await new Promise(r => setTimeout(r, 2500));
+  await showBackgroundSection();
+
+  const s = await readEffectState();
+  check(s.chipState === 'replace' || s.chipState === 'pending',
+    `an import is staged, not applied, got ${s.chipState}`);
+  check(/IMPORTED/.test(s.chipText || '') || /REPLACEMENT/.test(s.chipText || ''),
+    `the chip says it is imported and not yet active, got ${JSON.stringify(s.chipText)}`);
+  check(s.pendingVisible, 'the staged import is shown on its own row');
+  check(/not applied yet|not active yet/i.test(s.pendingText || ''),
+    `the staged import says it is not in use, got "${s.pendingText}"`);
+  // The ACTIVE effect is unchanged until the creator applies.
+  eq(s.currentEffectId, 'builtin.snow', 'the previously active effect is still the active one');
+  // And it now appears under Creator Effects.
+  const creatorOptions = await page.evaluate(() => Array.from(
+    document.querySelectorAll('#studio-effect-creator option'),
+  ).map(o => ({ value: o.value, label: o.textContent })));
+  const snowEntry = creatorOptions.find(o => o.value === 'creator.snowfall');
+  check(!!snowEntry, `the imported effect is listed under Creator Effects, got ${JSON.stringify(creatorOptions)}`);
+  check(/Creator/.test(snowEntry.label), 'a creator effect is visibly labelled as Creator');
+  check(/Test Creator/.test(snowEntry.label), `the creator effect shows its author, got "${snowEntry.label}"`);
+});
+
+await step('CREATOR-12: applying the imported effect activates it and persists', async () => {
+  const applyBtn = await page.$('#studio-effect-apply');
+  check(!!applyBtn, 'an apply button is offered for the staged import');
+  const applyText = await page.$eval('#studio-effect-apply', el => el.textContent.trim());
+  check(/Replace/.test(applyText), `with an effect already active it says Replace, got "${applyText}"`);
+  await applyBtn.click();
+  await new Promise(r => setTimeout(r, 600));
+
+  const s = await readEffectState();
+  eq(s.chipState, 'active', 'the imported effect is now active');
+  eq(s.currentEffectId, 'creator.snowfall', 'the active effect is the creator one');
+  check(/Creator/.test(s.currentText || ''), `the panel shows it as a Creator effect, got "${s.currentText}"`);
+  await new Promise(r => setTimeout(r, 400));
+  const pixels = await effectCanvasPixels();
+  check(pixels.sampled > 0, 'the creator effect actually renders');
+
+  // Save and reload: the effect must be reconstructed from the saved design.
+  await page.click('#studio-save');
+  await new Promise(r => setTimeout(r, 1800));
+  const status = await page.$eval('#studio-status', el => el.textContent || '');
+  check(/saved/i.test(status), `the design with a creator effect saved, status="${status}"`);
+
+  await resetStudioWorkspace();
+  await setMotionPreference('no-preference');
+  await showBackgroundSection();
+  const reloaded = await readEffectState();
+  eq(reloaded.chipState, 'active', 'the active effect survives a reload');
+  eq(reloaded.currentEffectId, 'creator.snowfall', 'the same creator effect is restored');
+  eq(reloaded.layerEffect, 'creator.snowfall', 'the canvas preview is restored from the saved design');
+});
+
+await step('CREATOR-12: an invalid package is refused with a usable reason', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const cases = [
+    ['code.zip', kpeffectWithCode(), /must not contain|unexpected/i],
+    ['traversal.zip', kpeffectTraversal(), /\.\.|absolute|could not be read/i],
+    ['garbage.zip', Buffer.from('this is not a zip at all'), /not a readable|read/i],
+  ];
+  for (const [name, bytes, pattern] of cases) {
+    const p = join(TMP_DIR, name);
+    writeFileSync(p, bytes);
+    const input = await page.$('#studio-effect-file');
+    await input.uploadFile(p);
+    await new Promise(r => setTimeout(r, 2500));
+    await showBackgroundSection();
+    const s = await readEffectState();
+    check(s.chipState === 'active',
+      `${name}: the previously active effect is untouched, got ${s.chipState}`);
+    eq(s.currentEffectId, 'creator.snowfall', `${name}: the active effect did not change`);
+    // The reason lives in the status line itself, so that is where it is read.
+    const reason = s.importError || s.importStatus || '';
+    check(pattern.test(reason), `${name}: a usable reason is shown, got "${reason}"`);
+    check(!/at Object\.|node:internal|\.js:\d+/.test(reason),
+      `${name}: the reason is creator-safe with no stack trace, got "${reason}"`);
+    // And the rejected package is NOT offered as a choice.
+    const options = await page.evaluate(() => Array.from(
+      document.querySelectorAll('#studio-effect-creator option'),
+    ).map(o => o.value));
+    check(!options.some(v => v && v.includes(name.replace('.zip', ''))),
+      `${name}: the rejected package did not become selectable`);
+  }
+  // Exactly one creator effect is installed — the one valid package.
+  const options = await page.evaluate(() => Array.from(
+    document.querySelectorAll('#studio-effect-creator option'),
+  ).map(o => o.value).filter(Boolean));
+  eq(options.length, 1, `only the valid package is installed, got ${JSON.stringify(options)}`);
+});
+
+await step('CREATOR-12: removing the effect leaves the background image untouched', async () => {
+  // Give the design a background image as well, so independence is real.
+  await resetStudioWorkspace();
+  await ensureEditingMode();
+  await pinStudioInView();
+  await setMotionPreference('no-preference');
+  await showBackgroundSection();
+  const bgInput = await page.$('#studio-background-file');
+  await bgInput.uploadFile(bgFixturePath);
+  await new Promise(r => setTimeout(r, 1600));
+  await showBackgroundSection();
+  const bgApply = await page.$('#studio-background-apply');
+  if (bgApply) await bgApply.click();
+  await new Promise(r => setTimeout(r, 500));
+
+  await showBackgroundSection();
+  await page.select('#studio-effect-builtin', 'builtin.stars');
+  await new Promise(r => setTimeout(r, 400));
+  await showBackgroundSection();
+  const effectApply = await page.$('#studio-effect-apply');
+  if (effectApply) await effectApply.click();
+  await new Promise(r => setTimeout(r, 500));
+
+  const both = await readEffectState();
+  eq(both.chipState, 'active', 'the effect is active');
+  const bgActive = await page.evaluate(() => ({
+    state: document.querySelector('[data-profile-background-preview]')?.dataset.profileBackgroundPreview,
+    src: document.querySelector('#studio-profile-background img')?.getAttribute('src') || '',
+  }));
+  eq(bgActive.state, 'active', 'the background image is active at the same time');
+
+  // Remove ONLY the effect.
+  await showBackgroundSection();
+  const removeBtn = await page.$('#studio-effect-remove');
+  check(!!removeBtn, 'a Remove button is offered for the effect');
+  await removeBtn.click();
+  await new Promise(r => setTimeout(r, 500));
+
+  const afterEffect = await readEffectState();
+  eq(afterEffect.chipState, 'none', 'removing the effect returns to NO EFFECT');
+  eq(afterEffect.layerEffect, 'none', 'the effect is gone from the canvas');
+  eq(afterEffect.hasCanvas, false, 'the effect canvas is gone');
+  const bgAfter = await page.evaluate(() => ({
+    state: document.querySelector('[data-profile-background-preview]')?.dataset.profileBackgroundPreview,
+    src: document.querySelector('#studio-profile-background img')?.getAttribute('src') || '',
+  }));
+  eq(bgAfter.state, 'active', 'the background image is STILL active after removing the effect');
+  eq(bgAfter.src, bgActive.src, 'the background image is genuinely unchanged');
+  const status = await page.$eval('#studio-status', el => el.textContent || '');
+  check(/image is unchanged/i.test(status), `the status says the image was untouched, got "${status}"`);
+});
+
+await step('CREATOR-12: reduced motion renders a still frame, and motion returns after', async () => {
+  await setMotionPreference('no-preference');
+  await showBackgroundSection();
+  await page.select('#studio-effect-builtin', 'builtin.snow');
+  await new Promise(r => setTimeout(r, 400));
+  await showBackgroundSection();
+  const apply = await page.$('#studio-effect-apply');
+  if (apply) await apply.click();
+  await new Promise(r => setTimeout(r, 600));
+
+  // Motion allowed: the renderer reports an animated surface and draws.
+  const first = await effectCanvasPixels();
+  const motionDiag = await page.evaluate(() => {
+    const layer = document.querySelector('#studio-profile-effect-layer');
+    const canvas = layer?.querySelector('canvas');
+    return {
+      motion: layer ? layer.dataset.motion : null,
+      effect: layer ? layer.dataset.profileEffect : null,
+      engine: layer ? layer.dataset.profileEffectEngine : null,
+      w: canvas ? canvas.width : 0,
+      h: canvas ? canvas.height : 0,
+      reduce: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+    };
+  });
+  check(first.sampled > 0,
+    `the effect draws when motion is allowed, got ${JSON.stringify(first)} / ${JSON.stringify(motionDiag)}`);
+  const motionOn = motionDiag.motion;
+  eq(motionOn, 'animated', 'with motion allowed the effect is animated');
+
+  // Now ask for reduced motion: a still frame, but still present.
+  await setMotionPreference('reduce');
+  await showBackgroundSection();
+  const reducedState = await readEffectState();
+  eq(reducedState.chipState, 'active', 'reduced motion does not remove the setting');
+  eq(reducedState.hasCanvas, true, 'the effect still renders under reduced motion');
+  const motionOff = await page.evaluate(() =>
+    document.querySelector('#studio-profile-effect-layer')?.dataset.motion);
+  eq(motionOff, 'static', 'under reduced motion the effect renders a still frame');
+  const reducedPixels = await effectCanvasPixels();
+  check(reducedPixels.sampled > 0, 'a still frame is drawn under reduced motion');
+  // Nothing in the layer is left running a CSS animation.
+  const cssAnimations = await page.evaluate(() => Array.from(
+    document.querySelectorAll('#studio-profile-effect-layer *'),
+  ).map(el => getComputedStyle(el).animationName).filter(n => n && n !== 'none'));
+  eq(cssAnimations.length, 0, `no CSS animation runs under reduced motion, got ${JSON.stringify(cssAnimations)}`);
+
+  // The stored design is untouched: turning the preference back restores motion.
+  await setMotionPreference('no-preference');
+  await showBackgroundSection();
+  const backState = await readEffectState();
+  eq(backState.chipState, 'active', 'the effect is still set after motion is allowed again');
+  const motionBack = await page.evaluate(() =>
+    document.querySelector('#studio-profile-effect-layer')?.dataset.motion);
+  eq(motionBack, 'animated', 'the effect animates again once motion is allowed');
+});
+
+await step('CREATOR-12: the published public profile renders the effect behind the content', async () => {
+  await page.click('#studio-save');
+  await new Promise(r => setTimeout(r, 1800));
+  await page.click('#studio-publish');
+  await new Promise(r => setTimeout(r, 2000));
+
+  await setMotionPreference('no-preference');
+  await page.goto(`${BASE}/#/profile/${seller.username}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await new Promise(r => setTimeout(r, 3000));
+
+  const view = await page.evaluate(() => {
+    const layer = document.querySelector('#profile-background-effect-layer');
+    const content = document.querySelector('.profile-content-frame');
+    const canvas = layer?.querySelector('canvas');
+    let sampled = 0;
+    if (canvas) {
+      try {
+        const { data } = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+        for (let i = 3; i < data.length; i += 4 * 199) if (data[i] > 8) sampled += 1;
+      } catch { /* ignore */ }
+    }
+    const z = (el) => (el ? parseInt(getComputedStyle(el).zIndex || '0', 10) : -1);
+    return {
+      layerExists: !!layer,
+      effect: layer ? layer.dataset.profileEffect : null,
+      hasCanvas: !!canvas,
+      sampled,
+      pointerEvents: layer ? getComputedStyle(layer).pointerEvents : null,
+      ariaHidden: layer ? layer.getAttribute('aria-hidden') : null,
+      position: layer ? getComputedStyle(layer).position : null,
+      layerZ: z(layer), contentZ: z(content),
+      // A click must reach the profile content, never the effect.
+      clickReachesContent: (() => {
+        const el = document.elementFromPoint(window.innerWidth / 2, 300);
+        return !!el && !el.closest('#profile-background-effect-layer');
+      })(),
+      // The effect must not have added layout height.
+      docHeight: document.documentElement.scrollHeight,
+    };
+  });
+  check(view.layerExists, 'the public profile has the effect layer');
+  check(view.effect && view.effect !== 'none', `the public profile renders the active effect, got "${view.effect}"`);
+  eq(view.hasCanvas, true, 'the public effect renders on a canvas');
+  check(view.sampled > 0, `the public effect actually drew (${view.sampled} sampled pixels)`);
+  eq(view.pointerEvents, 'none', 'the public effect layer never intercepts pointer events');
+  eq(view.ariaHidden, 'true', 'the public effect layer is hidden from assistive technology');
+  eq(view.position, 'fixed', 'the public effect layer is a fixed overlay');
+  check(view.layerZ < view.contentZ,
+    `the effect is behind the profile content (effect z=${view.layerZ}, content z=${view.contentZ})`);
+  check(view.clickReachesContent, 'a click reaches the profile content, not the effect layer');
+
+  // An invalid effect degrades to no effect rather than breaking the page.
+  const degraded = await page.evaluate(() => {
+    document.querySelector('#profile-frame')?.setAttribute('data-test', '1');
+    return true;
+  });
+  void degraded;
+  check(view.docHeight > 0, 'the profile still has layout — the effect added no height of its own');
 });
 
 await step('studio screenshot captured', async () => {

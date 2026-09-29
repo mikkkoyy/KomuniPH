@@ -1256,6 +1256,51 @@ export function initDatabase() {
     `);
   } catch (err) { /* safe no-op */ }
 
+  // CREATOR-12: creator-installed Profile Background Effects (.kpeffect packages).
+  //
+  // A DEDICATED table rather than a new creator_assets asset_type, for two
+  // reasons:
+  //   1. creator_assets.asset_type has a CHECK constraint that would need a full
+  //      table rebuild to widen, and a marketplace asset is monetised while an
+  //      installed effect is not (CREATOR-12 introduces no Coin purchases).
+  //   2. an effect carries a validated, on-disk package (manifest, definition
+  //      and re-encoded assets) and a distinct lifecycle. Folding that into the
+  //      asset blob would mean re-validating a marketplace row to render a
+  //      background layer.
+  //
+  // `status` is the effect lifecycle: uploaded -> validated -> installed, with
+  // published/archived as the terminal states. Only 'published' effects are
+  // selectable in Creator Studio and renderable on a public profile.
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS creator_effects (
+        id TEXT PRIMARY KEY,
+        creator_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        effect_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        author TEXT NOT NULL DEFAULT '',
+        version TEXT NOT NULL DEFAULT '1.0.0',
+        source TEXT NOT NULL DEFAULT 'creator' CHECK (source IN ('builtin','creator')),
+        status TEXT NOT NULL DEFAULT 'installed'
+          CHECK (status IN ('uploaded','validated','installed','published','archived')),
+        engine TEXT NOT NULL,
+        manifest_json TEXT NOT NULL,
+        definition_json TEXT NOT NULL,
+        storage_dir TEXT NOT NULL,
+        preview_path TEXT,
+        thumbnail_path TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        published_at TEXT,
+        archived_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_creator_effects_creator_status
+        ON creator_effects(creator_user_id, status);
+      CREATE INDEX IF NOT EXISTS idx_creator_effects_effect_id
+        ON creator_effects(effect_id, status);
+    `);
+  } catch (err) { /* safe no-op */ }
+
 // CREATOR-03: Normal Marketplace listings table.
 // Sellers create product listings (physical, digital, services, etc.)
 // Lifecycle: draft -> published -> archived. Only published listings

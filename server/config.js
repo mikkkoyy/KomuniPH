@@ -57,6 +57,10 @@ const config = {
     profileDir: process.env.UPLOAD_PROFILE_DIR || './uploads/profile',
     backgroundDir: process.env.UPLOAD_BACKGROUND_DIR || './uploads/backgrounds',
     creatorDir: process.env.UPLOAD_CREATOR_DIR || './uploads/creator',
+    // CREATOR-12: isolated storage for installed .kpeffect packages. Kept
+    // separate from creatorDir so a background effect can never be written into
+    // (or served from) the image upload area.
+    creatorEffectDir: process.env.UPLOAD_CREATOR_EFFECT_DIR || './uploads/creator-effects',
     creatorMaxWidth: parseInt(process.env.UPLOAD_CREATOR_MAX_WIDTH || '1600', 10),
     creatorMaxHeight: parseInt(process.env.UPLOAD_CREATOR_MAX_HEIGHT || '1600', 10),
     maxWidth: parseInt(process.env.UPLOAD_PROFILE_MAX_WIDTH || '1024', 10),

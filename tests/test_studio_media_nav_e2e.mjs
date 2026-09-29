@@ -11,12 +11,29 @@
  * Throwaway SQLite database under the OS temp directory.
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
 import puppeteer from 'puppeteer';
+// The client's own registries, so the expectations below are read from the
+// implementation instead of being hard-coded counts that drift when the real
+// profile structure changes.
+import {
+  guidePattern,
+  guideSectionLabel,
+  DEFAULT_GUIDE_PATTERN,
+  PROFILE_MAIN_SECTIONS,
+  PROFILE_SIDEBAR_SECTIONS,
+} from '../web/js/profileDesign.js';
+
+/** How many cards the current default guide has — one per real profile module. */
+const DEFAULT_GUIDE_SIZE = guidePattern(DEFAULT_GUIDE_PATTERN).cards.length;
+/** Every real profile module the Profile Viewer must draw. */
+const REAL_PROFILE_MODULES = [...PROFILE_MAIN_SECTIONS, ...PROFILE_SIDEBAR_SECTIONS];
+/** The upper-case section label the guide card renders for a module. */
+const moduleLabel = (id) => guideSectionLabel(id).toUpperCase();
 
 // ── Environment (MUST be set before any server/config import) ──────────────
 const TMP_DIR = mkdtempSync(join(tmpdir(), 'komuniph-e2e-'));
@@ -28,9 +45,31 @@ process.env.CORS_ORIGINS = 'http://127.0.0.1';
 process.env.HOST = '127.0.0.1';
 process.env.DEV_ADMIN_ENABLED = 'true';
 process.env.DEV_ADMIN_USERNAME = 'e2e-admin';
-process.env.UPLOAD_CREATOR_DIR = join(TMP_DIR, 'uploads-creator'); // isolate test uploads
+// NOTE: UPLOAD_CREATOR_DIR is deliberately NOT redirected to a temp directory.
+// Static uploads are served from a fixed <repo>/uploads root, while the uploader
+// writes to config.upload.creatorDir — so pointing the uploader anywhere else
+// makes every uploaded image a 404 in the browser, and no test can then assert
+// that an image really renders, resizes, or keeps its source. Uploads therefore
+// land in uploads/creator/ where the server can serve them, and every file this
+// run creates is deleted again before exit (see CREATOR_UPLOAD_DIR below) so the
+// working tree is left clean.
 
 const BASE = `http://127.0.0.1:${process.env.PORT}`;
+
+// Snapshot uploads/creator so the files this run creates can be removed again
+// and the git working tree is left exactly as it was found.
+const CREATOR_UPLOAD_DIR = resolve('uploads', 'creator');
+const uploadsBefore = new Set(
+  existsSync(CREATOR_UPLOAD_DIR) ? readdirSync(CREATOR_UPLOAD_DIR) : [],
+);
+function cleanupUploads() {
+  if (!existsSync(CREATOR_UPLOAD_DIR)) return;
+  for (const name of readdirSync(CREATOR_UPLOAD_DIR)) {
+    if (uploadsBefore.has(name)) continue;
+    try { rmSync(join(CREATOR_UPLOAD_DIR, name), { force: true }); } catch { /* best effort */ }
+  }
+}
+process.on('exit', cleanupUploads);
 
 // Hard watchdog: never hang the runner indefinitely (a hung browser close
 // or navigation reports code 3 instead of blocking forever).
@@ -54,6 +93,11 @@ async function step(name, fn) {
   }
 }
 function check(cond, msg = 'condition failed') { if (!cond) throw new Error(msg); }
+function eq(actual, expected, msg = '') {
+  if (actual !== expected) {
+    throw new Error(`${msg} expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+  }
+}
 
 async function api(method, path, { token, body } = {}) {
   const res = await fetch(`${BASE}${path}`, {
@@ -88,6 +132,12 @@ const seller = { username: 'e2e_seller01', email: 'e2e_seller01@test.local', pas
 // Upload fixture for the file input.
 const fixturePath = join(TMP_DIR, 'upload-fixture.png');
 await sharp({ create: { width: 120, height: 120, channels: 3, background: { r: 30, g: 140, b: 130 } } }).png().toFile(fixturePath);
+
+// CREATOR-10 fixture for the Profile Background and image-component uploads.
+// Deliberately a different, larger picture so a test can tell the background
+// apart from a component image, and so resizing it is visibly meaningful.
+const bgFixturePath = join(TMP_DIR, 'background-fixture.png');
+await sharp({ create: { width: 400, height: 300, channels: 3, background: { r: 200, g: 90, b: 40 } } }).png().toFile(bgFixturePath);
 
 // ── Browser ────────────────────────────────────────────────────────────────
 let browser;
@@ -169,6 +219,7 @@ await step('wallet shows Back to Profile + Gift', async () => {
 await step('studio workspace is expanded with upload control', async () => {
   await page.goto(`${BASE}/#/creator-studio`, { waitUntil: 'domcontentloaded', timeout: 30000 });
   try {
+    await waitForStudioReady();
     await page.waitForSelector('#studio-content-list [data-add="image"]', { timeout: 25000 });
   } catch (err) {
     await dumpState('studio-wait');
@@ -706,37 +757,175 @@ await step('CREATOR-08: zoom and reset change only the view, never the design', 
 // still be settling when the promise resolves, and a point measured mid-scroll
 // is stale by the time the real pointer event is dispatched — which would make
 // the press land on empty canvas and pan the viewer instead of moving the card.
-const scrollCardIntoView = (index) => page.evaluate((i) => {
-  document.querySelector('#studio-viewer').scrollIntoView({ block: 'center', inline: 'center' });
-  document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide_card"]')[i]
-    ?.scrollIntoView({ block: 'center', inline: 'center' });
+const scrollCardIntoView = async () => { /* replaced by prepareStableCanvas() */ };
+
+/**
+ * Read a guide card's screen rect, but only once it has STOPPED moving.
+ *
+ * Any in-flight canvas re-render (which re-clamps the pan) can still be settling
+ * when the previous promise resolves. A point measured while the canvas is still
+ * shifting is stale by the time the real pointer event is dispatched — the press
+ * then lands on empty canvas and pans the viewer instead of moving the card.
+ * Polling until two consecutive reads agree makes the point safe to use.
+ *
+ * It deliberately does NOT scroll anything: the studio CLIPS the canvas and pans
+ * it with a transform, so scrolling the (overflow:hidden) container would
+ * desynchronise it from the pan and make things worse. prepareStableCanvas()
+ * brings the whole design into view up front instead.
+ */
+const settledCardRect = (index) => page.evaluate(async (i) => {
+  const all = () => document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide_card"]');
+  const read = () => {
+    const el = all()[i];
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { l: r.left, t: r.top, w: r.width, h: r.height };
+  };
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  let prev = null;
+  for (let n = 0; n < 40; n += 1) {
+    const next = read();
+    if (next) {
+      if (prev && next.l === prev.l && next.t === prev.t && next.w === prev.w && next.h === prev.h) {
+        return next;
+      }
+      prev = next;
+    }
+    await sleep(50);
+  }
+  return prev;
 }, index);
+
+/**
+ * Put the viewer into a known, stable layout before a pointer gesture.
+ *
+ * scrollIntoView() is deliberately NOT used: the studio clips the canvas and pans
+ * it with its own transform, and a page scroll shifts every client coordinate.
+ *
+ * Instead this uses the app's own FIT control (CREATOR-10), which scales the
+ * whole 960x1200 design down until all of it — the main column AND the sidebar —
+ * sits inside the viewer, then re-centres it. That is exactly the state a
+ * creator wants before editing, and it guarantees the target is on screen
+ * instead of clipped past the right-hand edge of a narrower centre column. The
+ * page scroll is pinned to zero and the canvas transform is awaited until it
+ * stops changing, so a point measured now is still the same point when the
+ * pointer is pressed.
+ *
+ * Fit is viewer state only: it cannot move a component or dirty the design.
+ */
+/**
+ * Pin the scroll so the whole Profile Viewer — and therefore the whole fitted
+ * design — is inside the viewport.
+ *
+ * Used for CANVAS gestures. After Fit the design is scaled to fit the viewer, so
+ * the viewer being fully visible is exactly what makes every guide card and
+ * component reachable. Centres the workspace on the viewer rather than the whole
+ * layout, whose middle can sit far below a top-of-canvas guide card.
+ */
+async function pinCanvasInView() {
+  await page.evaluate(() => {
+    const viewer = document.querySelector('#studio-viewer');
+    if (viewer) {
+      const r = viewer.getBoundingClientRect();
+      // Keep the viewer's top just under the top of the window.
+      window.scrollBy(0, r.top - 6);
+    }
+    const c = document.querySelector('#studio-canvas-scroll');
+    if (c) { c.scrollTop = 0; c.scrollLeft = 0; }
+  });
+  await new Promise(r => setTimeout(r, 200));
+}
+
+/**
+ * Bring the Profile Viewer back to a workable height for canvas gestures.
+ *
+ * An earlier step deliberately drags the viewer's bottom boundary down to prove
+ * the height is not capped by the window, which leaves the viewer at its 4000px
+ * ceiling. The canvas is then centred inside that enormous viewer, so design
+ * content — including a top-of-canvas guide card — sits far below the visible
+ * window and cannot be pressed at all.
+ *
+ * This drags the real height grip back down to a sensible editing size, in
+ * repeated steps because one drag can only move by the pointer delta. It is
+ * viewer state only: the design, its geometry and its dirty flag are untouched.
+ */
+async function normaliseViewerHeight(target = 1000) {
+  for (let i = 0; i < 8; i += 1) {
+    const h = await page.evaluate(() => {
+      const v = document.querySelector('#studio-viewer');
+      return v ? Math.round(v.getBoundingClientRect().height) : 0;
+    });
+    if (h > 0 && h <= target) return h;
+    if (!(h > 0)) return 0;
+    await pinStudioInView();
+    const grip = await heightGripPoint();
+    if (!grip) return h;
+    const over = h - target;
+    // Dragging the grip UP shrinks the viewer; one drag moves at most 700px.
+    await dragMouse(grip, { x: grip.x, y: grip.y - Math.min(over, 700) });
+    await new Promise(r => setTimeout(r, 250));
+  }
+  return 0;
+}
+
+const prepareStableCanvas = async () => {
+  await pinStudioInView();
+  await normaliseViewerHeight();
+  // Invoke the Fit control directly on the element rather than clicking it by
+  // screen coordinates. The zoom bar is sticky, so after an arbitrary earlier
+  // scroll it can sit under another element and a coordinate click is silently
+  // swallowed — leaving the design at 100% and a card off-screen. A real
+  // hit-tested click on Fit is asserted separately in the CREATOR-10 steps.
+  const fitResult = await page.evaluate(async () => {
+    const read = () => document.querySelector('#studio-zoom-readout')?.textContent.trim();
+    const before = read();
+    document.querySelector('#studio-zoom-fit')?.click();
+    await new Promise(r => setTimeout(r, 200));
+    return { before, after: read() };
+  });
+  await new Promise(r => setTimeout(r, 200));
+  await pinCanvasInView();
+  return fitResult;
+};
+
+// Look a guide card up by its section LABEL rather than by position: bringing a
+// card to the front re-orders the DOM, so a positional index goes stale.
+const guideCardIndex = async (section) => (await guideCards()).findIndex(c => c.section === section);
+const guideCardBySection = async (section) => (await guideCards()).find(c => c.section === section) || null;
 
 const guideCardBodyPoint = async (index = 0) => {
   await scrollCardIntoView(index);
-  await new Promise(r => setTimeout(r, 200));
-  return page.evaluate((i) => {
+  const box = await settledCardRect(index);
+  if (!box) return null;
+  return page.evaluate(([b, i]) => {
     const el = document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide_card"]')[i];
     if (!el) return null;
-    const r = el.getBoundingClientRect();
-    const x = r.left + r.width / 2;
-    const y = r.top + r.height / 2;
+    const x = b.l + b.w / 2;
+    const y = b.t + b.h / 2;
     const top = document.elementFromPoint(x, y);
+    const viewer = document.querySelector('#studio-viewer')?.getBoundingClientRect();
     return {
       x, y,
+      rect: b,
+      inView: x >= 0 && y >= 0 && x <= window.innerWidth && y <= window.innerHeight,
+      windowH: window.innerHeight,
+      viewer: viewer ? { t: Math.round(viewer.top), b: Math.round(viewer.bottom) } : null,
+      zoom: document.querySelector('#studio-zoom-readout')?.textContent.trim(),
+      transform: document.querySelector('#studio-zoom-layer')?.style.transform,
       section: el.querySelector('.studio-guide-card-label')?.textContent || '',
       // Must be THIS card, not a different guide card stacked over it.
       hitsThis: !!top && top.closest('[data-comp-type="profile_guide_card"]') === el,
       topEl: top ? `${top.tagName.toLowerCase()}.${String(top.className || '').split(' ')[0] || '?'}` : null,
     };
-  }, index);
+  }, [box, index]);
 };
 
 // A point at the centre of one of a guide card's resize handles.
 const guideCardHandlePoint = async (index, dir) => {
   await scrollCardIntoView(index);
-  await new Promise(r => setTimeout(r, 200));
-  return page.evaluate(([i, d]) => {
+  const box = await settledCardRect(index);
+  if (!box) return null;
+  return page.evaluate(([b, i, d]) => {
     const el = document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide_card"]')[i];
     if (!el) return null;
     const h = el.querySelector(`[data-resize="${d}"]`);
@@ -750,7 +939,7 @@ const guideCardHandlePoint = async (index, dir) => {
       isHandle: top === h,
       topEl: top ? `${top.tagName.toLowerCase()}.${String(top.className || '').split(' ')[0] || '?'}` : null,
     };
-  }, [index, dir]);
+  }, [box, index, dir]);
 };
 
 // Select a guide card in the Layers panel by its section label. The layer name is
@@ -830,6 +1019,113 @@ const ensureGuidePresent = async () => {
   await new Promise(r => setTimeout(r, 300));
 };
 
+/**
+ * Wait until the Creator Studio workspace is actually USABLE.
+ *
+ * The workspace is rendered hidden and only revealed once the page has finished
+ * loading the signed-in profile and the design list. Waiting merely for a node
+ * inside it is not enough: those nodes already exist in the hidden subtree, so
+ * `waitForSelector` returns immediately and the following measurements read a
+ * layout that has not been laid out yet — the grid still reports its specified
+ * `minmax(0px, 1fr)` instead of resolved pixels, and every column measures 0.
+ */
+async function waitForStudioReady() {
+  await page.waitForSelector('#studio-workspace:not([hidden])', { visible: true, timeout: 30000 });
+  await page.waitForFunction(() => {
+    const el = document.querySelector('.studio-layout');
+    if (!el) return false;
+    const cols = getComputedStyle(el).gridTemplateColumns;
+    // Fully laid out means three RESOLVED pixel tracks.
+    return !!cols && !cols.includes('minmax') && cols.trim().split(/\s+/).length === 3;
+  }, { timeout: 30000 });
+  await new Promise(r => setTimeout(r, 150));
+};
+
+/**
+ * Wait until a specific <img> in the viewer has actually decoded.
+ *
+ * An upload resolves over HTTP before the browser has necessarily decoded the
+ * file, so a naturalWidth read taken straight after the upload can still be 0.
+ */
+function waitForImage(selector, timeout = 8000) { return page.evaluate(async ([sel, ms]) => {
+  const sleep = (n) => new Promise(r => setTimeout(r, n));
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const img = document.querySelector(sel);
+    if (img && img.naturalWidth > 0) {
+      return { src: img.getAttribute('src') || '', naturalW: img.naturalWidth, naturalH: img.naturalHeight };
+    }
+    if (Date.now() > deadline) {
+      return { src: img?.getAttribute('src') || '', naturalW: img?.naturalWidth || 0, naturalH: img?.naturalHeight || 0, timedOut: true };
+    }
+    await sleep(100);
+  }
+}, [selector, timeout]);
+}
+
+/**
+ * Leave Preview mode, whatever state a previous step left the Studio in.
+ */
+async function ensureEditingMode() {
+  const inPreview = await page.evaluate(() => !!document.querySelector('#creator-studio.studio-preview-mode'));
+  if (!inPreview) return;
+  await page.click('#studio-preview-toggle');
+  await new Promise(r => setTimeout(r, 300));
+};
+
+/**
+ * Pin the page scroll so the Creator Studio workspace is laid out in a known
+ * place before any pointer gesture.
+ *
+ * Puppeteer auto-scrolls to whatever it clicks, so after a step that clicked a
+ * control low on the page the workspace can sit anywhere. Every coordinate below
+ * is a VIEWPORT coordinate, so a target that has been scrolled out of view is
+ * simply not painted and elementFromPoint() returns null.
+ *
+ * This centres the workspace rather than pinning it to the top: the column
+ * resizers span the full workspace height, so a handle's own CENTRE — the point
+ * every probe measures and presses — has to be on screen. A resizer extending
+ * past the top or bottom edge is fine and expected; only its centre matters.
+ */
+async function pinStudioInView() {
+  await page.evaluate(() => {
+    const layout = document.querySelector('#studio-layout');
+    if (layout) layout.scrollIntoView({ block: 'center', inline: 'nearest' });
+    const c = document.querySelector('#studio-canvas-scroll');
+    if (c) { c.scrollTop = 0; c.scrollLeft = 0; }
+  });
+  await new Promise(r => setTimeout(r, 200));
+};
+
+/**
+ * Deselect the current component through the app's own Escape handler, so the
+ * Properties panel shows the canvas-level controls (where the Profile Background
+ * lives) rather than a component's fields.
+ */
+async function deselectComponent() {
+  await page.evaluate(() => document.activeElement?.blur?.());
+  await page.keyboard.press('Escape');
+  await new Promise(r => setTimeout(r, 250));
+  const stillSelected = await page.evaluate(() =>
+    !!document.querySelector('#studio-canvas-inner .studio-selected'));
+  if (stillSelected) {
+    // Fall back to clicking genuinely empty canvas well outside any component.
+    await page.evaluate(() => {
+      const doc = document.querySelector('#studio-canvas-document');
+      const hit = document.elementFromPoint(
+        doc.getBoundingClientRect().left + 6,
+        doc.getBoundingClientRect().bottom - 6,
+      );
+      if (hit) {
+        const o = { bubbles: true, clientX: doc.getBoundingClientRect().left + 6, clientY: doc.getBoundingClientRect().bottom - 6, button: 0, pointerId: 1 };
+        hit.dispatchEvent(new PointerEvent('pointerdown', o));
+        hit.dispatchEvent(new PointerEvent('pointerup', o));
+      }
+    });
+    await new Promise(r => setTimeout(r, 250));
+  }
+};
+
 await step('CREATOR-09: a new design starts with the default set of guide cards', async () => {
   // The design under edit is the one seeded by the harness; make sure we are
   // looking at a guide set rather than whatever a previous step left behind.
@@ -839,16 +1135,31 @@ await step('CREATOR-09: a new design starts with the default set of guide cards'
 
   const cards = await guideCards();
   const sections = cards.map(c => c.section);
-  // Only REAL KomuniPH profile sections, labelled in upper case.
-  const expected = ['PROFILE PHOTO', 'NAME', 'ALIAS', 'BIO', 'PERSONAL INFORMATION', 'GALLERY', 'TESTIMONIALS', 'COMMUNITIES'];
+  // CREATOR-10: the default guide IS the real public profile — the main column
+  // and one independent card per sidebar module. Read the expectations from the
+  // client's own registries so they cannot drift from the implementation.
+  const expected = REAL_PROFILE_MODULES.map(moduleLabel);
   for (const want of expected) {
     check(sections.includes(want), `the guide includes a "${want}" card, got ${JSON.stringify(sections)}`);
   }
+  eq(sections.length, expected.length, `the default guide is one card per real module, got ${JSON.stringify(sections)}`);
+
   // Every card is a plausible box on the 960x1200 design canvas.
   for (const c of cards) {
     check(c.width > 0 && c.height > 0, `card ${c.section} has a real size`);
     check(c.x >= 0 && c.y >= 0 && c.x + c.width <= 960 && c.y + c.height <= 1200,
       `card ${c.section} sits inside the design canvas`);
+  }
+  // CREATOR-10: the sidebar cards are INDEPENDENT — no two share a box, and the
+  // Gallery is a sidebar card rather than a main-column one below Testimonials.
+  const boxes = new Set(cards.map(c => `${c.x},${c.y},${c.width},${c.height}`));
+  eq(boxes.size, cards.length, 'every guide card has its own distinct box');
+  for (const label of ['FRIEND SPACE', 'PHOTO GALLERY', 'VIDEO BOX', 'MUSIC', 'SCRAPS']) {
+    const card = cards.find(c => c.section === label);
+    check(!!card, `the "${label}" card exists`);
+    // The real profile layout puts the sidebar at x=640, right of the 560-wide
+    // main column, so every sidebar card must start at or beyond it.
+    check(card.x >= 640, `the "${label}" card is in the sidebar, got x=${card.x}`);
   }
   // No duplicate sections — one card per section.
   check(new Set(sections).size === sections.length, `no duplicate guide cards, got ${JSON.stringify(sections)}`);
@@ -903,61 +1214,67 @@ await step('CREATOR-09: the design canvas size is stated and tracks the real can
 
 await step('CREATOR-09: a guide card can be selected, moved and resized with the mouse', async () => {
   // Move: a real pointer drag on the card's own body.
-  const before = (await guideCards())[0];
-  const body = await guideCardBodyPoint(0);
+  const PHOTO = 'PROFILE PHOTO';
+  const before = await guideCardBySection(PHOTO);
+  await prepareStableCanvas();
+  const body = await guideCardBodyPoint(await guideCardIndex(PHOTO));
   check(!!body, 'a guide card body point is available');
-  check(body.hitsThis, `the point hits the intended ${body.section} card, got ${body.topEl}`);
-  await page.mouse.move(body.x, body.y);
-  const atPress = await page.evaluate(([x, y]) => {
-    const el = document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide_card"]')[0];
-    const r = el.getBoundingClientRect();
-    const top = document.elementFromPoint(x, y);
-    return {
-      measuredCardRect: { l: r.left, t: r.top, w: r.width, h: r.height },
-      topAtMeasuredPoint: top ? `${top.tagName}.${String(top.className || '').split(' ')[0]}` : null,
-      isCard: !!top && top.closest('[data-comp-type="profile_guide_card"]') === el,
-      scrollTop: document.querySelector('#studio-canvas-scroll')?.scrollTop,
-    };
-  }, [body.x, body.y]);
-  await page.mouse.down();
-  await page.mouse.move(body.x + 60, body.y + 40, { steps: 12 });
-  await page.mouse.up();
-  await new Promise(r => setTimeout(r, 300));
-  const afterMove = (await guideCards())[0];
-  const statusNow = await page.$eval('#studio-status', el => el.textContent).catch(() => '?');
+  check(body.hitsThis,
+    `the point hits the intended ${body.section} card, got topEl=${body.topEl}`
+    + ` point=(${Math.round(body.x)},${Math.round(body.y)}) inView=${body.inView} winH=${body.windowH}`
+    + ` viewer=${JSON.stringify(body.viewer)} zoom=${body.zoom} transform=${body.transform}`
+    + ` rect=${JSON.stringify(body.rect)}`);
+  await dragMouse(body, { x: body.x + 60, y: body.y + 40 });
+  const afterMove = await guideCardBySection(PHOTO);
   check(afterMove.x > before.x && afterMove.y > before.y,
-    `dragging a guide card moves it (${before.section} ${before.x},${before.y} -> ${afterMove.x},${afterMove.y}) status="${statusNow}" atPress=${JSON.stringify(atPress)}`);
+    `dragging a guide card moves it (${before.x},${before.y} -> ${afterMove.x},${afterMove.y})`);
   check(afterMove.selected, 'the dragged card is the selected one');
 
-  // Resize: a real pointer drag on the card's EAST handle changes only width.
-  const sized = (await guideCards())[0];
-  const handle = await guideCardHandlePoint(0, 'e');
+  // Resize with real pointer drags. The default guide set packs the cards with
+  // small gaps, so a card that has been moved or grown can be overlapped by the
+  // next one, and an overlapped card's handles are correctly hidden behind that
+  // neighbour. Bring the card to the front first — the same thing a creator
+  // would do — so its handles are genuinely reachable.
+  await selectGuideCardInLayers(PHOTO);
+  await new Promise(r => setTimeout(r, 250));
+  await page.evaluate(() => {
+    const row = document.querySelector('#studio-layers-list .studio-layer-selected');
+    const btn = row && row.querySelector('.studio-layer-action[data-action="front"]');
+    if (btn) btn.click();
+  });
+  await new Promise(r => setTimeout(r, 300));
+
+  const sized = await guideCardBySection(PHOTO);
+  const handle = await guideCardHandlePoint(await guideCardIndex(PHOTO), 'e');
   check(!!handle, 'the guide card exposes an east resize handle');
   check(handle.isHandle, `the east handle is the hit target, got ${handle.topEl}`);
   await dragMouse(handle, { x: handle.x + 80, y: handle.y });
-  const afterResize = (await guideCards())[0];
+  const afterResize = await guideCardBySection(PHOTO);
   check(afterResize.width > sized.width,
     `dragging the east handle widened the card (${sized.width} -> ${afterResize.width})`);
   check(afterResize.height === sized.height, `an edge handle changed only the width, height ${sized.height} -> ${afterResize.height}`);
 
   // A CORNER handle changes both axes.
-  const beforeCorner = (await guideCards())[0];
-  const corner = await guideCardHandlePoint(0, 'se');
+  const beforeCorner = await guideCardBySection(PHOTO);
+  const corner = await guideCardHandlePoint(await guideCardIndex(PHOTO), 'se');
   check(!!corner?.isHandle, `the south-east handle is the hit target, got ${corner && corner.topEl}`);
   await dragMouse(corner, { x: corner.x + 60, y: corner.y + 40 });
-  const afterCorner = (await guideCards())[0];
+  const afterCorner = await guideCardBySection(PHOTO);
   check(afterCorner.width > beforeCorner.width && afterCorner.height > beforeCorner.height,
     `dragging the corner handle grew both axes (${beforeCorner.width}x${beforeCorner.height} -> ${afterCorner.width}x${afterCorner.height})`);
 });
 
 await step('CREATOR-09: guide card Properties stay in step with the card', async () => {
-  await selectGuideCardInLayers('GALLERY');
+  await prepareStableCanvas();
+  await selectGuideCardInLayers('PHOTO GALLERY');
   await new Promise(r => setTimeout(r, 250));
 
+  // Recompute the index AFTER the canvas is prepared: bringing a card to the
+  // front re-orders the DOM, so an index taken earlier can be stale.
   const shown = await guideCards();
-  const galleryIndex = shown.findIndex(c => c.section === 'GALLERY');
+  const galleryIndex = shown.findIndex(c => c.section === 'PHOTO GALLERY');
   const gallery = shown[galleryIndex];
-  check(!!gallery, 'a Gallery guide card exists');
+  check(!!gallery, 'a Photo Gallery guide card exists');
 
   // The Properties panel shows the card's real geometry.
   for (const [field, value] of [['X', gallery.x], ['Y', gallery.y], ['Width', gallery.width], ['Height', gallery.height]]) {
@@ -972,7 +1289,12 @@ await step('CREATOR-09: guide card Properties stay in step with the card', async
   check(afterField.width === 300, `the Width field resized the card, got ${afterField.width}`);
 
   // And dragging the card updates the Properties field (CREATOR-09 §12).
-  const body = await guideCardBodyPoint(galleryIndex);
+  await prepareStableCanvas();
+  await selectGuideCardInLayers('PHOTO GALLERY');
+  await new Promise(r => setTimeout(r, 250));
+  const body = await guideCardBodyPoint(await guideCardIndex('PHOTO GALLERY'));
+  check(!!body?.hitsThis,
+    `the Gallery card body is reachable, got ${body && body.topEl} cards=${await guideCardCount()} trace=${JSON.stringify(body && body.trace)}`);
   await dragMouse(body, { x: body.x + 40, y: body.y + 25 });
   const afterDrag = (await guideCards())[galleryIndex];
   const shownX = Number(await propValue('X'));
@@ -1001,6 +1323,7 @@ await step('CREATOR-09: a guide card can be deleted, and deletion survives reope
   const designId = await page.$eval('#studio-design-select', el => el.value);
   await page.reload({ waitUntil: 'networkidle0' });
   await page.waitForSelector('#studio-design-select', { timeout: 15000 });
+  await waitForStudioReady();
   await new Promise(r => setTimeout(r, 1200));
   await page.select('#studio-design-select', designId);
   await new Promise(r => setTimeout(r, 1500));
@@ -1020,12 +1343,12 @@ await step('CREATOR-09: Reset Guide restores exactly one default set', async () 
     }
   }
   const damaged = await guideCardCount();
-  check(damaged < 8, `some cards are missing before the reset (${damaged})`);
+  check(damaged < DEFAULT_GUIDE_SIZE, `some cards are missing before the reset (${damaged} of ${DEFAULT_GUIDE_SIZE})`);
 
   await page.click('#studio-guide-reset');
   await new Promise(r => setTimeout(r, 400));
   const restored = await guideCards();
-  check(restored.length === 8, `reset restored exactly one default set, got ${restored.length} cards`);
+  eq(restored.length, DEFAULT_GUIDE_SIZE, `reset restored exactly one default set, got ${restored.length} cards`);
   const sections = restored.map(c => c.section);
   check(new Set(sections).size === sections.length, `reset created no duplicates, got ${JSON.stringify(sections)}`);
   check(sections.includes('BIO') && sections.includes('ALIAS') && sections.includes('TESTIMONIALS'),
@@ -1048,6 +1371,609 @@ await step('CREATOR-09: guide cards never appear in Preview', async () => {
   await page.click('#studio-preview-toggle');
   await new Promise(r => setTimeout(r, 300));
   check(await guideCardCount() > 0, 'leaving Preview brings the guide cards back');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CREATOR-10 — the Profile Viewer shows the REAL profile, the outer Profile
+// Background, and direct image drag/resize in DESIGN coordinates.
+// ═══════════════════════════════════════════════════════════════════════════
+
+await step('CREATOR-10: the Profile Viewer shows the real profile layout', async () => {
+  await ensureGuidePresent();
+  const view = await page.evaluate(() => {
+    const q = (s) => document.querySelector(s);
+    const box = (el) => {
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(parseFloat(el.style.left)), y: Math.round(parseFloat(el.style.top)), w: Math.round(r.width), h: Math.round(r.height) };
+    };
+    const skeleton = q('#studio-profile-skeleton');
+    return {
+      exists: !!skeleton,
+      // The outer Profile Background area.
+      background: box(q('#studio-profile-skeleton [data-skeleton="background"]')),
+      // The two real columns, drawn as SEPARATE areas.
+      main: box(q('#studio-profile-skeleton [data-skeleton="main"]')),
+      sidebar: box(q('#studio-profile-skeleton [data-skeleton="sidebar"]')),
+      // One INDEPENDENT card per real profile module.
+      modules: Array.from(document.querySelectorAll('#studio-profile-skeleton [data-skeleton-module]'))
+        .map(el => ({
+          id: el.dataset.skeletonModule,
+          column: el.dataset.skeletonColumn,
+          label: el.querySelector('.studio-skeleton-label')?.textContent || '',
+          x: Math.round(parseFloat(el.style.left)),
+          y: Math.round(parseFloat(el.style.top)),
+          w: Math.round(parseFloat(el.style.width)),
+          h: Math.round(parseFloat(el.style.height)),
+        })),
+      // Studio-only chrome: never a hit target, never a component.
+      pointerEvents: skeleton ? getComputedStyle(skeleton).pointerEvents : null,
+      ariaHidden: skeleton?.getAttribute('aria-hidden'),
+      asComponent: document.querySelectorAll('#studio-profile-skeleton[data-comp-id]').length,
+    };
+  });
+
+  check(view.exists, 'the profile structure is drawn on the canvas');
+  // The outer background exists and covers the whole design.
+  check(!!view.background, 'the outer Profile Background area is present');
+  eq(view.background.x, 0, 'background x');
+  eq(view.background.y, 0, 'background y');
+  eq(view.background.w, 960, 'background width');
+  eq(view.background.h, 1200, 'background height');
+
+  // Main and sidebar are separate, non-overlapping areas.
+  check(!!view.main && !!view.sidebar, 'both the main profile area and the sidebar are present');
+  check(view.main.x < view.sidebar.x, 'the sidebar is to the right of the main profile');
+  check(view.main.x + view.main.w <= view.sidebar.x, 'the main profile and sidebar do not overlap');
+
+  // Every sidebar feature is its own independent card.
+  const byId = new Map(view.modules.map(m => [m.id, m]));
+  for (const [id, label] of [
+    ['friend_space', 'FRIEND SPACE'], ['gallery', 'PHOTO GALLERY'],
+    ['video_box', 'VIDEO BOX'], ['music', 'MUSIC'], ['scraps', 'SCRAPS'],
+  ]) {
+    const m = byId.get(id);
+    check(!!m, `the "${id}" module card is present`);
+    eq(m.column, 'sidebar', `${id} is in the sidebar`);
+    eq(m.label, label, `${id} label`);
+    check(m.x >= view.sidebar.x, `the "${id}" card sits inside the sidebar`);
+    check(m.x + m.w <= view.sidebar.x + view.sidebar.w, `the "${id}" card fits the sidebar width`);
+  }
+  // Each is a DISTINCT card — none merged into one giant sidebar block.
+  const sidebarCards = view.modules.filter(m => m.column === 'sidebar');
+  const distinct = new Set(sidebarCards.map(m => `${m.x},${m.y},${m.w},${m.h}`));
+  eq(distinct.size, sidebarCards.length, 'every sidebar module has its own distinct card');
+  for (const m of sidebarCards) {
+    check(m.h < view.sidebar.h, `"${m.id}" is not one giant sidebar block`);
+  }
+
+  // The main column holds the real main sections, and NO Gallery below
+  // Testimonials — Photo Gallery is a sidebar module on the real profile.
+  for (const id of ['profile_photo', 'name', 'alias', 'bio', 'personal_info', 'testimonials']) {
+    const m = byId.get(id);
+    check(!!m, `the main module "${id}" is present`);
+    eq(m.column, 'main', `${id} is in the main profile`);
+  }
+  const bio = byId.get('bio');
+  const testimonials = byId.get('testimonials');
+  check(!!testimonials && !!bio, 'both Bio and Testimonials are present');
+  for (const m of view.modules.filter(m => m.column === 'main' && m.id !== 'testimonials')) {
+    check(m.y + m.h <= testimonials.y + 1,
+      `main module "${m.id}" is not below Testimonials (Photo Gallery must not be invented there)`);
+  }
+  check(!!byId.get('gallery') && byId.get('gallery').column === 'sidebar',
+    'Photo Gallery is a sidebar card, not a main-column section');
+
+  // The structure is chrome, not content: never selectable, never a component.
+  eq(view.pointerEvents, 'none', 'the profile structure never intercepts a pointer');
+  eq(view.ariaHidden, 'true', 'the profile structure is hidden from assistive tech');
+  eq(view.asComponent, 0, 'the profile structure is not made of design components');
+});
+
+await step('CREATOR-10: the real profile structure and the guide agree', async () => {
+  const view = await page.evaluate(() => {
+    const read = (sel) => Array.from(document.querySelectorAll(sel)).map(el => ({
+      label: (el.querySelector('.studio-skeleton-label') || el.querySelector('.studio-guide-card-label'))?.textContent || '',
+      x: Math.round(parseFloat(el.style.left)),
+      y: Math.round(parseFloat(el.style.top)),
+      w: Math.round(parseFloat(el.style.width)),
+      h: Math.round(parseFloat(el.style.height)),
+    }));
+    return {
+      skeleton: read('#studio-profile-skeleton [data-skeleton-module]'),
+      guide: read('#studio-canvas-inner [data-comp-type="profile_guide_card"]'),
+    };
+  });
+  const guideByLabel = new Map(view.guide.map(c => [c.label, c]));
+  eq(view.guide.length, view.skeleton.length,
+    'the guide has exactly one card per real profile module');
+  for (const m of view.skeleton) {
+    const card = guideByLabel.get(m.label);
+    check(!!card, `the guide marks "${m.label}", which the structure draws`);
+    eq(card.x, m.x, `${m.label} guide x matches the structure`);
+    eq(card.y, m.y, `${m.label} guide y matches the structure`);
+    eq(card.w, m.w, `${m.label} guide width matches the structure`);
+    eq(card.h, m.h, `${m.label} guide height matches the structure`);
+  }
+});
+
+await step('CREATOR-10: the guide never appears publicly, and neither does the structure', async () => {
+  await page.click('#studio-preview-toggle');
+  await new Promise(r => setTimeout(r, 350));
+  const inPreview = await page.evaluate(() => ({
+    cards: document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide_card"]').length,
+    skeleton: document.querySelectorAll('#studio-profile-skeleton').length,
+  }));
+  eq(inPreview.cards, 0, 'no guide card is drawn in Preview');
+  eq(inPreview.skeleton, 0, 'the studio-only profile structure is not drawn in Preview');
+  await page.click('#studio-preview-toggle');
+  await new Promise(r => setTimeout(r, 300));
+  check(await guideCardCount() > 0, 'leaving Preview brings the guide cards back');
+
+  // The real public profile must never render a guide card either.
+  const publicProfile = await api('GET', `/api/profile/${seller.username}`);
+  check(publicProfile.status === 200, 'the public profile loads');
+  const designComps = publicProfile.data?.design?.layout?.components || [];
+  for (const c of designComps) {
+    check(!['profile_guide_card', 'profile_guide'].includes(c.type),
+      `the published design carries no public guide type, got ${c.type}`);
+  }
+  const rendered = await page.evaluate(() => document.querySelectorAll(
+    '#profile-frame [data-comp-type="profile_guide_card"], #profile-frame .studio-guide-card',
+  ).length);
+  eq(rendered, 0, 'no guide card is rendered on the public profile');
+});
+
+await step('CREATOR-10: the Profile Background is uploaded and sits behind the whole profile', async () => {
+  await ensureEditingMode();
+  await ensureGuidePresent();
+  // The background is a property of the whole DESIGN, so show the canvas-level
+  // Properties by clearing any component selection.
+  await pinStudioInView();
+  await deselectComponent();
+  await new Promise(r => setTimeout(r, 200));
+
+  const before = await page.evaluate(() => ({
+    layer: !!document.querySelector('#studio-profile-background'),
+    set: document.querySelector('#studio-profile-background')?.dataset.profileBackground,
+    preview: document.querySelector('[data-profile-background-preview]')?.dataset.profileBackgroundPreview,
+    hasUpload: !!document.querySelector('#studio-background-upload'),
+    selected: !!document.querySelector('#studio-canvas-inner .studio-selected'),
+  }));
+  check(before.layer, 'the background LAYER always exists, so the creator sees where it goes');
+  check(!before.selected, 'no component is selected, so the canvas Properties are shown');
+  eq(before.hasUpload, true, 'the Properties panel offers Upload Image');
+  eq(before.set, 'none', 'no background is set to begin with');
+
+  // Upload a real image through the app's own control, using the existing
+  // server-validated Creator Studio upload endpoint.
+  const input = await page.$('#studio-background-file');
+  check(!!input, 'the background file input exists');
+  await input.uploadFile(bgFixturePath);
+  await new Promise(r => setTimeout(r, 1200));
+
+  const staged = await page.evaluate(() => ({
+    applyEnabled: !document.querySelector('#studio-background-apply')?.disabled,
+    status: document.querySelector('#studio-background-status')?.textContent || '',
+  }));
+  check(staged.applyEnabled, `the upload is staged and can be applied, status="${staged.status}"`);
+
+  await page.click('#studio-background-apply');
+  await new Promise(r => setTimeout(r, 400));
+  const decoded = await waitForImage('#studio-profile-background img');
+  check(!decoded.timedOut, 'the uploaded background actually decoded');
+  check(/\/uploads\/creator\//.test(decoded.src), `the background is the uploaded application URL, got "${decoded.src}"`);
+  check(decoded.naturalW > 0 && decoded.naturalH > 0,
+    `the uploaded image actually loaded (${decoded.naturalW}x${decoded.naturalH})`);
+
+  const applied = await page.evaluate(() => {
+    const layer = document.querySelector('#studio-profile-background');
+    const img = layer?.querySelector('img');
+    const doc = document.querySelector('#studio-canvas-document');
+    const lr = layer?.getBoundingClientRect();
+    const sr = layer?.parentElement?.getBoundingClientRect();
+    // Is the background behind the main column AND every sidebar card?
+    const behind = (sel) => Array.from(document.querySelectorAll(sel)).map(el => {
+      const r = el.getBoundingClientRect();
+      const inside = !!lr && r.left >= lr.left - 1 && r.top >= lr.top - 1
+        && r.right <= lr.right + 1 && r.bottom <= lr.bottom + 1;
+      return { inside };
+    });
+    return {
+      set: layer?.dataset.profileBackground,
+      src: img?.getAttribute('src') || '',
+      naturalW: img?.naturalWidth || 0,
+      naturalH: img?.naturalHeight || 0,
+      fillW: img ? Math.round(img.getBoundingClientRect().width) : 0,
+      fillH: img ? Math.round(img.getBoundingClientRect().height) : 0,
+      // The background is a LAYER, not a content card: no geometry, not a
+      // component, nothing to select, drag or resize.
+      asComponent: document.querySelectorAll('#studio-profile-background[data-comp-id]').length,
+      hasHandles: document.querySelectorAll('#studio-profile-background [data-resize]').length,
+      inLayerRows: document.querySelectorAll('#studio-layers-list .studio-layer-name')
+        .length && Array.from(document.querySelectorAll('#studio-layers-list .studio-layer-name'))
+          .some(el => /background/i.test(el.textContent)),
+      main: behind('#studio-profile-skeleton [data-skeleton="main"]'),
+      sidebar: behind('#studio-profile-skeleton [data-skeleton="sidebar"]'),
+      sidebarCards: behind('#studio-profile-skeleton [data-skeleton-module][data-skeleton-column="sidebar"]'),
+      doc: !!doc,
+      layerInsideDoc: !!lr && !!sr,
+    };
+  });
+
+  eq(applied.set, 'set', 'the background is set');
+  check(/\/uploads\/creator\//.test(applied.src), `the background is the uploaded application URL, got "${applied.src}"`);
+  check(applied.naturalW > 0 && applied.naturalH > 0,
+    `the uploaded image actually loaded (${applied.naturalW}x${applied.naturalH})`);
+
+  // It fills the whole design area, so main + sidebar all sit on it.
+  check(applied.fillW >= 900, `the background spans the design width, got ${applied.fillW}`);
+  check(applied.fillH >= 1200, `the background spans the design height, got ${applied.fillH}`);
+  for (const m of applied.main) check(m.inside, 'the main profile area is inside the background');
+  for (const m of applied.sidebar) check(m.inside, 'the sidebar area is inside the background');
+  for (const m of applied.sidebarCards) check(m.inside, 'every sidebar card is inside the background');
+  eq(applied.sidebarCards.length, 6, 'all six sidebar cards sit on the background');
+
+  // And it is NOT a normal image card.
+  eq(applied.asComponent, 0, 'the background is not a design component');
+  eq(applied.hasHandles, 0, 'the background has no resize handles');
+  eq(applied.inLayerRows, false, 'the background is not listed in Layers as a component');
+});
+
+await step('CREATOR-10: the background saves, reloads and reaches the published profile', async () => {
+  const saved = await page.evaluate(async () => {
+    document.querySelector('#studio-save').click();
+    return true;
+  });
+  check(saved, 'Save Draft was clicked');
+  await new Promise(r => setTimeout(r, 1500));
+
+  const persisted = await page.evaluate(() => ({
+    status: document.querySelector('#studio-status')?.textContent || '',
+    src: document.querySelector('#studio-profile-background img')?.getAttribute('src') || '',
+  }));
+  check(/saved/i.test(persisted.status), `the draft saved, status="${persisted.status}"`);
+  check(/\/uploads\/creator\//.test(persisted.src), 'the background is still applied after saving');
+
+  // Reload the design through the app's own selector: the background must come back.
+  const designId = await page.$eval('#studio-design-select', el => el.value);
+  await page.select('#studio-design-select', '__none__');
+  await new Promise(r => setTimeout(r, 300));
+  const reloaded = await page.evaluate(() => ({
+    set: document.querySelector('#studio-profile-background')?.dataset.profileBackground,
+    src: document.querySelector('#studio-profile-background img')?.getAttribute('src') || '',
+  }));
+  check(reloaded.set === 'set' || /\//.test(reloaded.src),
+    `reopening the design preserves the background (set=${reloaded.set} src="${reloaded.src}")`);
+
+  // Publish, then confirm the PUBLIC profile receives it on its own outer
+  // background layer — the real published behaviour.
+  await page.click('#studio-publish');
+  await new Promise(r => setTimeout(r, 1800));
+  const publicProfile = await api('GET', `/api/profile/${seller.username}`);
+  check(publicProfile.status === 200, 'the public profile loads after publishing');
+  const bg = publicProfile.data?.design?.theme?.backgroundImage;
+  check(/\/uploads\/creator\//.test(bg || ''), `the published design carries the background, got "${bg}"`);
+  void designId;
+});
+
+await step('CREATOR-10: an uploaded image can be dragged and resized on the canvas', async () => {
+  await ensureEditingMode();
+  await pinStudioInView();
+  await deselectComponent();
+
+  // Add a fresh image component and give it the uploaded picture.
+  await page.evaluate(() => {
+    const item = document.querySelector('#studio-content-list [data-type="image"]');
+    item?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await new Promise(r => setTimeout(r, 250));
+  const armed = await page.evaluate(() => ({
+    status: document.querySelector('#studio-status')?.textContent || '',
+  }));
+  check(/place it/i.test(armed.status), `clicking Image armed a placement, status="${armed.status}"`);
+  // Place it in the empty strip of the main column, below the profile modules.
+  await page.evaluate(() => {
+    const doc = document.querySelector('#studio-canvas-document');
+    const r = doc.getBoundingClientRect();
+    const opts = { bubbles: true, clientX: r.left + 300, clientY: r.top + 700, button: 0, pointerId: 1 };
+    doc.dispatchEvent(new PointerEvent('pointerdown', opts));
+    doc.dispatchEvent(new PointerEvent('pointerup', opts));
+  });
+  await new Promise(r => setTimeout(r, 450));
+  const placed = await page.evaluate(() => {
+    // Scope to the SELECTED image: an earlier step already put an image on this
+    // canvas, so the first [data-comp-type="image"] is not the one just added.
+    const el = document.querySelector('#studio-canvas-inner [data-comp-type="image"].studio-selected');
+    return {
+      exists: !!el,
+      selected: !!el,
+      id: el?.dataset.compId || '',
+      images: document.querySelectorAll('#studio-canvas-inner [data-comp-type="image"]').length,
+      status: document.querySelector('#studio-status')?.textContent || '',
+      title: document.querySelector('#studio-properties .studio-prop-title')?.textContent || '',
+    };
+  });
+  check(placed.exists,
+    `the image component was added to the canvas (images=${placed.images} status="${placed.status}")`);
+  check(placed.selected,
+    `the new image component is the selected one (id="${placed.id}" title="${placed.title}")`);
+
+  const fileInput = await page.$('#studio-properties input[type=file]');
+  check(!!fileInput, 'the image component offers an upload control');
+  await fileInput.uploadFile(bgFixturePath);
+  await new Promise(r => setTimeout(r, 1200));
+  const decoded = await waitForImage('#studio-canvas-inner [data-comp-type="image"].studio-selected img');
+  check(/\/uploads\/creator\//.test(decoded.src), `the component holds the uploaded file, got "${decoded.src}"`);
+  check(decoded.naturalW > 0, `the uploaded image loaded (naturalWidth ${decoded.naturalW})`);
+
+  await prepareStableCanvas();
+  // Bring the image to the front so its handles are reachable, as a creator would.
+  await page.evaluate(() => {
+    const row = document.querySelector('#studio-layers-list .studio-layer-selected');
+    row?.querySelector('.studio-layer-action[data-action="front"]')?.click();
+  });
+  await new Promise(r => setTimeout(r, 350));
+  await prepareStableCanvas();
+
+  const geomOf = () => page.evaluate(() => {
+    const el = document.querySelector('#studio-canvas-inner [data-comp-type="image"].studio-selected');
+    if (!el) return null;
+    const img = el.querySelector('img');
+    const r = img.getBoundingClientRect();
+    const cr = el.getBoundingClientRect();
+    return {
+      x: parseFloat(el.style.left), y: parseFloat(el.style.top),
+      width: parseFloat(el.style.width), height: parseFloat(el.style.height),
+      src: img.getAttribute('src') || '',
+      naturalW: img.naturalWidth, naturalH: img.naturalHeight,
+      // The IMAGE, not just the box, is what changes size.
+      imgW: Math.round(r.width), imgH: Math.round(r.height),
+      boxW: Math.round(cr.width), boxH: Math.round(cr.height),
+      visible: r.width > 1 && r.height > 1,
+      fit: img.className,
+    };
+  });
+  const handlePoint = (dir) => page.evaluate((d) => {
+    const el = document.querySelector('#studio-canvas-inner [data-comp-type="image"].studio-selected');
+    const h = el?.querySelector(`[data-resize="${d}"]`);
+    if (!h) return null;
+    const r = h.getBoundingClientRect();
+    const x = r.left + r.width / 2;
+    const y = r.top + r.height / 2;
+    return { x, y, isHandle: document.elementFromPoint(x, y) === h };
+  }, dir);
+
+  const start = await geomOf();
+  check(!!start, 'the uploaded image appears in the Profile Viewer');
+  check(start.visible, 'the image is actually visible, not just a placeholder box');
+  check(/\/uploads\/creator\//.test(start.src), `the image is the uploaded file, got "${start.src}"`);
+  check(start.naturalW > 0, `the source image loaded at its natural size (${start.naturalW}px)`);
+
+  // ── Move ──
+  const box = await page.evaluate(() => {
+    const el = document.querySelector('#studio-canvas-inner [data-comp-type="image"].studio-selected');
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  await dragMouse(box, { x: box.x - 90, y: box.y - 50 });
+  const moved = await geomOf();
+  check(moved.x !== start.x || moved.y !== start.y,
+    `dragging the image moved it (${start.x},${start.y} -> ${moved.x},${moved.y})`);
+  eq(moved.width, start.width, 'moving does not change the width');
+  eq(moved.height, start.height, 'moving does not change the height');
+
+  // ── Resize with a CORNER handle (both dimensions) ──
+  const se = await handlePoint('se');
+  check(!!se?.isHandle, `the south-east corner handle is the hit target, got ${se && JSON.stringify(se)}`);
+  const beforeCorner = await geomOf();
+  await dragMouse(se, { x: se.x + 90, y: se.y + 70 });
+  const afterCorner = await geomOf();
+  check(afterCorner.width > beforeCorner.width, `a corner handle widened the image (${beforeCorner.width} -> ${afterCorner.width})`);
+  check(afterCorner.height > beforeCorner.height, `a corner handle grew the image (${beforeCorner.height} -> ${afterCorner.height})`);
+  check(afterCorner.visible, 'the image is still visible after a corner resize');
+  // The IMAGE resized, not just an invisible box around it.
+  check(afterCorner.imgW > beforeCorner.imgW && afterCorner.imgH > beforeCorner.imgH,
+    `the visible picture resized (${beforeCorner.imgW}x${beforeCorner.imgH} -> ${afterCorner.imgW}x${afterCorner.imgH})`);
+
+  // ── Resize with an EDGE handle (one dimension only) ──
+  const e = await handlePoint('e');
+  check(!!e?.isHandle, `the east edge handle is the hit target, got ${e && JSON.stringify(e)}`);
+  const beforeEdge = await geomOf();
+  await dragMouse(e, { x: e.x + 80, y: e.y });
+  const afterEdge = await geomOf();
+  check(afterEdge.width > beforeEdge.width, `an edge handle widened the image (${beforeEdge.width} -> ${afterEdge.width})`);
+  eq(afterEdge.height, beforeEdge.height, 'an edge handle changed ONLY the width');
+  check(afterEdge.imgW > beforeEdge.imgW, 'the visible picture widened with the edge handle');
+
+  // ── All 8 handles exist and are reachable ──
+  const handles = await page.evaluate(() => {
+    const el = document.querySelector('#studio-canvas-inner [data-comp-type="image"].studio-selected');
+    return Array.from(el.querySelectorAll('[data-resize]')).map(h => h.dataset.resize);
+  });
+  for (const dir of ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']) {
+    check(handles.includes(dir), `the ${dir} resize handle exists`);
+  }
+  eq(handles.length, 8, 'there are exactly the 8 normal resize handles');
+
+  // ── Image quality: the SOURCE is untouched by resizing ──
+  check(afterEdge.src === start.src, 'resizing never changes the image source');
+  eq(afterEdge.naturalW, start.naturalW, 'the source resolution is unchanged by resizing');
+  eq(afterEdge.naturalH, start.naturalH, 'the source height is unchanged by resizing');
+  // The app must not swap in a re-encoded/rasterised bitmap at a new size.
+  const noCanvas = await page.evaluate(() => {
+    const el = document.querySelector('#studio-canvas-inner [data-comp-type="image"].studio-selected');
+    return {
+      canvases: el.querySelectorAll('canvas').length,
+      backgrounds: Array.from(el.querySelectorAll('img')).map(i => i.style.backgroundImage || '').filter(Boolean).length,
+    };
+  });
+  eq(noCanvas.canvases, 0, 'the image is never rasterised into a canvas');
+  eq(noCanvas.backgrounds, 0, 'the image is not swapped for a CSS background bitmap');
+
+  // ── Zoom and pan do not change image geometry ──
+  const beforeZoom = await geomOf();
+  await page.click('#studio-zoom-in');
+  await page.click('#studio-zoom-in');
+  await new Promise(r => setTimeout(r, 300));
+  const afterZoom = await geomOf();
+  for (const k of ['x', 'y', 'width', 'height']) {
+    eq(afterZoom[k], beforeZoom[k], `zooming does not change the image ${k}`);
+  }
+  eq(afterZoom.naturalW, beforeZoom.naturalW, 'zooming does not change the stored image resolution');
+
+  // Panning the viewer must not move the image either.
+  const panBefore = await geomOf();
+  const empty = await page.evaluate(() => {
+    const v = document.querySelector('#studio-viewer').getBoundingClientRect();
+    return { x: v.left + 14, y: v.bottom - 14 };
+  });
+  await dragMouse(empty, { x: empty.x - 60, y: empty.y - 40 });
+  const panAfter = await geomOf();
+  for (const k of ['x', 'y', 'width', 'height']) {
+    eq(panAfter[k], panBefore[k], `panning does not change the image ${k}`);
+  }
+
+  // Fit shows the whole profile without touching geometry either.
+  const beforeFit = await geomOf();
+  await page.click('#studio-zoom-fit');
+  await new Promise(r => setTimeout(r, 300));
+  const afterFit = await geomOf();
+  for (const k of ['x', 'y', 'width', 'height']) {
+    eq(afterFit[k], beforeFit[k], `Fit does not change the image ${k}`);
+  }
+  const fit = await page.evaluate(() => {
+    const v = document.querySelector('#studio-viewer').getBoundingClientRect();
+    const d = document.querySelector('#studio-canvas-document').getBoundingClientRect();
+    return {
+      zoom: document.querySelector('#studio-zoom-readout')?.textContent.trim(),
+      designRight: d.right, viewRight: v.right,
+      designLeft: d.left, viewLeft: v.left,
+    };
+  });
+  check(fit.zoom !== '100%', `Fit changed the view scale, got ${fit.zoom}`);
+  check(fit.designRight <= fit.viewRight + 2 && fit.designLeft >= fit.viewLeft - 2,
+    `Fit brings the WHOLE design into the viewer (design ${fit.designLeft}..${fit.designRight}, viewer ${fit.viewLeft}..${fit.viewRight})`);
+});
+
+await step('CREATOR-10: resizing a Studio panel shrinks the viewer, not the design', async () => {
+  await ensureEditingMode();
+  await pinStudioInView();
+  const designGeom = () => page.evaluate(() => {
+    const doc = document.querySelector('#studio-canvas-document');
+    const img = document.querySelector('#studio-canvas-inner [data-comp-type="image"]');
+    const docR = doc.getBoundingClientRect();
+    return {
+      docW: Math.round(docR.width), docH: Math.round(docR.height),
+      label: document.querySelector('#studio-canvas-size')?.textContent.trim(),
+      imgX: img ? parseFloat(img.style.left) : null,
+      imgY: img ? parseFloat(img.style.top) : null,
+      imgW: img ? parseFloat(img.style.width) : null,
+      imgH: img ? parseFloat(img.style.height) : null,
+    };
+  });
+
+  // Reset to a known view first, so the canvas is fully visible.
+  await page.click('#studio-zoom-reset');
+  await new Promise(r => setTimeout(r, 300));
+  await pinStudioInView();
+  const before = await designGeom();
+  const viewerBefore = await viewerBox();
+  const dirtyBefore = await page.evaluate(() => !!document.querySelector('#studio-undo')?.disabled);
+
+  // ── Widen the LEFT panel: the centre viewer must shrink ──
+  const leftHandle = await page.$eval('#studio-col-resizer-left', el => {
+    const r = el.getBoundingClientRect();
+    return {
+      x: r.left + r.width / 2, y: r.top + r.height / 2,
+      w: r.width, h: r.height,
+    };
+  });
+  check(leftHandle.w > 0 && leftHandle.h > 0,
+    `the left column resizer has a real hit area (${leftHandle.w}x${leftHandle.h})`);
+  // The handle's own centre must be on screen, otherwise a press there is a
+  // click on empty page rather than on the handle.
+  const leftHit = await page.evaluate(([x, y]) => {
+    const el = document.querySelector('#studio-col-resizer-left');
+    const top = document.elementFromPoint(x, y);
+    return { inView: x >= 0 && y >= 0 && x <= window.innerWidth && y <= window.innerHeight,
+             isSelf: !!(top && (top === el || el.contains(top))) };
+  }, [leftHandle.x, leftHandle.y]);
+  check(leftHit.inView, `the left resizer's centre is inside the viewport (${leftHandle.x},${leftHandle.y})`);
+  check(leftHit.isSelf, 'the left resizer is the topmost element at its own centre');
+  await dragMouse(leftHandle, { x: leftHandle.x + 120, y: leftHandle.y });
+  await new Promise(r => setTimeout(r, 350));
+  await pinStudioInView();
+  const afterLeft = await designGeom();
+  const viewerAfterLeft = await viewerBox();
+  check(viewerAfterLeft.width < viewerBefore.width - 40,
+    `widening the LEFT panel narrowed the centre viewer (${viewerBefore.width} -> ${viewerAfterLeft.width})`);
+  eq(afterLeft.docW, before.docW, 'widening the LEFT panel did NOT change the canvas width');
+  eq(afterLeft.docH, before.docH, 'widening the LEFT panel did NOT change the canvas height');
+  eq(afterLeft.label, before.label, 'the stated design canvas size is unchanged');
+  eq(afterLeft.imgX, before.imgX, 'the image was not moved by a panel resize');
+  eq(afterLeft.imgW, before.imgW, 'the image was not resized by a panel resize');
+
+  // ── Widen the RIGHT panel: the centre viewer must shrink too ──
+  await pinStudioInView();
+  const rightHandle = await page.$eval('#studio-col-resizer-right', el => {
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height };
+  });
+  check(rightHandle.w > 0 && rightHandle.h > 0,
+    `the right column resizer has a real hit area (${rightHandle.w}x${rightHandle.h})`);
+  // Drag towards the centre, away from the far side, so the Properties panel grows.
+  await dragMouse(rightHandle, { x: rightHandle.x - 120, y: rightHandle.y });
+  await new Promise(r => setTimeout(r, 350));
+  await pinStudioInView();
+  const viewerAfterRight = await viewerBox();
+  check(viewerAfterRight.width < viewerAfterLeft.width - 40,
+    `widening the RIGHT panel narrowed the centre viewer further (${viewerAfterLeft.width} -> ${viewerAfterRight.width})`);
+  const afterRight = await designGeom();
+  eq(afterRight.imgW, before.imgW, 'the image survived the right panel resize unchanged');
+  eq(afterRight.label, before.label, 'the design canvas size is still unchanged');
+
+  // ── No overlap, and the viewer keeps a usable minimum ──
+  const boxes = await page.evaluate(() => {
+    const r = (s) => {
+      const el = document.querySelector(s);
+      if (!el) return null;
+      const b = el.getBoundingClientRect();
+      return { left: b.left, right: b.right, width: b.width, top: b.top, bottom: b.bottom };
+    };
+    return { left: r('#studio-elements'), stage: r('#studio-stage'), right: r('#studio-properties-panel') };
+  });
+  check(boxes.left && boxes.stage && boxes.right, 'all three columns are present');
+  check(boxes.left.right <= boxes.stage.left + 1,
+    `the Elements panel does not overlap the viewer (${boxes.left.right} vs ${boxes.stage.left})`);
+  check(boxes.stage.right <= boxes.right.left + 1,
+    `the Properties panel does not overlap the viewer (${boxes.stage.right} vs ${boxes.right.left})`);
+  check(boxes.stage.width > 0, 'the viewer still has a positive width');
+
+  // ── Narrowing the panels gives the space back ──
+  await page.click('#studio-zoom-reset');
+  await new Promise(r => setTimeout(r, 200));
+  await pinStudioInView();
+  const left2 = await page.$eval('#studio-col-resizer-left', el => {
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  await dragMouse(left2, { x: left2.x - 120, y: left2.y });
+  await new Promise(r => setTimeout(r, 350));
+  await pinStudioInView();
+  const viewerNarrowed = await viewerBox();
+  check(viewerNarrowed.width > viewerAfterRight.width + 40,
+    `narrowing the LEFT panel gave the space back to the viewer (${viewerAfterRight.width} -> ${viewerNarrowed.width})`);
+
+  // ── Workspace resizing is not an edit ──
+  const dirtyAfter = await page.evaluate(() => !!document.querySelector('#studio-undo')?.disabled);
+  eq(dirtyAfter, dirtyBefore, 'resizing the panels never pushed an undo entry / dirtied the design');
+  const handlesIntact = await page.evaluate(() => ({
+    colResizers: document.querySelectorAll('#studio-layout .studio-col-resizer:not([hidden])').length,
+    heightGrip: document.querySelectorAll('#studio-viewer-height-grip:not([hidden])').length,
+  }));
+  eq(handlesIntact.colResizers, 2, 'both column resizers are still usable');
+  eq(handlesIntact.heightGrip, 1, 'the viewer height grip is still usable');
 });
 
 
@@ -1099,6 +2025,8 @@ await step('CREATOR-08: a compact zoom bar exists, but no viewer SIZING controls
 // Requirement: prove the handles actually receive pointer events rather than
 // being covered by the canvas, a panel, or the sticky toolbar.
 await step('workspace resize handles are the topmost element at their boundary', async () => {
+  // Pin the scroll: every coordinate below is a viewport coordinate.
+  await pinStudioInView();
   const hit = await page.evaluate(() => {
     const probe = (selector) => {
       const el = document.querySelector(selector);
@@ -1147,6 +2075,7 @@ await step('workspace resize handles are the topmost element at their boundary',
 });
 
 await step('dragging the left panel boundary changes the left panel width', async () => {
+  await pinStudioInView();
   await selectFirstComponent();
   const before = await page.evaluate(() => ({
     left: document.querySelector('#studio-elements').getBoundingClientRect().width,
@@ -1192,6 +2121,7 @@ await step('dragging the left panel boundary changes the left panel width', asyn
 });
 
 await step('dragging the Properties boundary changes the Properties width', async () => {
+  await pinStudioInView();
   const before = await page.evaluate(() => ({
     left: document.querySelector('#studio-elements').getBoundingClientRect().width,
     right: document.querySelector('#studio-properties-panel').getBoundingClientRect().width,
@@ -1243,6 +2173,7 @@ await step('the viewer keeps full center-column width, not a width of its own', 
 });
 
 await step('dragging the viewer bottom boundary up makes the viewer shorter', async () => {
+  await pinStudioInView();
   await selectFirstComponent();
   const before = await viewerBox();
   const geomBefore = await componentGeom();
@@ -1272,6 +2203,7 @@ await step('dragging the viewer bottom boundary up makes the viewer shorter', as
 });
 
 await step('dragging the viewer bottom boundary down makes the viewer taller', async () => {
+  await pinStudioInView();
   // CREATOR-07B: the old viewport-minus-chrome cap is gone, so a downward drag
   // is free to make the viewer genuinely taller than the window. Shrink first to
   // give the drag room, then grow well past the previous cap.
@@ -1405,21 +2337,44 @@ await step('component editing still works after resizing the workspace', async (
   // Component dragging still works. Drag the COMPONENT's own centre rather than
   // the canvas centre: the design canvas is 1200px tall, so once the viewer is a
   // large editing area the canvas midpoint is not necessarily over any element.
-  const geomBefore = await componentGeom();
-  const dragPoint = await page.evaluate(() => {
-    const el = document.querySelector('#studio-canvas-inner [data-comp-id].studio-selected')
-      || document.querySelector('#studio-canvas-inner [data-comp-id]');
+  //
+  // Everything here is scoped to the SELECTED component. componentGeom() reads
+  // the first ordinary component in DOM (z-index) order, which is not
+  // necessarily the one Layers selected — comparing that component's geometry
+  // across a drag would report a false failure whenever a lower-z component
+  // also exists.
+  //
+  // The view is prepared through the app's own Fit control rather than
+  // el.scrollIntoView(): the studio CLIPS the canvas and pans it with a
+  // transform, so scrolling the (overflow:hidden) container behind the app's back
+  // desynchronises it from the pan and the press then lands on empty canvas.
+  await prepareStableCanvas();
+  const selectedContentSelector =
+    '#studio-canvas-inner [data-comp-id].studio-selected'
+    + ':not([data-comp-type="profile_guide_card"]):not([data-comp-type="profile_guide"])';
+  const selectedIsOrdinary = await page.$(selectedContentSelector);
+  check(!!selectedIsOrdinary, 'the selected component is an ordinary content component');
+  const readSelected = () => page.evaluate((sel) => {
+    const el = document.querySelector(sel);
     if (!el) return null;
-    el.scrollIntoView({ block: 'center', inline: 'center' });
+    return {
+      x: parseFloat(el.style.left), y: parseFloat(el.style.top),
+      width: parseFloat(el.style.width), height: parseFloat(el.style.height),
+    };
+  }, selectedContentSelector);
+  const geomBefore = await readSelected();
+  const dragPoint = await page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    if (!el) return null;
     const r = el.getBoundingClientRect();
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-  });
+  }, selectedContentSelector);
   await new Promise(r => setTimeout(r, 200));
   check(!!dragPoint, 'component has a draggable centre in view');
   if (dragPoint) {
     await dragMouse(dragPoint, { x: dragPoint.x + 25, y: dragPoint.y + 15 });
   }
-  const geomAfter = await componentGeom();
+  const geomAfter = await readSelected();
   check(!!geomAfter, 'component still present after drag');
   const moved = geomBefore && geomAfter && (geomBefore.x !== geomAfter.x || geomBefore.y !== geomAfter.y);
   check(moved, `component drag still moves the component (${geomBefore?.x},${geomBefore?.y} -> ${geomAfter?.x},${geomAfter?.y})`);
@@ -1430,11 +2385,19 @@ await step('component editing still works after resizing the workspace', async (
   const target = await page.evaluate((sel) => {
     const el = document.querySelector(`${sel}:not(.studio-comp-locked):not(.studio-comp-hidden)`);
     if (!el) return null;
-    el.click();
+    const r = el.getBoundingClientRect();
+    const x = r.left + r.width / 2;
+    const y = r.top + r.height / 2;
+    // A real pointerdown, not el.click(): the editor attaches its resize
+    // handles from the pointerdown handler, and a synthetic click never
+    // reaches it, so the component would stay unselected with no handles.
+    const opts = { bubbles: true, clientX: x, clientY: y, button: 0, pointerId: 1 };
+    el.dispatchEvent(new PointerEvent('pointerdown', opts));
+    window.dispatchEvent(new PointerEvent('pointerup', opts));
     return { id: el.dataset.compId };
   }, contentCompSelector);
   check(!!target, 'found an unlocked content component for the resize test');
-  await new Promise(r => setTimeout(r, 200));
+  await new Promise(r => setTimeout(r, 250));
 
   const sizeBefore = await page.evaluate((id) => {
     const el = document.querySelector(`#studio-canvas-inner [data-comp-id="${id}"]`);
@@ -1442,15 +2405,11 @@ await step('component editing still works after resizing the workspace', async (
   }, target.id);
   check(!!sizeBefore, 'component size readable for the resize handle test');
 
-  // The component may sit below the visible canvas after the workspace was
-  // resized, so scroll the handle into view first: a pointer press that lands
-  // outside the scroll viewport would hit the studio layout instead.
-  await page.evaluate((id) => {
-    const el = document.querySelector(`#studio-canvas-inner [data-comp-id="${id}"]`);
-    const h = el && el.querySelector('[data-resize="se"]');
-    if (h) h.scrollIntoView({ block: 'center', inline: 'center' });
-  }, target.id);
-  await new Promise(r => setTimeout(r, 200));
+  // The component may sit outside the visible canvas, so reach it through the
+  // app's own Fit control rather than scrollIntoView(): the studio CLIPS the
+  // canvas and pans it with a transform, so scrolling the (overflow:hidden)
+  // container behind the app's back desynchronises it from the pan.
+  await prepareStableCanvas();
 
   const handle = await page.evaluate((id) => {
     const el = document.querySelector(`#studio-canvas-inner [data-comp-id="${id}"]`);
@@ -1537,6 +2496,39 @@ await step('single-column mode hides the handles and drops the side columns', as
 });
 
 await step('dragging empty canvas pans the viewer without moving the design', async () => {
+  // Panning is only meaningful while the design is LARGER than the viewer. A
+  // design that already fits is deliberately centred and the pan is pinned —
+  // that is correct behaviour, not a broken drag. An earlier step deliberately
+  // grew the viewer to its ceiling, so establish the precondition explicitly
+  // and assert that it really holds rather than assuming it.
+  await pinStudioInView();
+  await page.click('#studio-zoom-reset');
+  await new Promise(r => setTimeout(r, 250));
+  // Shrink in repeated drags: one drag can only move by the pointer delta, and
+  // the viewer may start at its 4000px ceiling.
+  for (let i = 0; i < 6; i += 1) {
+    const h = await page.evaluate(() => Math.round(document.querySelector('#studio-viewer').getBoundingClientRect().height));
+    if (h <= 700) break;
+    await pinStudioInView();
+    const shrink = await heightGripPoint();
+    if (!shrink) break;
+    await dragMouse(shrink, { x: shrink.x, y: shrink.y - 700 });
+    await new Promise(r => setTimeout(r, 250));
+  }
+  const pre = await page.evaluate(() => {
+    const v = document.querySelector('#studio-viewer').getBoundingClientRect();
+    const d = document.querySelector('#studio-canvas-document').getBoundingClientRect();
+    return {
+      zoom: document.querySelector('#studio-zoom-readout')?.textContent.trim(),
+      viewerH: Math.round(v.height),
+      designH: Math.round(d.height),
+      transform: document.querySelector('#studio-zoom-layer')?.style.transform,
+    };
+  });
+  check(pre.designH > pre.viewerH,
+    `the design is larger than the viewer, so there is something to pan (design ${pre.designH} vs viewer ${pre.viewerH} at ${pre.zoom})`);
+  await pinCanvasInView();
+
   await selectFirstComponent();
   const before = await componentGeom();
   check(before, 'component geometry readable before the pan');
@@ -1679,4 +2671,8 @@ if (failed.length) {
   for (const f of failed) process.stdout.write(`  ✗ ${f.name}\n    ${f.error?.message || f.error}\n`);
 }
 try { rmSync(TMP_DIR, { recursive: true, force: true }); } catch {}
+// Remove the uploads this run wrote into the servable uploads/creator tree.
+// Done explicitly as well as on exit, so a hard process.exit() can never leave
+// untracked files behind in the git working tree.
+cleanupUploads();
 process.exit(failed.length ? 1 : 0);

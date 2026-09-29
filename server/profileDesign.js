@@ -59,15 +59,26 @@ export const DEFAULT_GUIDE_PATTERN = 'default';
  * guide card can label a placement without ever carrying profile data. A stored
  * card selects one of these ids and nothing else — no markup, CSS, script, text
  * content or user data.
+ *
+ * CREATOR-10: the registry now mirrors the REAL public profile structure
+ * (web/js/profile.js → renderProfilePage) — a main column and a sidebar of
+ * independent modules. Photo Gallery is a SIDEBAR module, and the sidebar
+ * features each have their own section id.
  */
 export const GUIDE_SECTIONS = new Set([
+  // Main profile column
   'profile_photo',
   'name',
   'alias',
   'bio',
   'personal_info',
-  'gallery',
   'testimonials',
+  // Sidebar — one independent module each
+  'friend_space',
+  'gallery',
+  'video_box',
+  'music',
+  'scraps',
   'communities',
 ]);
 
@@ -447,6 +458,37 @@ function validateLayoutConfig(layout) {
 }
 
 /**
+ * CREATOR-10: the Profile Background is a DESIGN-LEVEL theme setting, not an
+ * ordinary `image` component.
+ *
+ * The public profile already owns the outer background layer
+ * (`#profile-background-layer`, painted behind .profile-content-frame and
+ * therefore behind the main column AND every sidebar card), and
+ * applyProfileDesignAndTheme() folds a published design's theme into it. So the
+ * design theme's `backgroundImage` IS the profile background — reusing that
+ * existing pipeline instead of inventing a second background mechanism.
+ *
+ * validateThemeConfig (shared with the Profile Editor) only requires
+ * backgroundImage to be a string. For a DESIGN we tighten it to the same rule
+ * every other image field uses — http(s) or a same-origin /uploads/ path — so a
+ * stored design can never carry a javascript:/data:/protocol-relative URL, and
+ * never bypasses the server-side upload validation that produced it.
+ *
+ * Returns the theme's own errors, exactly like validateThemeConfig, so the
+ * caller can use the same "no errors of its own" rule it applies to the layout.
+ */
+function validateDesignTheme(theme) {
+  const errors = validateThemeConfig(theme);
+  if (errors.length > 0) return errors;
+
+  const url = theme.backgroundImage;
+  if (url !== undefined && url !== null && url !== '' && !APP_IMAGE_URL_RE.test(url)) {
+    errors.push('theme.backgroundImage must be a valid http(s) or /uploads/ image URL');
+  }
+  return errors;
+}
+
+/**
  * Validate + normalize a design payload.
  * Accepts a full body ({ name?, layout?, theme? }) or a partial patch.
  * Returns { errors, data } where data (when errors is empty) holds the
@@ -491,7 +533,7 @@ export function validateDesignPayload(body, { partial = false } = {}) {
     } else if (!isPlainObject(body.theme)) {
       errors.push('theme must be an object or null');
     } else {
-      const themeErrors = validateThemeConfig(body.theme);
+      const themeErrors = validateDesignTheme(body.theme);
       errors.push(...themeErrors);
       if (themeErrors.length === 0) data.theme = body.theme;
     }

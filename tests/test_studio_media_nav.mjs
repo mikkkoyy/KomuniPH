@@ -591,11 +591,21 @@ test('CREATOR-08 guide patterns are a small, closed, safe registry', async () =>
     check(!design.CONTENT_COMPONENT_TYPES.has(type), `${type} is NOT a public content component`);
     check(design.PUBLIC_RENDER_EXCLUDED_TYPES.has(type), `${type} is explicitly excluded from public rendering`);
   }
-  check(design.GUIDE_SECTION_IDS.length === 8, 'the guide covers exactly the 8 real profile sections');
-  for (const section of ['profile_photo', 'name', 'alias', 'bio', 'personal_info', 'gallery', 'testimonials', 'communities']) {
+  // CREATOR-10: the guide now mirrors the REAL public profile — a main column
+  // and a sidebar of independent modules, including the four sidebar features
+  // that previously had no section of their own.
+  check(design.GUIDE_SECTION_IDS.length === 12, `the guide covers exactly the 12 real profile sections, got ${design.GUIDE_SECTION_IDS.length}`);
+  for (const section of [
+    'profile_photo', 'name', 'alias', 'bio', 'personal_info', 'testimonials',
+    'friend_space', 'gallery', 'video_box', 'music', 'scraps', 'communities',
+  ]) {
     check(design.GUIDE_SECTION_IDS.includes(section), `guide section "${section}" exists`);
     check(server.GUIDE_SECTIONS.has(section), `guide section "${section}" is allowed server-side`);
   }
+  // Photo Gallery is a SIDEBAR module on the real profile, never a main-column
+  // section below Testimonials.
+  check(design.GUIDE_SECTION_COLUMN.gallery === 'sidebar', 'Photo Gallery is a sidebar module');
+  check(!design.PROFILE_MAIN_SECTIONS.includes('gallery'), 'the main column has no Gallery section');
 
   // The server accepts only known section ids.
   check(!server.GUIDE_SECTIONS.has('__proto__'), 'prototype keys are not sections');
@@ -625,16 +635,49 @@ test('CREATOR-08: zoom controls exist, but no viewer SIZING controls do', async 
   check(src.includes('id="studio-zoom-in"'), 'zoom in is rendered');
   check(src.includes('id="studio-zoom-out"'), 'zoom out is rendered');
   check(src.includes('id="studio-zoom-reset"'), 'reset is rendered');
-  check(src.includes('studio-zoom-readout'), 'zoom percentage readout is rendered');
-  check(src.includes('zoomBy') && src.includes('resetViewerView'), 'zoom handlers are wired');
+  check(src.includes('id="studio-zoom-fit"'), 'CREATOR-10: a Fit control is rendered');
+  check(src.includes('fitViewerToProfile'), 'CREATOR-10: the Fit handler is wired');
+  check(src.includes('zoomPercent'), 'zoom handlers are wired');
 
   // The old CREATOR-07 controls stay gone — none of them may return.
   check(!src.includes('data-viewer='), 'no data-viewer control attributes remain');
-  check(!src.includes('fitZoom'), 'no Fit zoom helper');
   check(!src.includes('onViewerBarClick'), 'old viewer bar click handler is removed');
   for (const gone of ['data-viewer="fit"', 'data-viewer="actual"', 'pan-left', 'pan-right', 'pan-up', 'pan-down']) {
     check(!src.includes(gone), `${gone} is gone`);
   }
+
+  // CREATOR-10 allows exactly ONE new thing: zooming the DESIGN so the whole
+  // profile — main column and sidebar — fits the viewer. It is zoom state, not
+  // a viewer-sizing control, so it must not write the stage/viewer geometry,
+  // must not mark the design dirty, and must not add undo history.
+  const bodyOf = (text, marker) => {
+    const start = text.indexOf(marker);
+    if (start < 0) return '';
+    const rest = text.slice(start + marker.length);
+    const next = rest.search(/\n(?:async )?function /);
+    return next < 0 ? rest : rest.slice(0, next);
+  };
+  const fitBody = bodyOf(src, 'function fitViewerToProfile');
+  check(fitBody.length > 0, 'the Fit handler exists');
+  check(fitBody.includes('fitZoom'), 'Fit scales the design with the shared fitZoom helper');
+  check(!/stage\.style\.height/.test(fitBody), 'Fit never sets the stage height');
+  check(!/viewerHeight\s*=/.test(fitBody), 'Fit never changes the viewer height');
+  check(!/panelWidths\s*=/.test(fitBody), 'Fit never changes a panel width');
+  check(!fitBody.includes('dirty = true'), 'Fit never marks the design dirty');
+  check(!fitBody.includes('pushHistory'), 'Fit never pushes an undo entry');
+
+  // fitZoom itself must be a pure viewer-state calculation.
+  const vsrc = readFileSync(resolve('web/js/studioViewer.js'), 'utf8');
+  const fitHelper = bodyOf(vsrc, 'export function fitZoom');
+  check(fitHelper.length > 0, 'fitZoom exists in the viewer module');
+  check(fitHelper.includes('clampZoom'), 'fitZoom clamps its result into the supported zoom range');
+  check(fitHelper.includes('return clampZoom(Math.min(1'), 'fitZoom never scales past 100%');
+  check(fitHelper.includes('DEFAULT_ZOOM'), 'fitZoom falls back to 100% when the viewer is unmeasured');
+
+  // No viewer SIZING controls may return: the viewer's box is sized only by the
+  // two column boundaries and its own bottom grip.
+  check(!src.includes('zoomViewer'), 'no viewer-sizing zoom handler');
+  check(!/data-resize="viewer-width"/.test(src), 'no viewer width resize control');
 
   // Zoom must never control viewer size, and the viewer must stay the workspace.
   check(!/zoom[^;\n]*stage\.style\.height/.test(src), 'zoom never sets the stage height');

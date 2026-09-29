@@ -592,6 +592,118 @@
   font-weight: 600;
 }
 
+/* ── Profile Background layer (CREATOR-10) ────────────────────────────────────
+   The uploaded background is a BACKGROUND LAYER behind the entire profile, not
+   a content card: it spans the full design area and is drawn first, so the main
+   column and every sidebar card sit on top of it.
+
+   The picture is a plain <img> holding the ORIGINAL uploaded file, so resizing
+   or zooming the viewer is pure CSS scaling of that one source — the app never
+   rasterises, downsamples or re-encodes it to show it at a different size. */
+.studio-profile-background {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  /* Purely presentational: never a hit target, never selectable. */
+  pointer-events: none;
+  border-radius: inherit;
+}
+.studio-profile-background-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  /* Keeps the browser interpolating the source at whatever size is shown,
+     rather than the app substituting a pre-resized bitmap. */
+  image-rendering: auto;
+}
+.studio-profile-background[data-profile-background="none"] {
+  background: transparent;
+}
+
+/* ── Real profile structure (CREATOR-10) ─────────────────────────────────────
+   The Profile Viewer's base structure: the outer Profile Background area, the
+   MAIN PROFILE column, the separate SIDEBAR column, and one INDEPENDENT card
+   per real profile module (Friend Space, Photo Gallery, Video Box, Music,
+   Scraps and Communities are each their own card — never merged into one
+   sidebar block).
+
+   It is deliberately fainter than the guide cards, because it is the profile
+   itself rather than an editing marker. The whole layer is `pointer-events:
+   none` and aria-hidden: it can never swallow a drag, a selection, a resize
+   handle or a click, and it is never saved with the design. */
+.studio-profile-skeleton {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.studio-skeleton-label {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: rgba(51, 65, 85, 0.55);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* The outer background area: shows where an uploaded background actually sits. */
+.studio-skeleton-bg {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px dashed rgba(71, 85, 105, 0.35);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+/* The two real columns, drawn as separate areas. */
+.studio-skeleton-column {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid rgba(71, 85, 105, 0.28);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.4);
+}
+.studio-skeleton-main { border-color: rgba(30, 64, 175, 0.28); }
+.studio-skeleton-sidebar { border-color: rgba(124, 58, 237, 0.28); }
+
+/* One card per real profile module. */
+.studio-skeleton-card {
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  align-items: flex-start;
+  border: 1.5px dashed rgba(71, 85, 105, 0.4);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.55);
+}
+.studio-skeleton-card-main { border-color: rgba(30, 64, 175, 0.3); }
+.studio-skeleton-card-sidebar { border-color: rgba(124, 58, 237, 0.3); }
+.studio-skeleton-card .studio-skeleton-label { color: rgba(51, 65, 85, 0.62); }
+
+/* The background preview in the Properties panel. */
+.studio-bg-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 84px;
+  margin-bottom: 0.5rem;
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+}
+.studio-bg-preview img { width: 100%; height: 100%; display: block; }
+.studio-bg-preview-empty {
+  padding: 0 0.6rem;
+  font-size: 11px;
+  text-align: center;
+  color: rgba(51, 65, 85, 0.7);
+}
+
 /* Canvas components */
 .studio-comp {
   position: absolute;

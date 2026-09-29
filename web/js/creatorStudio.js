@@ -25,8 +25,12 @@ import {
   GUIDE_COMPONENT_TYPES,
   GUIDE_SECTIONS,
   GUIDE_SECTION_IDS,
+  GUIDE_SECTION_COLUMN,
   GUIDE_PATTERN_IDS,
   DEFAULT_GUIDE_PATTERN,
+  PROFILE_LAYOUT,
+  PROFILE_MAIN_SECTIONS,
+  PROFILE_SIDEBAR_SECTIONS,
   guidePattern,
   guideSectionLabel,
   guideLabel,
@@ -38,6 +42,7 @@ import {
   defaultViewerState,
   clampZoom,
   clampPan,
+  fitZoom,
   viewerTransform,
   designPoint,
   columnWidthsFromDrag,
@@ -94,10 +99,56 @@ const SECTION_ICONS = {
   communities: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 12h17M12 3.5c2.5 2.6 3.6 5.4 3.6 8.5s-1.1 5.9-3.6 8.5c-2.5-2.6-3.6-5.4-3.6-8.5s1.1-5.9 3.6-8.5z" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>`,
 };
 
-const DEFAULT_CANVAS = { width: 960, minHeight: 1200 };
+/**
+ * CREATOR-10: the design canvas is the real profile layout's own size, so the
+ * editable area and the profile it describes can never disagree.
+ */
+const DEFAULT_CANVAS = { ...PROFILE_LAYOUT.canvas };
 const SNAP = 6;
 const MIN_SIZE = 8;
 const HANDLE_DIRS = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+
+// ── Profile Background (CREATOR-10) ────────────────────────────────────────────
+//
+// The background is DESIGN-LEVEL configuration, never an ordinary `image`
+// component. It lives on the design's theme, which the public profile already
+// folds into its outer `#profile-background-layer` — the layer painted behind
+// the whole profile, main column and sidebar alike. So the Studio writes the
+// same theme fields the profile reads, and there is exactly one background.
+//
+// The presentation fields are the platform's own background vocabulary, already
+// validated server-side by validateThemeConfig; `imageUrl` is the single
+// allowlisted image value and is validated strictly as a design.
+const PROFILE_BACKGROUND_SIZES = ['cover', 'contain', 'stretch'];
+const PROFILE_BACKGROUND_POSITIONS = [
+  'center', 'top', 'bottom', 'left', 'right',
+  'top left', 'top center', 'top right',
+  'center left', 'center center', 'center right',
+  'bottom left', 'bottom center', 'bottom right',
+];
+const PROFILE_BACKGROUND_REPEATS = ['no-repeat', 'repeat', 'repeat-x', 'repeat-y'];
+
+/** 'stretch' has no CSS keyword; the profile maps it to 100% 100%. */
+function backgroundSizeCss(size) {
+  return size === 'stretch' ? '100% 100%' : (size || 'cover');
+}
+
+/** The design's theme object, created on demand so a patch never drops it. */
+function designTheme() {
+  if (!currentDesign) return null;
+  if (!isPlainTheme(currentDesign.theme)) currentDesign.theme = {};
+  return currentDesign.theme;
+}
+
+function isPlainTheme(theme) {
+  return !!theme && typeof theme === 'object' && !Array.isArray(theme);
+}
+
+/** The uploaded profile-background URL, or '' when none is set. */
+function backgroundImageUrl() {
+  const theme = designTheme();
+  return theme && typeof theme.backgroundImage === 'string' ? theme.backgroundImage : '';
+}
 
 // ── Module state ─────────────────────────────────────────────────────────────
 let root = null;
@@ -284,6 +335,9 @@ export function renderCreatorStudioPage() {
               <button type="button" id="studio-zoom-out" class="btn btn-secondary studio-zoom-btn" title="Zoom out (10%)" aria-label="Zoom out">−</button>
               <span id="studio-zoom-readout" class="studio-zoom-readout" role="status" aria-live="polite" title="Current zoom">100%</span>
               <button type="button" id="studio-zoom-in" class="btn btn-secondary studio-zoom-btn" title="Zoom in (10%)" aria-label="Zoom in">+</button>
+              <button type="button" id="studio-zoom-fit" class="btn btn-secondary studio-zoom-btn"
+                      title="Scale the Profile Viewer so the whole profile — including the sidebar — is visible"
+                      aria-label="Fit profile to viewer">Fit</button>
               <button type="button" id="studio-zoom-reset" class="btn btn-secondary studio-zoom-btn studio-zoom-reset" title="Reset zoom to 100% and re-centre">Reset</button>
             </div>
           </div>
@@ -660,6 +714,121 @@ function buildComponentNode(comp) {
   return el;
 }
 
+/**
+ * CREATOR-10: the Profile Viewer's base structure — a faithful, editable
+ * representation of the REAL public profile, drawn from PROFILE_LAYOUT.
+ *
+ * Before CREATOR-10 the canvas was a plain surface with unrelated placeholder
+ * boxes floating on it, so a creator had no idea what their profile would
+ * actually look like. This replaces that with the real thing:
+ *
+ *   PROFILE BACKGROUND  → the outer area an uploaded background sits behind
+ *   MAIN PROFILE        → the wide left column
+ *   SIDEBAR             → the narrow right column, its own separate area
+ *   one card per module → Friend Space, Photo Gallery, Video Box, Music,
+ *                         Scraps (and Communities) each INDEPENDENT
+ *
+ * The whole layer is Studio-only chrome. It is never saved with the design, is
+ * never a component, is not selectable, and is hidden in Preview — which
+ * represents the real published page. Every box is `pointer-events: none` so it
+ * can never swallow a drag, a selection or a resize handle.
+ */
+function buildProfileSkeleton() {
+  const layer = document.createElement('div');
+  layer.className = 'studio-profile-skeleton';
+  layer.id = 'studio-profile-skeleton';
+  layer.setAttribute('aria-hidden', 'true');
+
+  const place = (el, box) => {
+    el.style.left = `${box.x}px`;
+    el.style.top = `${box.y}px`;
+    el.style.width = `${box.width}px`;
+    el.style.height = `${box.height}px`;
+    return el;
+  };
+
+  const tag = (text) => {
+    const span = document.createElement('span');
+    span.className = 'studio-skeleton-label';
+    span.textContent = text;
+    return span;
+  };
+
+  // The outer Profile Background area, behind absolutely everything.
+  const bg = document.createElement('div');
+  bg.className = 'studio-skeleton-bg';
+  bg.dataset.skeleton = 'background';
+  place(bg, PROFILE_LAYOUT.background);
+  bg.appendChild(tag('PROFILE BACKGROUND'));
+  layer.appendChild(bg);
+
+  // The two real columns, drawn as separate areas.
+  for (const [name, key] of [['main', 'main'], ['sidebar', 'sidebar']]) {
+    const column = document.createElement('div');
+    column.className = `studio-skeleton-column studio-skeleton-${name}`;
+    column.dataset.skeleton = name;
+    place(column, PROFILE_LAYOUT[key]);
+    column.appendChild(tag(name === 'main' ? 'MAIN PROFILE' : 'SIDEBAR'));
+    layer.appendChild(column);
+  }
+
+  // Every real profile module, each as its OWN card. Sidebar modules are never
+  // merged into a single sidebar block.
+  for (const section of [...PROFILE_MAIN_SECTIONS, ...PROFILE_SIDEBAR_SECTIONS]) {
+    const card = document.createElement('div');
+    const column = GUIDE_SECTION_COLUMN[section] || 'main';
+    card.className = `studio-skeleton-card studio-skeleton-card-${column}`;
+    card.dataset.skeletonModule = section;
+    card.dataset.skeletonColumn = column;
+    place(card, PROFILE_LAYOUT.modules[section]);
+    card.appendChild(tag(guideSectionLabel(section).toUpperCase()));
+    layer.appendChild(card);
+  }
+
+  return layer;
+}
+
+/**
+ * CREATOR-10: paint the uploaded Profile Background behind the whole design.
+ *
+ * It is a BACKGROUND LAYER, not a content card: it is a sibling of the profile
+ * structure, sized to the full design area and drawn first so the main column
+ * and every sidebar card sit on top of it. It carries no geometry of its own,
+ * so it can never be selected, dragged, resized or deleted, and it never
+ * appears as a small image card.
+ */
+function buildProfileBackgroundLayer() {
+  const url = backgroundImageUrl();
+  const layer = document.createElement('div');
+  layer.className = 'studio-profile-background';
+  layer.id = 'studio-profile-background';
+  layer.setAttribute('aria-hidden', 'true');
+  layer.dataset.profileBackground = url ? 'set' : 'none';
+
+  const c = canvas();
+  layer.style.left = '0px';
+  layer.style.top = '0px';
+  layer.style.width = `${c.width}px`;
+  layer.style.height = `${Math.max(c.minHeight, PROFILE_LAYOUT.background.height)}px`;
+
+  if (url) {
+    const theme = designTheme();
+    // Rendered through a real <img> so the ORIGINAL uploaded file is what the
+    // browser scales — no rasterising, no re-encoding, no canvas round-trip.
+    const img = document.createElement('img');
+    img.className = 'studio-profile-background-img';
+    img.alt = '';
+    img.decoding = 'async';
+    img.referrerPolicy = 'no-referrer';
+    img.src = url;
+    img.style.objectFit = backgroundSizeCss(theme.backgroundSize);
+    img.style.objectPosition = theme.backgroundPosition || 'center';
+    img.style.visibility = theme.backgroundRepeat === 'repeat' ? 'visible' : 'visible';
+    layer.appendChild(img);
+  }
+  return layer;
+}
+
 function renderCanvas() {
   const inner = root?.querySelector('#studio-canvas-inner');
   if (!inner || !currentDesign) return;
@@ -683,6 +852,17 @@ function renderCanvas() {
     empty.textContent = 'Your profile is empty. Click a section or "+" in the Elements panel to place it, or drag it onto the canvas.';
     doc.appendChild(empty);
   }
+
+  // CREATOR-10: draw the Profile Background and the real profile structure
+  // FIRST, so both sit behind every component.
+  //
+  // The BACKGROUND is part of the real published profile, so it is shown in
+  // Preview too. The profile STRUCTURE and the guide cards are Studio-only
+  // editing aids, so Preview leaves them out — exactly the exclusion the public
+  // profile renderer applies.
+  doc.appendChild(buildProfileBackgroundLayer());
+  if (!previewMode) doc.appendChild(buildProfileSkeleton());
+
   // CREATOR-09: guide cards are a Studio-only aid. Preview represents the real
   // published profile, so no guide is drawn there — exactly as the public
   // profile renderer excludes them. The components themselves are untouched and
@@ -1032,6 +1212,148 @@ function setPath(object, path, value) {
   o[keys[keys.length - 1]] = value;
 }
 
+/**
+ * CREATOR-10: Profile Background control.
+ *
+ * The flow is exactly the required one —
+ *   Upload Image → Set as Profile Background → it becomes the background
+ *   behind the entire profile (main column AND every sidebar card).
+ *
+ * It is NOT an ordinary `image` component: it writes design-level theme
+ * configuration, so it is never a small content card, never selectable on the
+ * canvas, and never dragged or resized. The upload goes through the existing
+ * Creator Studio endpoint, so the server re-validates the real file content
+ * (JPEG/PNG/WebP only) exactly as it does for any other studio image.
+ */
+function profileBackgroundProperties(frag) {
+  frag.appendChild(sectionTitle('Profile Background'));
+
+  const theme = designTheme();
+  const url = backgroundImageUrl();
+
+  const preview = document.createElement('div');
+  preview.className = 'studio-bg-preview';
+  preview.dataset.profileBackgroundPreview = url ? 'set' : 'none';
+  if (url) {
+    const img = document.createElement('img');
+    img.alt = '';
+    img.referrerPolicy = 'no-referrer';
+    img.src = url;
+    img.style.objectFit = backgroundSizeCss(theme.backgroundSize);
+    preview.appendChild(img);
+  } else {
+    const none = document.createElement('span');
+    none.className = 'studio-bg-preview-empty';
+    none.textContent = 'No background set — the profile uses its theme background.';
+    preview.appendChild(none);
+  }
+  frag.appendChild(preview);
+
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = 'image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp';
+  fileInput.hidden = true;
+  fileInput.id = 'studio-background-file';
+
+  const uploadBtn = document.createElement('button');
+  uploadBtn.type = 'button';
+  uploadBtn.id = 'studio-background-upload';
+  uploadBtn.className = 'btn btn-secondary studio-upload-btn';
+  uploadBtn.textContent = 'Upload Image';
+  uploadBtn.title = 'Choose a JPG, JPEG, PNG or WebP image';
+  uploadBtn.addEventListener('click', () => fileInput.click());
+
+  const applyBtn = document.createElement('button');
+  applyBtn.type = 'button';
+  applyBtn.id = 'studio-background-apply';
+  applyBtn.className = 'btn btn-primary studio-upload-btn';
+  applyBtn.textContent = 'Set as Profile Background';
+  applyBtn.disabled = true;
+  applyBtn.title = url ? 'Replace the profile background with the uploaded image' : 'Use the uploaded image as the profile background';
+
+  const clearBtn = document.createElement('button');
+  clearBtn.type = 'button';
+  clearBtn.id = 'studio-background-clear';
+  clearBtn.className = 'btn btn-secondary studio-upload-btn';
+  clearBtn.textContent = 'Remove';
+  clearBtn.disabled = !url;
+  clearBtn.title = 'Remove the profile background';
+
+  const row = document.createElement('div');
+  row.className = 'studio-image-row';
+  row.append(uploadBtn, applyBtn, clearBtn);
+
+  const status = document.createElement('p');
+  status.className = 'studio-prop-hint studio-upload-status';
+  status.id = 'studio-background-status';
+  status.textContent = 'JPG, JPEG, PNG or WebP, up to 5 MB.';
+
+  // An upload is staged, not applied: the creator picks a file, then explicitly
+  // promotes it to the profile background, so an upload can never silently
+  // replace the background of a design being edited.
+  let pendingUrl = '';
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files && fileInput.files[0];
+    fileInput.value = '';
+    if (!file) return;
+    uploadBtn.disabled = true;
+    applyBtn.disabled = true;
+    status.textContent = 'Uploading…';
+    try {
+      pendingUrl = await uploadStudioImage(file);
+      applyBtn.disabled = false;
+      status.textContent = 'Uploaded. Choose "Set as Profile Background" to use it.';
+    } catch (err) {
+      pendingUrl = '';
+      status.textContent = err.message || 'Upload failed. Try a JPG, JPEG, PNG, or WebP image.';
+    } finally {
+      uploadBtn.disabled = false;
+    }
+  });
+
+  applyBtn.addEventListener('click', () => {
+    const next = pendingUrl || url;
+    if (!next) return;
+    pushHistory();
+    const t = designTheme();
+    t.backgroundImage = next;
+    // Sensible presentation defaults the first time a background is applied.
+    if (!t.backgroundSize) t.backgroundSize = 'cover';
+    if (!t.backgroundPosition) t.backgroundPosition = 'center';
+    if (!t.backgroundRepeat) t.backgroundRepeat = 'no-repeat';
+    pendingUrl = '';
+    markChanged('Profile background set. It sits behind the whole profile, including the sidebar.');
+    renderProperties();
+  });
+
+  clearBtn.addEventListener('click', () => {
+    if (!backgroundImageUrl()) return;
+    pushHistory();
+    const t = designTheme();
+    delete t.backgroundImage;
+    pendingUrl = '';
+    markChanged('Profile background removed.');
+    renderProperties();
+  });
+
+  frag.appendChild(row);
+  frag.appendChild(fileInput);
+  frag.appendChild(status);
+
+  // Presentation: how the background is painted behind the profile. These are
+  // the platform's own background values, validated server-side.
+  frag.appendChild(fieldRow('Size', selectField(theme, 'backgroundSize', PROFILE_BACKGROUND_SIZES, {
+    labels: ['Cover', 'Contain', 'Stretch'],
+  })));
+  frag.appendChild(fieldRow('Position', selectField(theme, 'backgroundPosition', PROFILE_BACKGROUND_POSITIONS)));
+  frag.appendChild(fieldRow('Repeat', selectField(theme, 'backgroundRepeat', PROFILE_BACKGROUND_REPEATS)));
+
+  const hint = document.createElement('p');
+  hint.className = 'studio-prop-hint';
+  hint.textContent = 'The background covers the outer profile area, behind the main profile and every sidebar card. It is saved with the design and published with it — it is never a normal image card.';
+  frag.appendChild(hint);
+}
+
 function canvasProperties(frag) {
   const c = canvas();
   frag.appendChild(sectionTitle('Canvas'));
@@ -1049,6 +1371,10 @@ function canvasProperties(frag) {
 
   widthInput.addEventListener('input', () => { renderCanvas(); });
   heightInput.addEventListener('input', () => { renderCanvas(); });
+
+  // CREATOR-10: the background is a property of the DESIGN as a whole, so it
+  // lives with the canvas settings rather than with any one component.
+  profileBackgroundProperties(frag);
 }
 
 /**
@@ -1408,6 +1734,32 @@ function resetViewerView() {
   renderCanvas();
   renderZoomReadout();
   setStatus('View reset to 100% and re-centred. The saved design is unchanged.');
+}
+
+/**
+ * CREATOR-10: scale the viewer so the WHOLE profile is visible, main column and
+ * sidebar alike.
+ *
+ * The design canvas is 960 wide, but the centre column is whatever the two side
+ * panels leave over — usually narrower. At 100% the right-hand edge, where the
+ * profile SIDEBAR lives, is clipped off-screen, so a creator cannot see where the
+ * sidebar begins. Fit scales the design down (never up) until the whole profile
+ * fits, then re-centres.
+ *
+ * Like zoom and pan this is VIEWER state only: it cannot move, resize or
+ * otherwise touch a component, cannot change the canvas size, and cannot mark
+ * the design dirty.
+ */
+function fitViewerToProfile() {
+  const c = canvas();
+  const { w, h } = viewerViewport();
+  zoom = fitZoom({ contentW: c.width, contentH: c.minHeight, viewportW: w, viewportH: h });
+  // Re-centre for the new scale: clampPan() centres anything that already fits.
+  viewerPan = { x: 0, y: 0 };
+  clampViewerPan();
+  renderCanvas();
+  renderZoomReadout();
+  setStatus(`Profile fitted to the viewer at ${zoomPercent(zoom)}. The saved design is unchanged.`);
 }
 
 // ── Layer operations ─────────────────────────────────────────────────────────
@@ -1988,6 +2340,10 @@ async function saveDraft() {
     const result = await designApi.updateDesign(currentDesign.id, {
       name: currentDesign.name,
       layout: clone(layout()),
+      // CREATOR-10: the Profile Background is design-level theme configuration,
+      // so it is saved with the design and published with it. Sending the theme
+      // is what carries the background; the server validates it strictly.
+      theme: isPlainTheme(currentDesign.theme) ? clone(currentDesign.theme) : null,
     });
     currentDesign = normalizeDesign(result.design);
     designs = designs.map(d => (d.id === currentDesign.id ? currentDesign : d));
@@ -2238,6 +2594,7 @@ function attachEvents() {
   // CREATOR-08: zoom controls. Viewer state only — no design mutation.
   root.querySelector('#studio-zoom-in').addEventListener('click', () => zoomBy('in'));
   root.querySelector('#studio-zoom-out').addEventListener('click', () => zoomBy('out'));
+  root.querySelector('#studio-zoom-fit').addEventListener('click', fitViewerToProfile);
   root.querySelector('#studio-zoom-reset').addEventListener('click', resetViewerView);
   root.querySelector('#studio-canvas-inner').addEventListener('pointerdown', onStagePointerDown);
   // CREATOR-09: restore the default guide set from the toolbar, so it is

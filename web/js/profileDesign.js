@@ -48,16 +48,56 @@ export const LEGACY_GUIDE_COMPONENT_TYPE = 'profile_guide';
  * exactly the controlled sections the public profile actually renders — no
  * invented sections, and no user data. A stored card selects one of these ids,
  * so a guide can never carry arbitrary markup, CSS, script or profile content.
+ *
+ * CREATOR-10: the registry now mirrors the REAL public profile structure
+ * (web/js/profile.js → renderProfilePage) rather than one flat list:
+ *
+ *   .profile-content
+ *     .profile-main          → #profile-module (photo/name/alias/bio),
+ *                              #personal-info-module, #testimonials-module
+ *     .profile-sidebar       → #friend-space-module, #photo-gallery-module,
+ *                              #video-box-module, #music-module,
+ *                              #scraps-module, #community-module
+ *
+ * So Photo Gallery is a SIDEBAR module (not a main-column section below
+ * Testimonials), and the sidebar features each have their own section id.
  */
 export const GUIDE_SECTIONS = {
+  // ── Main profile column ──
   profile_photo: 'Profile Photo',
   name: 'Name',
   alias: 'Alias',
   bio: 'Bio',
   personal_info: 'Personal Information',
-  gallery: 'Gallery',
   testimonials: 'Testimonials',
+  // ── Sidebar (each its own independent module) ──
+  friend_space: 'Friend Space',
+  gallery: 'Photo Gallery',
+  video_box: 'Video Box',
+  music: 'Music',
+  scraps: 'Scraps',
   communities: 'Communities',
+};
+
+/**
+ * CREATOR-10: which column each real profile section lives in. This is the
+ * single source of truth the Profile Viewer, the guide patterns and the tests
+ * all read, so a section can never be drawn in the main column on one surface
+ * and in the sidebar on another.
+ */
+export const GUIDE_SECTION_COLUMN = {
+  profile_photo: 'main',
+  name: 'main',
+  alias: 'main',
+  bio: 'main',
+  personal_info: 'main',
+  testimonials: 'main',
+  friend_space: 'sidebar',
+  gallery: 'sidebar',
+  video_box: 'sidebar',
+  music: 'sidebar',
+  scraps: 'sidebar',
+  communities: 'sidebar',
 };
 
 export const GUIDE_SECTION_IDS = Object.keys(GUIDE_SECTIONS);
@@ -69,49 +109,103 @@ export const GUIDE_COMPONENT_TYPES = new Set([
 ]);
 
 /**
- * CREATOR-09: the server-known guide patterns. Each pattern is a list of card
- * placements in DESIGN coordinates on the 960x1200 canvas — a plain description
- * of where things go, never content.
+ * CREATOR-10: the REAL KomuniPH profile layout, in DESIGN coordinates on the
+ * 960x1200 canvas. This is the single source of truth shared by:
+ *
+ *   - the Profile Viewer skeleton (the editable base structure a creator sees)
+ *   - the default guide pattern (the placement markers laid over it)
+ *   - the tests that assert the two agree
+ *
+ * It mirrors web/js/profile.js → renderProfilePage():
+ *
+ *   PROFILE BACKGROUND            covers the whole 960x1200 design area
+ *   ├── MAIN PROFILE              the wide left column
+ *   │   ├── Profile Photo / Name / Alias / Bio
+ *   │   ├── Personal Information
+ *   │   └── Testimonials
+ *   └── SIDEBAR                   the narrow right column, one card per module
+ *       ├── Friend Space
+ *       ├── Photo Gallery
+ *       ├── Video Box
+ *       ├── Music
+ *       ├── Scraps
+ *       └── Communities
+ *
+ * Note there is deliberately NO Gallery in the main column: on the real profile
+ * Photo Gallery is a sidebar module (#photo-gallery-module), so the viewer must
+ * not invent a second, main-column Gallery section below Testimonials.
  */
+export const PROFILE_LAYOUT = {
+  canvas: { width: 960, minHeight: 1200 },
+  /** The outer Profile Background layer: the whole design area. */
+  background: { x: 0, y: 0, width: 960, height: 1200 },
+  /** The wide MAIN PROFILE area, left of the sidebar. */
+  main: { x: 40, y: 40, width: 560, height: 1060 },
+  /** The separate SIDEBAR area, right of the main column. */
+  sidebar: { x: 640, y: 40, width: 280, height: 1060 },
+  /**
+   * Each real profile module, in the column it actually lives in. Every entry
+   * is an INDEPENDENT card — the sidebar modules in particular are never merged
+   * into one giant sidebar block.
+   */
+  modules: {
+    // ── Main profile column ──
+    profile_photo: { x: 40, y: 40, width: 180, height: 180 },
+    name: { x: 240, y: 56, width: 360, height: 60 },
+    alias: { x: 240, y: 124, width: 300, height: 48 },
+    bio: { x: 40, y: 240, width: 560, height: 110 },
+    personal_info: { x: 40, y: 368, width: 560, height: 190 },
+    testimonials: { x: 40, y: 576, width: 560, height: 200 },
+    // ── Sidebar: one independent card per module ──
+    friend_space: { x: 640, y: 40, width: 280, height: 210 },
+    gallery: { x: 640, y: 266, width: 280, height: 190 },
+    video_box: { x: 640, y: 472, width: 280, height: 140 },
+    music: { x: 640, y: 628, width: 280, height: 120 },
+    scraps: { x: 640, y: 764, width: 280, height: 140 },
+    communities: { x: 640, y: 920, width: 280, height: 140 },
+  },
+};
+
+/** The main-column module ids, in reading order. */
+export const PROFILE_MAIN_SECTIONS = ['profile_photo', 'name', 'alias', 'bio', 'personal_info', 'testimonials'];
+/** The sidebar module ids, in the order the real profile stacks them. */
+export const PROFILE_SIDEBAR_SECTIONS = ['friend_space', 'gallery', 'video_box', 'music', 'scraps', 'communities'];
+
+/** Build guide card placements straight from the real profile layout. */
+function cardsFromProfileLayout(sectionIds) {
+  return sectionIds.map(section => {
+    const m = PROFILE_LAYOUT.modules[section];
+    return { section, x: m.x, y: m.y, width: m.width, height: m.height };
+  });
+}
+
+/**
+ * CREATOR-08's guide patterns. Each is a list of card placements in DESIGN
+ * coordinates on the 960x1200 canvas — a plain description of where things go,
+ * never content.
+ *
+ * CREATOR-10: `default` is now generated from PROFILE_LAYOUT, so the guide can
+ * never drift away from the profile structure the viewer draws.
+ */
+const DEFAULT_CARDS = cardsFromProfileLayout([...PROFILE_MAIN_SECTIONS, ...PROFILE_SIDEBAR_SECTIONS]);
+
 export const GUIDE_PATTERNS = {
   default: {
     id: 'default',
     label: 'Default Profile',
-    cards: [
-      { section: 'profile_photo', x: 40, y: 20, width: 200, height: 190 },
-      { section: 'name', x: 40, y: 222, width: 420, height: 64 },
-      { section: 'alias', x: 40, y: 294, width: 360, height: 56 },
-      { section: 'bio', x: 40, y: 362, width: 480, height: 120 },
-      { section: 'personal_info', x: 40, y: 494, width: 440, height: 150 },
-      { section: 'gallery', x: 40, y: 656, width: 560, height: 200 },
-      { section: 'testimonials', x: 40, y: 868, width: 480, height: 160 },
-      { section: 'communities', x: 40, y: 1040, width: 520, height: 150 },
-    ],
+    cards: DEFAULT_CARDS,
   },
   minimal: {
     id: 'minimal',
     label: 'Minimal Profile',
-    cards: [
-      { section: 'profile_photo', x: 40, y: 24, width: 150, height: 150 },
-      { section: 'name', x: 40, y: 192, width: 400, height: 60 },
-      { section: 'bio', x: 40, y: 268, width: 440, height: 130 },
-      { section: 'gallery', x: 40, y: 414, width: 520, height: 230 },
-      { section: 'communities', x: 40, y: 660, width: 480, height: 170 },
-    ],
+    // Same real structure, fewer optional modules: the sidebar keeps Friend
+    // Space and Photo Gallery, the main column drops Alias and Testimonials.
+    cards: cardsFromProfileLayout(['profile_photo', 'name', 'bio', 'personal_info', 'friend_space', 'gallery']),
   },
   classic: {
     id: 'classic',
     label: 'Classic Profile',
-    cards: [
-      { section: 'profile_photo', x: 40, y: 24, width: 180, height: 180 },
-      { section: 'name', x: 40, y: 220, width: 440, height: 70 },
-      { section: 'alias', x: 40, y: 298, width: 340, height: 56 },
-      { section: 'bio', x: 40, y: 370, width: 460, height: 130 },
-      { section: 'personal_info', x: 40, y: 516, width: 420, height: 170 },
-      { section: 'gallery', x: 40, y: 702, width: 540, height: 190 },
-      { section: 'testimonials', x: 40, y: 908, width: 460, height: 160 },
-      { section: 'communities', x: 40, y: 1084, width: 500, height: 106 },
-    ],
+    cards: cardsFromProfileLayout([...PROFILE_MAIN_SECTIONS, 'friend_space', 'gallery', 'communities']),
   },
 };
 

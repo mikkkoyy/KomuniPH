@@ -124,6 +124,34 @@ export function stepPan(pan, direction) {
 }
 
 /**
+ * CREATOR-10: the largest zoom that still shows the WHOLE design inside the
+ * viewer, in either axis.
+ *
+ * The design canvas is 960x1200, but the viewer's centre column is whatever the
+ * side panels leave over. At 100% the canvas is usually WIDER than that column,
+ * so the right-hand edge — where the profile SIDEBAR lives — is clipped off and
+ * the creator literally cannot see where the sidebar begins. Fit solves that by
+ * scaling the design down to the viewport.
+ *
+ * Like every other value in this module it is pure VIEWER state: it is clamped
+ * into [MIN_ZOOM, MAX_ZOOM] and is never written to a component or the server.
+ * A zero/NaN viewport (the stage is not laid out yet) falls back to 1, which
+ * is the ordinary 100% view rather than a divide-by-zero.
+ */
+export function fitZoom({ contentW, contentH, viewportW, viewportH, margin = 0 } = {}) {
+  const cw = Number(contentW);
+  const ch = Number(contentH);
+  const vw = Number(viewportW);
+  const vh = Number(viewportH);
+  if (!(cw > 0) || !(ch > 0) || !(vw > 0) || !(vh > 0)) return DEFAULT_ZOOM;
+  const usableW = Math.max(1, vw - margin);
+  const usableH = Math.max(1, vh - margin);
+  // Never scale UP past 100%: "fit" is about making a too-large design visible,
+  // not about magnifying a small one.
+  return clampZoom(Math.min(1, usableW / cw, usableH / ch));
+}
+
+/**
  * CSS transform for the zoom layer. `transform-origin: 0 0` means the
  * translate below is expressed in unscaled screen pixels, so pan and zoom do
  * not interfere with one another.

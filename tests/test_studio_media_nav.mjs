@@ -625,6 +625,32 @@ test('pointer -> design point ignores viewer pan and divides out zoom', async ()
 
 group('Profile Viewer Wiring (source)');
 
+test('every named import in creatorStudio.js actually resolves', async () => {
+  // A named import used only inside a function body is a RUNTIME ReferenceError:
+  // `node --check` passes, and a bare import() succeeds, so nothing else in the
+  // suite would notice until a creator clicked the affected control. This caught
+  // a real CREATOR-10 bug where Reset referenced DEFAULT_ZOOM without importing
+  // it, so Reset silently did nothing and the canvas never re-centred.
+  const { readFileSync: read } = await import('node:fs');
+  const { pathToFileURL } = await import('node:url');
+  const src = read(resolve('web/js/creatorStudio.js'), 'utf8');
+  const check = async (specifier, modulePath, label) => {
+    const end = src.indexOf(specifier);
+    check(end > 0, `${label} import statement is present`);
+    const start = src.lastIndexOf('import {', end);
+    const names = src.slice(start, src.indexOf('}', start))
+      .replace(/import\s*\{|\}/g, '')
+      .split(',').map(s => s.trim()).filter(Boolean);
+    // pathToFileURL, not a bare path: on Windows an absolute path is not a
+    // valid ESM specifier and the loader rejects a 'd:' protocol.
+    const mod = await import(pathToFileURL(modulePath).href);
+    const missing = names.filter(n => !(n in mod));
+    check(missing.length === 0, `${label} exports every imported name, missing: ${missing.join(', ')}`);
+  };
+  await check("from './studioViewer.js';", resolve('web/js/studioViewer.js'), 'studioViewer');
+  await check("from './profileDesign.js';", resolve('web/js/profileDesign.js'), 'profileDesign');
+});
+
 test('CREATOR-08: zoom controls exist, but no viewer SIZING controls do', async () => {
   const { readFileSync } = await import('node:fs');
   const src = readFileSync(resolve('web/js/creatorStudio.js'), 'utf8');

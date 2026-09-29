@@ -337,6 +337,124 @@ const emptyCanvasPoint = () => page.evaluate(() => {
   }
   return null;
 });
+/**
+ * Authoritative snapshot of the whole saved design model, read from the rendered
+ * canvas. Used to prove that viewer-only operations (zoom, re-centring, Fit,
+ * panel/viewer/window resize) never touch design coordinates.
+ */
+const designSnapshot = () => page.evaluate(() => {
+  const doc = document.querySelector('#studio-canvas-document');
+  return {
+    canvasW: doc ? parseFloat(doc.style.width) : null,
+    canvasH: doc ? parseFloat(doc.style.minHeight) : null,
+    sizeLabel: document.querySelector('#studio-canvas-size')?.textContent.trim() || '',
+    // Every component's full geometry plus its image source, ordered so the
+    // comparison is stable across renders.
+    comps: Array.from(doc?.querySelectorAll('[data-comp-id]') || [])
+      .map(el => {
+        const img = el.querySelector('img');
+        return [
+          el.dataset.compId, el.dataset.compType,
+          parseFloat(el.style.left), parseFloat(el.style.top),
+          parseFloat(el.style.width), parseFloat(el.style.height),
+          parseFloat(el.style.rotation) || 0,
+          el.style.zIndex || '0',
+          img ? (img.getAttribute('src') || '') : '',
+        ].join('|');
+      })
+      .sort(),
+  };
+});
+
+/** Whether an undo entry exists, read from the Undo control's availability. */
+const undoDepth = () => page.evaluate(() => (document.querySelector('#studio-undo')?.disabled ? 0 : 1));
+
+/**
+ * Measure how the design canvas currently sits inside the Profile Viewer.
+ *
+ * `gap*` values are the breathing room on each side, with a negative gap
+ * floored to 0 (an oversized canvas is deliberately pulled past the edge to show
+ * its middle, which is not "room"). `isCentred` then compares the two sides: a
+ * centred canvas has equal room left/right and top/bottom, which is what
+ * "must always be centered" means in a way a transform string alone cannot fake.
+ */
+const canvasPlacement = () => page.evaluate(() => {
+  const viewer = document.querySelector('#studio-canvas-scroll');
+  const doc = document.querySelector('#studio-canvas-document');
+  if (!viewer || !doc) return null;
+  const v = viewer.getBoundingClientRect();
+  const d = doc.getBoundingClientRect();
+  const left = d.left - v.left;
+  const right = v.right - d.right;
+  const top = d.top - v.top;
+  const bottom = v.bottom - d.bottom;
+  return {
+    left: Math.round(left), right: Math.round(right),
+    top: Math.round(top), bottom: Math.round(bottom),
+    gapLeft: Math.max(0, Math.round(left)),
+    gapRight: Math.max(0, Math.round(right)),
+    gapTop: Math.max(0, Math.round(top)),
+    gapBottom: Math.max(0, Math.round(bottom)),
+    canvasW: Math.round(d.width), canvasH: Math.round(d.height),
+    viewerW: Math.round(v.width), viewerH: Math.round(v.height),
+    zoom: document.querySelector('#studio-zoom-readout')?.textContent.trim(),
+    transform: document.querySelector('#studio-zoom-layer')?.style.transform,
+  };
+});
+
+/**
+ * True when the canvas sits in the middle of the viewer on both axes.
+ *
+ * This compares the RAW offsets, not the floored `gap*` values. When the canvas
+ * is larger than the viewer its offsets are negative, and flooring them to zero
+ * would make ANY position look centred — an off-centre oversized canvas would
+ * wrongly pass. Equal raw offsets on both sides is what actually means "the
+ * canvas centre coincides with the viewport centre".
+ */
+const isCentred = (p) => !!p
+  && Math.abs(p.left - p.right) <= 1
+  && Math.abs(p.top - p.bottom) <= 1;
+
+/** Describe a placement for a failure message. */
+const placeNote = (p) => `zoom ${p?.zoom} (left ${p?.left} vs right ${p?.right},`
+  + ` top ${p?.top} vs bottom ${p?.bottom}, canvas ${p?.canvasW}x${p?.canvasH} in viewer ${p?.viewerW}x${p?.viewerH})`;
+
+/**
+ * Click a zoom control reliably.
+ *
+ * The zoom bar is sticky, so after an arbitrary earlier scroll it can end up
+ * under another element and a coordinate click is silently swallowed: the control
+ * never fires, the viewer does not move, and the test then asserts against
+ * unchanged state. This clicks for real first — so the button's hit area really
+ * is exercised — and falls back to invoking the element in-page when the view did
+ * not move.
+ *
+ * `expectChange: false` is for controls that are legitimately idempotent: Reset at
+ * 100% on an already-centred canvas changes nothing observable, and that is
+ * correct behaviour rather than a dead button. Real Reset behaviour is proven
+ * separately, starting from a genuinely off-centre view.
+ */
+const clickZoomControl = async (selector, { expectChange = true } = {}) => {
+  // Zoom AND transform together: a no-op at the same zoom can still re-centre.
+  const signature = () => page.evaluate(() => {
+    const layer = document.querySelector('#studio-zoom-layer');
+    return `${document.querySelector('#studio-zoom-readout')?.textContent.trim()}|${layer?.style.transform || ''}`;
+  });
+  const before = await signature();
+  await page.evaluate((sel) => {
+    document.querySelector(sel)?.scrollIntoView({ block: 'center', inline: 'nearest' });
+  }, selector);
+  await new Promise(r => setTimeout(r, 120));
+  await page.click(selector);
+  await new Promise(r => setTimeout(r, 240));
+  if (await signature() !== before) return 'real-click';
+  await page.evaluate((sel) => document.querySelector(sel)?.click(), selector);
+  await new Promise(r => setTimeout(r, 240));
+  if (await signature() !== before) return 'in-page-fallback';
+  if (expectChange) throw new Error(`${selector} had no effect on the viewer (still "${before}")`);
+  return 'no-op';
+};
+
 // Viewer box, in page coordinates.
 const viewerBox = () => page.$eval('#studio-viewer', (el) => {
   const r = el.getBoundingClientRect();
@@ -551,8 +669,18 @@ await step('a profile taller than the viewer is reached by panning, not scaled o
   // The design stays at its authored 960x1200 — it is NOT shrunk to fit.
   check(state.inlineW === '960px', `the design keeps its authored width, got "${state.inlineW}"`);
   check(state.inlineH === '1200px', `the design keeps its authored height, got "${state.inlineH}"`);
-  // No auto-fit: the transform is identity, not a scale-down.
-  check(/matrix\(1,\s*0,\s*0,\s*1,\s*0,\s*0\)/.test(state.transform) || state.transform === 'none',
+  // No auto-fit: the SCALE must still be 1 — the design is not shrunk to fit.
+  //
+  // CREATOR-10: the assertion is on the scale, not on the whole transform. A
+  // translate is now expected and required — the canvas is centred in the viewer
+  // rather than sitting against its top-left corner — so an identity transform
+  // is no longer the correct thing to assert. What must NOT happen is the
+  // design being rescaled to fit.
+  const matrix = /matrix\(([^)]+)\)/.exec(state.transform);
+  const parts = matrix ? matrix[1].split(',').map(v => parseFloat(v)) : null;
+  const scaleX = parts ? Math.abs(parts[0]) : 1;
+  const scaleY = parts ? Math.abs(parts[3]) : 1;
+  check(Math.abs(scaleX - 1) < 0.0001 && Math.abs(scaleY - 1) < 0.0001,
     `the design is not automatically scaled down to fit, transform is "${state.transform}"`);
   // Still clipped, never scrolled.
   check(state.overflow === 'hidden', 'the viewer still clips instead of scrolling');
@@ -2633,6 +2761,392 @@ await step('typing in a number field is not hijacked by arrow keys', async () =>
   // nudge the component, which would double-apply the movement.
   const delta = Math.abs(valueAfter - valueBefore);
   check(delta <= 1, `arrow key inside a number input applies at most one step, delta=${delta}`);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CREATOR-10 — the editable canvas is always CENTRED, and every action that
+// re-establishes the view (zoom, Fit, Reset, panel/viewer/window resize) must
+// re-centre it. All of it is viewer-only state.
+//
+// These run LAST on purpose: they deliberately change zoom, pan and the panel
+// widths, so running them earlier would perturb the workspace-state assertions
+// that depend on a known starting layout.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Reload the Studio so these steps start from a KNOWN workspace: default panel
+// widths, the default viewer height, a freshly-loaded (not dirty) design and
+// 100% zoom. Earlier steps deliberately leave the panels narrowed, the viewer
+// very short and the zoom far from 1, none of which is a state these assertions
+// should have to cope with.
+const resetStudioWorkspace = async () => {
+  await page.goto(`${BASE}/#/creator-studio`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  // An explicit reload is REQUIRED: navigating to the same URL with only a hash
+  // change does not re-document in Chromium, so goto() alone would silently keep
+  // the previous workspace (narrowed panels, a 300px viewer, a dirty design and
+  // a populated undo stack) and every assertion below would run against stale
+  // state. reload() guarantees a fresh module instance, so the default panel
+  // widths, default viewer height, clean design and empty undo stack are real.
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
+  await waitForStudioReady();
+  await page.waitForSelector('#studio-design-select', { timeout: 15000 });
+  await page.waitForFunction(() => document.querySelectorAll('#studio-canvas-inner [data-comp-id]').length > 0,
+    { timeout: 20000 });
+  await new Promise(r => setTimeout(r, 300));
+};
+
+await step('CREATOR-10: the canvas is centered at 100%', async () => {
+  await resetStudioWorkspace();
+  await ensureEditingMode();
+  await pinStudioInView();
+  // Drive Reset through the real control so the assertion covers the button.
+  await page.click('#studio-zoom-reset');
+  await new Promise(r => setTimeout(r, 300));
+  const p = await canvasPlacement();
+  check(!!p, 'the canvas is measurable');
+  eq(p.zoom, '100%', 'Reset returns the viewer to 100%');
+  check(isCentred(p), `the canvas is centered at 100% — ${placeNote(p)}`);
+  // At the default 100% the 960x1200 canvas is larger than the centre column, so
+  // centring must show the canvas MIDDLE rather than pinning a corner.
+  check(p.left < 0 && p.top < 0,
+    `an oversized canvas is centered on its middle, not a corner — ${placeNote(p)}`);
+  const geomBefore = await designSnapshot();
+  await page.click('#studio-zoom-reset');
+  await new Promise(r => setTimeout(r, 250));
+  eq(JSON.stringify(await designSnapshot()), JSON.stringify(geomBefore),
+    'Reset is idempotent and changed no design data');
+});
+
+await step('CREATOR-10: zooming out and back in keeps the canvas centered', async () => {
+  // Fresh workspace so the "small zoom" half of this step starts from a viewer
+  // large enough for a reduced canvas to genuinely FIT, which is the case that
+  // must produce equal breathing room rather than a flush corner.
+  await resetStudioWorkspace();
+  await ensureEditingMode();
+  await pinStudioInView();
+  await page.click('#studio-zoom-reset');
+  await new Promise(r => setTimeout(r, 250));
+
+  for (const dir of ['out', 'in']) {
+    // Two steps each, so the canvas crosses between "fits" and "oversized":
+    // both must stay centred, which is the whole requirement.
+    for (let i = 0; i < 2; i += 1) {
+      await clickZoomControl(dir === 'out' ? '#studio-zoom-out' : '#studio-zoom-in');
+    }
+    const p = await canvasPlacement();
+    check(isCentred(p), `zooming ${dir} keeps the canvas centered — ${placeNote(p)}`);
+  }
+  // A large zoom, where the canvas is far bigger than the viewer, must still
+  // show the canvas centre rather than pinning a corner.
+  for (let i = 0; i < 6; i += 1) {
+    await clickZoomControl('#studio-zoom-in');
+  }
+  const big = await canvasPlacement();
+  check(isCentred(big), `a large zoom stays centered — ${placeNote(big)}`);
+  check(big.left < 0 && big.top < 0,
+    `a large zoom shows the canvas middle, not a corner — ${placeNote(big)}`);
+
+  // And a small zoom, where the canvas is much smaller than the viewer, must be
+  // inset with equal room on all four sides.
+  await clickZoomControl('#studio-zoom-reset');
+  for (let i = 0; i < 5; i += 1) {
+    await clickZoomControl('#studio-zoom-out');
+  }
+  const small = await canvasPlacement();
+  check(isCentred(small), `a small zoom stays centered — ${placeNote(small)}`);
+  check(small.canvasW < small.viewerW && small.canvasH < small.viewerH,
+    `the small-zoom canvas really does fit the viewer — ${placeNote(small)}`);
+  check(small.gapLeft > 0 && small.gapRight > 0 && small.gapTop > 0 && small.gapBottom > 0,
+    `a small zoom insets the canvas from every edge — ${placeNote(small)}`);
+  await clickZoomControl('#studio-zoom-reset');
+});
+
+await step('CREATOR-10: Reset re-centers after zooming and manual panning', async () => {
+  await resetStudioWorkspace();
+  await ensureEditingMode();
+  await pinStudioInView();
+  // Prove Reset recovers from a genuinely off-centre view, not from an
+  // already-centred one.
+  for (let i = 0; i < 4; i += 1) {
+    await clickZoomControl('#studio-zoom-in');
+  }
+  await clickZoomControl('#studio-zoom-reset');
+  const start = await canvasPlacement();
+  check(isCentred(start), `the canvas starts centered before the manual pan — ${placeNote(start)}`);
+
+  // Panning needs room to move, so make the canvas bigger than the viewer.
+  for (let i = 0; i < 3; i += 1) {
+    await clickZoomControl('#studio-zoom-in');
+  }
+  const empty = await emptyCanvasPoint();
+  let panned = null;
+  if (empty) {
+    await page.mouse.move(empty.x, empty.y);
+    await page.mouse.down();
+    await page.mouse.move(empty.x + 150, empty.y + 130, { steps: 8 });
+    await page.mouse.up();
+    await new Promise(r => setTimeout(r, 250));
+    panned = await canvasPlacement();
+  }
+  check(!!empty, 'found an empty-canvas point to pan from');
+  check(panned && !isCentred(panned),
+    `a manual pan does move the canvas off-centre — ${placeNote(panned)}`);
+
+  await clickZoomControl('#studio-zoom-reset');
+  const reset = await canvasPlacement();
+  eq(reset.zoom, '100%', 'Reset is back at 100%');
+  check(isCentred(reset), `Reset re-centers the canvas after panning — ${placeNote(reset)}`);
+});
+
+await step('CREATOR-10: resizing a side panel re-centers the canvas without touching the design', async () => {
+  // Fresh workspace, so the centre column has room to be narrowed and widened.
+  await resetStudioWorkspace();
+  await ensureEditingMode();
+  await pinStudioInView();
+  await page.click('#studio-zoom-reset');
+  await new Promise(r => setTimeout(r, 250));
+  const before = await canvasPlacement();
+  const geomBefore = await designSnapshot();
+  const undoBefore = await undoDepth();
+
+  // Widen the LEFT panel: the centre column narrows, so the canvas re-centres.
+  const leftHandle = await page.$eval('#studio-col-resizer-left', el => {
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  await dragMouse(leftHandle, { x: leftHandle.x + 90, y: leftHandle.y });
+  await new Promise(r => setTimeout(r, 400));
+  const afterLeft = await canvasPlacement();
+  check(afterLeft.viewerW < before.viewerW - 30,
+    `widening the left panel narrowed the centre viewer (${before.viewerW} -> ${afterLeft.viewerW})`);
+  check(isCentred(afterLeft), `the canvas re-centers after a left panel resize — ${placeNote(afterLeft)}`);
+
+  // Widen the RIGHT panel: the centre column narrows again, re-centring again.
+  await pinStudioInView();
+  const rightHandle = await page.$eval('#studio-col-resizer-right', el => {
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  await dragMouse(rightHandle, { x: rightHandle.x - 90, y: rightHandle.y });
+  await new Promise(r => setTimeout(r, 400));
+  const afterRight = await canvasPlacement();
+  check(afterRight.viewerW < afterLeft.viewerW - 30,
+    `widening the right panel narrowed the centre viewer further (${afterLeft.viewerW} -> ${afterRight.viewerW})`);
+  check(isCentred(afterRight), `the canvas re-centers after a right panel resize — ${placeNote(afterRight)}`);
+
+  // Narrowing them again must give the space back and re-centre once more.
+  await pinStudioInView();
+  const leftBack = await page.$eval('#studio-col-resizer-left', el => {
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  await dragMouse(leftBack, { x: leftBack.x - 90, y: leftBack.y });
+  await new Promise(r => setTimeout(r, 400));
+  const widened = await canvasPlacement();
+  check(widened.viewerW > afterRight.viewerW + 30,
+    `narrowing the left panel gave the space back (${afterRight.viewerW} -> ${widened.viewerW})`);
+  check(isCentred(widened), `the canvas re-centers when the panels narrow — ${placeNote(widened)}`);
+
+  // The design must be completely untouched by any of it.
+  eq(JSON.stringify(await designSnapshot()), JSON.stringify(geomBefore),
+    'resizing a side panel changed no component geometry, canvas size or image source');
+  eq(await undoDepth(), undoBefore, 'resizing a side panel created no undo history');
+});
+
+await step('CREATOR-10: resizing the viewer height re-centers the canvas', async () => {
+  // Fresh workspace, so the viewer starts at its full default height and can
+  // genuinely be shortened.
+  await resetStudioWorkspace();
+  await ensureEditingMode();
+  await pinStudioInView();
+  const before = await canvasPlacement();
+  const geomBefore = await designSnapshot();
+  const grip = await heightGripPoint();
+  check(!!grip, 'the viewer height grip is reachable');
+  if (grip) {
+    await dragMouse(grip, { x: grip.x, y: grip.y - 320 });
+    await new Promise(r => setTimeout(r, 400));
+  }
+  const after = await canvasPlacement();
+  check(after.viewerH < before.viewerH - 200, `the viewer got shorter (${before.viewerH} -> ${after.viewerH})`);
+  check(isCentred(after), `the canvas re-centers after a viewer height change — ${placeNote(after)}`);
+  eq(JSON.stringify(await designSnapshot()), JSON.stringify(geomBefore),
+    'a viewer height change touched no component geometry');
+});
+
+await step('CREATOR-10: resizing the browser window re-centers the canvas', async () => {
+  await resetStudioWorkspace();
+  await ensureEditingMode();
+  await pinStudioInView();
+  const before = await canvasPlacement();
+  await page.setViewport({ width: 1400, height: 860 });
+  await new Promise(r => setTimeout(r, 600));
+  const narrow = await canvasPlacement();
+  check(narrow.viewerW < before.viewerW, `the centre viewer got narrower with the window (${before.viewerW} -> ${narrow.viewerW})`);
+  check(isCentred(narrow), `the canvas re-centers after a window resize — ${placeNote(narrow)}`);
+  await page.setViewport({ width: 1600, height: 900 });
+  await new Promise(r => setTimeout(r, 600));
+  const wide = await canvasPlacement();
+  check(isCentred(wide), `the canvas re-centers again when the window widens — ${placeNote(wide)}`);
+});
+
+await step('CREATOR-10: centering never dirties the design or adds undo history', async () => {
+  // A freshly-reloaded workspace: the design is loaded, not dirty, and the undo
+  // stack is empty. Otherwise this would be asserting against a design that
+  // earlier editing steps had already dirtied.
+  await resetStudioWorkspace();
+  await ensureEditingMode();
+  await pinStudioInView();
+  const undoBefore = await undoDepth();
+  eq(undoBefore, 0, 'the reloaded workspace starts with no undo history');
+  const geomBefore = await designSnapshot();
+
+  // Exercise every re-centring path in one go. Reset is exercised with
+  // expectChange:false because it is legitimately a no-op from an already-centred
+  // 100% view; its real behaviour is proven in the dedicated step above.
+  for (const selector of ['#studio-zoom-in', '#studio-zoom-out', '#studio-zoom-reset']) {
+    await clickZoomControl(selector, { expectChange: selector !== '#studio-zoom-reset' });
+  }
+  await page.evaluate(() => document.querySelector('#studio-zoom-fit')?.click());
+  await new Promise(r => setTimeout(r, 300));
+  const leftHandle = await page.$eval('#studio-col-resizer-left', el => {
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  });
+  await dragMouse(leftHandle, { x: leftHandle.x + 70, y: leftHandle.y });
+  await new Promise(r => setTimeout(r, 350));
+  await page.setViewport({ width: 1450, height: 880 });
+  await new Promise(r => setTimeout(r, 400));
+  await page.setViewport({ width: 1600, height: 900 });
+  await new Promise(r => setTimeout(r, 400));
+
+  eq(await undoDepth(), undoBefore,
+    'zooming, resetting, fitting, panel resize and window resize created no undo history');
+  eq(JSON.stringify(await designSnapshot()), JSON.stringify(geomBefore),
+    'no re-centring action changed any design data');
+  check(isCentred(await canvasPlacement()), 'the canvas is still centered after all of that');
+
+  // The strongest available proof that nothing was persisted: reload and confirm
+  // the design that comes back from the server is byte-for-byte what it was.
+  // (The Save button is not a dirty indicator — it is never disabled — so the
+  // undo stack and the stored design are the meaningful signals.)
+  await resetStudioWorkspace();
+  eq(JSON.stringify(await designSnapshot()), JSON.stringify(geomBefore),
+    'reloading proves the re-centring actions persisted nothing to the server');
+});
+
+await step('CREATOR-10: an image component survives every re-centring unchanged', async () => {
+  await prepareStableCanvas();
+  const imagePresent = await page.evaluate(() =>
+    !!document.querySelector('#studio-canvas-inner [data-comp-type="image"]'));
+  check(imagePresent, 'an image component is present to check against re-centring');
+  if (!imagePresent) return;
+
+  const readImage = () => page.evaluate(() => {
+    const el = document.querySelector('#studio-canvas-inner [data-comp-type="image"]');
+    if (!el) return null;
+    const img = el.querySelector('img');
+    return {
+      x: parseFloat(el.style.left), y: parseFloat(el.style.top),
+      width: parseFloat(el.style.width), height: parseFloat(el.style.height),
+      src: img?.getAttribute('src') || '', naturalW: img?.naturalWidth || 0,
+    };
+  });
+  const before = await readImage();
+
+  for (const selector of ['#studio-zoom-out', '#studio-zoom-in', '#studio-zoom-reset']) {
+    await page.click(selector);
+    await new Promise(r => setTimeout(r, 220));
+    const after = await readImage();
+    eq(after.x, before.x, `${selector} did not change the image x`);
+    eq(after.y, before.y, `${selector} did not change the image y`);
+    eq(after.width, before.width, `${selector} did not change the image width`);
+    eq(after.height, before.height, `${selector} did not change the image height`);
+    eq(after.src, before.src, `${selector} did not change the image source`);
+    eq(after.naturalW, before.naturalW, `${selector} did not change the stored image resolution`);
+  }
+  await page.evaluate(() => document.querySelector('#studio-zoom-fit')?.click());
+  await new Promise(r => setTimeout(r, 300));
+  const afterFit = await readImage();
+  eq(afterFit.x, before.x, 'Fit did not change the image x');
+  eq(afterFit.y, before.y, 'Fit did not change the image y');
+  eq(afterFit.width, before.width, 'Fit did not change the image width');
+  eq(afterFit.height, before.height, 'Fit did not change the image height');
+  eq(afterFit.src, before.src, 'Fit did not change the image source');
+  eq(afterFit.naturalW, before.naturalW, 'Fit did not change the stored image resolution');
+  check(isCentred(await canvasPlacement()), 'Fit also leaves the canvas centered');
+});
+
+await step('CREATOR-10: the Profile Background stays outside the main profile', async () => {
+  const geom = await page.evaluate(() => {
+    const layer = document.querySelector('#studio-profile-background');
+    const bgBox = document.querySelector('#studio-profile-skeleton [data-skeleton="background"]');
+    const main = document.querySelector('#studio-profile-skeleton [data-skeleton="main"]');
+    const sidebar = document.querySelector('#studio-profile-skeleton [data-skeleton="sidebar"]');
+    if (!layer || !bgBox) return { missing: true };
+    const rect = (el) => el.getBoundingClientRect();
+    const encloses = (a, b) => a.left <= b.left + 1 && a.top <= b.top + 1
+      && a.right >= b.right - 1 && a.bottom >= b.bottom - 1;
+    const lb = rect(layer);
+    const bb = rect(bgBox);
+    const mb = main ? rect(main) : null;
+    const sb = sidebar ? rect(sidebar) : null;
+    return {
+      missing: false,
+      layerEncloses: encloses(lb, bb),
+      enclosesMain: !!mb && encloses(bb, mb),
+      enclosesSidebar: !!sb && encloses(bb, sb),
+      backgroundInsideMain: !!mb && encloses(mb, bb),
+      sidebarInsideMain: !!mb && !!sb && encloses(mb, sb),
+      isModuleCard: !!document.querySelector('#studio-profile-skeleton [data-skeleton-module][data-profile-background]'),
+    };
+  });
+  check(!geom.missing, 'the Profile Background layer and the background area are both present');
+  check(geom.layerEncloses, 'the background LAYER encloses the whole profile background area');
+  check(geom.enclosesMain, 'the background encloses the MAIN PROFILE area');
+  check(geom.enclosesSidebar, 'the background encloses the SIDEBAR area');
+  eq(geom.isModuleCard, false, 'the background is not one of the profile module cards');
+  eq(geom.backgroundInsideMain, false, 'the background is NOT inside the main content column');
+  eq(geom.sidebarInsideMain, false, 'the sidebar is not merged into the main content column');
+});
+
+await step('CREATOR-10: there is no Gallery below Testimonials on the canvas', async () => {
+  const layout = await page.evaluate(() => ({
+    cards: Array.from(document.querySelectorAll('#studio-profile-skeleton [data-skeleton-module]'))
+      .map(el => ({
+        id: el.dataset.skeletonModule,
+        column: el.dataset.skeletonColumn,
+        label: el.querySelector('.studio-skeleton-label')?.textContent || '',
+        x: Math.round(parseFloat(el.style.left)),
+        y: Math.round(parseFloat(el.style.top)),
+        w: Math.round(parseFloat(el.style.width)),
+        h: Math.round(parseFloat(el.style.height)),
+      })),
+  }));
+  check(layout.cards.length > 0, 'the profile structure is drawn');
+
+  const galleries = layout.cards.filter(c => c.id === 'gallery');
+  check(galleries.length === 1, `there is exactly one Photo Gallery card, got ${galleries.length}`);
+  for (const g of galleries) {
+    eq(g.column, 'sidebar', 'Photo Gallery is a sidebar card');
+    eq(g.label, 'PHOTO GALLERY', 'the sidebar card is labelled Photo Gallery');
+  }
+  // Every sidebar feature is its own independent card.
+  for (const id of ['friend_space', 'video_box', 'music', 'scraps']) {
+    const c = layout.cards.find(k => k.id === id);
+    check(!!c, `the "${id}" sidebar card exists`);
+    eq(c.column, 'sidebar', `"${id}" is a sidebar card`);
+  }
+  const distinct = new Set(layout.cards.map(c => `${c.x},${c.y},${c.w},${c.h}`));
+  eq(distinct.size, layout.cards.length, 'every sidebar module has its own distinct card');
+
+  const t = layout.cards.find(c => c.id === 'testimonials');
+  check(!!t, 'the Testimonials card exists in the main column');
+  eq(t.column, 'main', 'Testimonials is a main-column card');
+  for (const c of layout.cards.filter(k => k.column === 'main' && k.id !== 'testimonials')) {
+    check(c.y + c.h <= t.y + 1, `main card "${c.id}" is not below Testimonials`);
+  }
+  const mainGallery = layout.cards.filter(c => c.column === 'main' && /^gallery$/i.test(c.id));
+  eq(mainGallery.length, 0, 'no main-column Gallery section exists');
 });
 
 await step('studio screenshot captured', async () => {

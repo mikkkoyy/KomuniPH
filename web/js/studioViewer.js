@@ -98,6 +98,46 @@ export function zoomPercent(zoom) {
 }
 
 /**
+ * The pan that puts the design in the MIDDLE of the viewer. Pure viewer state.
+ *
+ * CREATOR-10: the editable canvas must never sit stuck against the top-left
+ * corner. Whenever the view is (re)established — a zoom step, Reset, Fit, a
+ * side-panel drag, a viewer-height drag or a window resize — the canvas is
+ * re-centred rather than left wherever the previous view happened to be.
+ *
+ *   centerX = (viewportWidth  - scaledCanvasWidth ) / 2
+ *   centerY = (viewportHeight - scaledCanvasHeight) / 2
+ *
+ * The same formula covers both cases, which is the point:
+ *
+ *   • Canvas SMALLER than the viewport → a positive offset, so the canvas floats
+ *     in the middle with equal breathing room on every side.
+ *   • Canvas LARGER than the viewport → a negative offset showing the middle of
+ *     the canvas, rather than pinning a corner into view.
+ *
+ * A centred offset is always inside clampPan()'s reachable range, so passing the
+ * result back through clampPan() is a no-op that preserves the "the design can
+ * never be dragged out of reach" invariant without moving anything.
+ *
+ * @param {number} viewportW  usable viewer width in screen px
+ * @param {number} viewportH  usable viewer height in screen px
+ * @param {number} contentW   ALREADY-SCALED canvas width in screen px
+ * @param {number} contentH   ALREADY-SCALED canvas height in screen px
+ */
+export function centeredPan({ viewportW, viewportH, contentW, contentH } = {}) {
+  const centerAxis = (viewport, scaled) => {
+    const v = Number(viewport);
+    const s = Number(scaled);
+    if (!Number.isFinite(v) || !Number.isFinite(s)) return 0;
+    return Math.round((v - s) / 2);
+  };
+  return {
+    x: centerAxis(viewportW, contentW),
+    y: centerAxis(viewportH, contentH),
+  };
+}
+
+/**
  * Keep the design reachable: when it is larger than the viewer the user may pan
  * until only PAN_MARGIN of it remains on screen; when it fits, it is centred.
  * Pan values are in SCREEN pixels (the scale is applied before the translate).

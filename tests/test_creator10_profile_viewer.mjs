@@ -523,6 +523,109 @@ await test('CREATOR-10: an uploaded image URL is validated like any other image'
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+await test('CREATOR-10: centeredPan puts the canvas in the middle of the viewer', () => {
+  // Canvas SMALLER than the viewport → a POSITIVE offset, giving equal
+  // breathing room on all four sides (not pinned to the top-left).
+  const small = viewer.centeredPan({ viewportW: 1200, viewportH: 1000, contentW: 600, contentH: 400 });
+  eq(small.x, 300, 'small canvas is centred horizontally');
+  eq(small.y, 300, 'small canvas is centred vertically');
+  check(small.x > 0 && small.y > 0, 'a canvas that fits is never anchored at the top-left');
+
+  // Canvas LARGER than the viewport → a NEGATIVE offset showing the middle of
+  // the canvas, rather than forcing a corner into view.
+  const large = viewer.centeredPan({ viewportW: 800, viewportH: 900, contentW: 960, contentH: 1200 });
+  eq(large.x, -80, 'a wider canvas is centred by showing its middle');
+  eq(large.y, -150, 'a taller canvas is centred by showing its middle');
+  check(large.x < 0 && large.y < 0, 'an oversized canvas is not pinned to a corner');
+
+  // Exactly equal → offset 0 on that axis.
+  eq(viewer.centeredPan({ viewportW: 960, viewportH: 1200, contentW: 960, contentH: 1200 }).x, 0,
+    'an exactly-fitting canvas needs no horizontal offset');
+
+  // Both axes together, the default 960x1200 canvas in a typical 808x864 viewer.
+  const typical = viewer.centeredPan({ viewportW: 808, viewportH: 864, contentW: 960, contentH: 1200 });
+  eq(typical.x, -76, 'the default canvas is centred in a narrower centre column');
+  eq(typical.y, -168, 'the default canvas is centred vertically too');
+});
+
+await test('CREATOR-10: a centred pan is always inside the reachable clamp range', () => {
+  // Centring must never fight clampPan(): the centred offset has to survive it
+  // unchanged, otherwise the "design can never be dragged out of reach"
+  // invariant would drag the canvas back off-centre.
+  const cases = [
+    { viewportW: 808, viewportH: 864, contentW: 960, contentH: 1200 },   // both axes oversized
+    { viewportW: 2000, viewportH: 2000, contentW: 400, contentH: 300 }, // canvas fits easily
+    { viewportW: 960, viewportH: 1200, contentW: 960, contentH: 1200 }, // exact fit
+    { viewportW: 500, viewportH: 400, contentW: 300, contentH: 1200 },  // mixed
+  ];
+  for (const c of cases) {
+    const centred = viewer.centeredPan(c);
+    const clamped = viewer.clampPan({
+      panX: centred.x, panY: centred.y,
+      viewportW: c.viewportW, viewportH: c.viewportH,
+      contentW: c.contentW, contentH: c.contentH,
+    });
+    eq(clamped.x, centred.x, `centred x survives the clamp for ${JSON.stringify(c)}`);
+    eq(clamped.y, centred.y, `centred y survives the clamp for ${JSON.stringify(c)}`);
+  }
+});
+
+await test('CREATOR-10: zoom re-centres by recomputing, never by preserving the old pan', () => {
+  // The whole point of the fix: the OLD behaviour clamped the previous pan when
+  // the canvas was oversized, which left it stuck wherever it was. Centring is
+  // recomputed from the viewport and the NEW scaled size every time.
+  const viewport = { viewportW: 808, viewportH: 864 };
+  const canvasSize = { contentW: 960, contentH: 1200 };
+  let pan = { x: 0, y: 0 };
+
+  for (const zoom of [1, 0.9, 0.8, 0.5, 0.3, 0.25, 1.5, 2.5, 3]) {
+    const scaled = { contentW: canvasSize.contentW * zoom, contentH: canvasSize.contentH * zoom };
+    // Simulate: update zoom, then RECENTRE (not clamp).
+    pan = viewer.centeredPan({ ...viewport, ...scaled });
+    // The result must be exactly the centred position for this zoom.
+    const expected = {
+      x: Math.round((viewport.viewportW - scaled.contentW) / 2),
+      y: Math.round((viewport.viewportH - scaled.contentH) / 2),
+    };
+    eq(pan.x, expected.x, `zoom ${zoom} recentres x`);
+    eq(pan.y, expected.y, `zoom ${zoom} recentres y`);
+    // And the canvas centre must land on the viewport centre.
+    const canvasCentre = pan.x + scaled.contentW / 2;
+    const viewportCentre = viewport.viewportW / 2;
+    check(Math.abs(canvasCentre - viewportCentre) <= 1,
+      `at zoom ${zoom} the canvas centre sits at the viewport centre (${canvasCentre} vs ${viewportCentre})`);
+  }
+});
+
+await test('CREATOR-10: no zoom level anchors the canvas to the top-left', () => {
+  // Requirement: large AND small zoom must both stay centred. Walking the whole
+  // supported range proves neither end regresses to corner-anchoring.
+  //
+  // A canvas exactly the size of the viewport legitimately gets a ZERO offset —
+  // it fills the viewport exactly, so there is nothing to inset. The assertions
+  // therefore compare the offset against the true centred value rather than
+  // assuming a sign.
+  const viewport = { viewportW: 808, viewportH: 864 };
+  for (let zoom = viewer.MIN_ZOOM; zoom <= viewer.MAX_ZOOM + 1e-9; zoom = Math.round((zoom + 0.01) * 100) / 100) {
+    const scaledW = 960 * zoom;
+    const scaledH = 1200 * zoom;
+    const p = viewer.centeredPan({ ...viewport, contentW: scaledW, contentH: scaledH });
+    // The canvas centre must coincide with the viewport centre on BOTH axes.
+    const expectX = Math.round((viewport.viewportW - scaledW) / 2);
+    const expectY = Math.round((viewport.viewportH - scaledH) / 2);
+    eq(p.x, expectX, `at zoom ${zoom} the canvas is centred horizontally`);
+    eq(p.y, expectY, `at zoom ${zoom} the canvas is centred vertically`);
+
+    // A positive offset is required whenever the canvas is strictly smaller
+    // than the viewport, otherwise it is left flush against an edge.
+    if (scaledW < viewport.viewportW) check(p.x > 0, `at zoom ${zoom} a canvas narrower than the viewer is inset from the left edge`);
+    if (scaledH < viewport.viewportH) check(p.y > 0, `at zoom ${zoom} a canvas shorter than the viewer is inset from the top edge`);
+    // A strictly larger canvas must be pulled back to show its middle.
+    if (scaledW > viewport.viewportW) check(p.x < 0, `at zoom ${zoom} an oversized canvas shows its centre, not a corner`);
+    if (scaledH > viewport.viewportH) check(p.y < 0, `at zoom ${zoom} a tall canvas shows its centre, not a corner`);
+  }
+});
+
 process.stdout.write('\n════════════════════════════════════════════════════════════\n');
 process.stdout.write(`CREATOR-10 PROFILE VIEWER TESTS: ${passed}/${passed + failed} passed\n`);
 if (failed > 0) {

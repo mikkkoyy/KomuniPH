@@ -39,10 +39,10 @@ import {
   stepPan,
   stepZoom,
   zoomPercent,
-  defaultViewerState,
   clampZoom,
   clampPan,
   fitZoom,
+  centeredPan,
   viewerTransform,
   designPoint,
   columnWidthsFromDrag,
@@ -52,6 +52,7 @@ import {
   MIN_CENTER_WIDTH,
   MIN_VIEWER_HEIGHT,
   DEFAULT_VIEWER_HEIGHT,
+  DEFAULT_ZOOM,
 } from './studioViewer.js';
 
 // ── Component catalog (mirrors the server registries) ────────────────────────
@@ -216,7 +217,18 @@ function setStatus(message) {
 }
 function showWorkspace(visible) {
   const workspace = root?.querySelector('#studio-workspace');
-  if (workspace) workspace.hidden = !visible;
+  if (!workspace) return;
+  workspace.hidden = !visible;
+  // CREATOR-10: un-hiding the workspace is the first moment the viewer has a
+  // measurable size, so it is the first moment the canvas CAN be centred. The
+  // re-centring in recentreViewer() deliberately bails out while the viewport is
+  // still 0x0, so without this the design would stay pinned against the
+  // top-left corner on first paint. Repaint afterwards, because the canvas
+  // transform was written before the viewport existed.
+  if (visible) {
+    applyWorkspaceState();
+    renderCanvas();
+  }
 }
 
 function pushHistory() {
@@ -400,10 +412,27 @@ function renderDesignSelect() {
 // Viewer-only controls. Nothing in this section may touch the design layout.
 
 /** Current viewer viewport size in screen px (0 when the stage is not laid out). */
+/**
+ * The usable area the canvas is laid out in: the viewer's CONTENT box.
+ *
+ * clientWidth/clientHeight describe the PADDING box, but the canvas document is
+ * a child of #studio-canvas-inner, which sits inside the scroll element's
+ * padding — and that element has a 1.25rem padding plus a 1px border. Centring
+ * against the padding box would therefore be skewed by that fixed inset: the
+ * canvas would sit ~20px too far right and down, which is exactly the "stuck
+ * against the edge" appearance centring is meant to remove. Subtracting the
+ * padding measures the box the canvas origin actually lives in, so a centred pan
+ * is centred both mathematically and on screen.
+ */
 function viewerViewport() {
   const scroll = root?.querySelector('#studio-canvas-scroll');
   if (!scroll) return { w: 0, h: 0 };
-  return { w: scroll.clientWidth, h: scroll.clientHeight };
+  const cs = window.getComputedStyle(scroll);
+  const pad = (a, b) => (parseFloat(cs[a]) || 0) + (parseFloat(cs[b]) || 0);
+  return {
+    w: Math.max(0, scroll.clientWidth - pad('paddingLeft', 'paddingRight')),
+    h: Math.max(0, scroll.clientHeight - pad('paddingTop', 'paddingBottom')),
+  };
 }
 
 /** Scaled on-screen size of the design document. */
@@ -418,6 +447,37 @@ function clampViewerPan() {
   if (!(w > 0) || !(h > 0)) return;
   const scaled = scaledCanvasSize();
   viewerPan = clampPan({ panX: viewerPan.x, panY: viewerPan.y, viewportW: w, viewportH: h, contentW: scaled.w, contentH: scaled.h });
+}
+
+/**
+ * CREATOR-10: put the editable canvas in the MIDDLE of the Profile Viewer.
+ *
+ * Called whenever the view is (re)established rather than merely kept reachable:
+ *
+ *   zoom − / zoom + / Fit / Reset   — the scale changed, so the canvas is
+ *                                     re-centred at the new size
+ *   side-panel drag                 — the centre column changed width
+ *   viewer-height drag              — the viewport changed height
+ *   window resize                   — both of the above may have changed
+ *   opening / switching a design    — a new canvas in a known view
+ *
+ * When the scaled canvas is smaller than the viewport this leaves equal
+ * breathing room on every side; when it is larger it shows the middle of the
+ * canvas instead of pinning a corner to the top-left. Either way the result is
+ * passed through clampViewerPan() to keep the design reachable — a no-op for a
+ * centred offset, but it preserves the invariant rather than assuming it.
+ *
+ * Deliberately NOT called from renderCanvas()/clampViewerPan(): those run on
+ * every re-render, so recentring there would throw away a creator's manual pan
+ * during an ordinary component edit. Centring is an explicit action, and manual
+ * panning stays available in between.
+ */
+function recentreViewer() {
+  const { w, h } = viewerViewport();
+  if (!(w > 0) || !(h > 0)) return;
+  const scaled = scaledCanvasSize();
+  viewerPan = centeredPan({ viewportW: w, viewportH: h, contentW: scaled.w, contentH: scaled.h });
+  clampViewerPan();
 }
 
 /** Nudge the viewer by one step (arrow keys). Viewer-only. */
@@ -477,7 +537,9 @@ function applyWorkspaceState() {
     layout.querySelectorAll('.studio-col-resizer').forEach(el => { el.hidden = true; });
     const grip = layout.querySelector('#studio-viewer-height-grip');
     if (grip) grip.hidden = true;
-    clampViewerPan();
+    // CREATOR-10: the viewport changed shape, so the canvas is re-centred.
+    recentreViewer();
+    renderCanvas();
     return;
   }
 
@@ -517,7 +579,14 @@ function applyWorkspaceState() {
     min: MIN_VIEWER_HEIGHT,
     fallback: DEFAULT_VIEWER_HEIGHT,
   })}px`;
-  clampViewerPan();
+  // CREATOR-10: a panel-width or viewer-height change resizes the centre column
+  // and/or the viewport, so the canvas is re-centred rather than left wherever
+  // the previous view happened to be. Still viewer-only: no design geometry,
+  // no dirty flag, no undo entry. Repaint so the new centred transform is
+  // actually written — the canvas is a sibling of the stage, so resizing the
+  // stage alone leaves the transform untouched.
+  recentreViewer();
+  renderCanvas();
 }
 
 /**
@@ -536,6 +605,51 @@ function clampWorkspaceToWindow() {
     panelWidths = { left, right };
   }
   applyWorkspaceState();
+}
+
+/**
+ * CREATOR-10: keep the canvas centred whenever the viewer's usable size changes.
+ *
+ * applyWorkspaceState() already re-centres explicitly on a panel drag or a
+ * viewer-height drag, but a browser window resize is not enough on its own: the
+ * resize event can arrive while the CSS grid is still laid out for the previous
+ * window width, so centring in the event handler measures a stale viewport and
+ * leaves the canvas tens of pixels off-centre. Chasing it with an extra animation
+ * frame is a race, not a guarantee — a scrollbar appearing or a media query
+ * flipping can change the centre column again afterwards.
+ *
+ * Observing the element's real size is the authoritative answer, and it also
+ * covers cases no explicit call site knows about (scrollbar changes, a sidebar
+ * that re-lays out, single-column mode toggling). The callback only re-centres
+ * when the size actually differs from the last observed one, so it settles after
+ * a single pass.
+ *
+ * Re-centring writes only a transform, never a size, so this cannot loop.
+ */
+let viewerResizeObserver = null;
+let lastObservedViewport = { w: 0, h: 0 };
+
+function observeViewerSize() {
+  const scroll = root?.querySelector('#studio-canvas-scroll');
+  if (!scroll) return;
+  try { viewerResizeObserver?.disconnect(); } catch { /* best-effort */ }
+  if (typeof ResizeObserver !== 'function') return;
+  lastObservedViewport = viewerViewport();
+  viewerResizeObserver = new ResizeObserver(() => {
+    const v = viewerViewport();
+    if (v.w === lastObservedViewport.w && v.h === lastObservedViewport.h) return;
+    lastObservedViewport = v;
+    if (!(v.w > 0) || !(v.h > 0)) return;
+    recentreViewer();
+    renderCanvas();
+  });
+  viewerResizeObserver.observe(scroll);
+}
+
+function stopObservingViewerSize() {
+  try { viewerResizeObserver?.disconnect(); } catch { /* best-effort */ }
+  viewerResizeObserver = null;
+  lastObservedViewport = { w: 0, h: 0 };
 }
 
 function startPanelResize(edge, event) {
@@ -1715,7 +1829,10 @@ function renderZoomReadout() {
 /** Apply a new zoom and keep the pan legal for the new scale. Viewer-only. */
 function setZoom(next, message) {
   zoom = clampZoom(next);
-  clampViewerPan();
+  // CREATOR-10: a zoom change re-centres. The previous pan was computed for the
+  // OLD scale, so keeping it would leave the canvas off-centre (or pinned to a
+  // corner) at the new size.
+  recentreViewer();
   renderCanvas();
   renderZoomReadout();
   if (message) setStatus(message);
@@ -1725,12 +1842,15 @@ function zoomBy(direction) {
   setZoom(stepZoom(zoom, direction));
 }
 
-/** CREATOR-08: Reset restores zoom 1 and re-centres the pan. Nothing else. */
+/**
+ * CREATOR-10: Reset returns to 100% and re-centres the canvas.
+ *
+ * Only viewer state changes. The design — canvas size, component geometry, image
+ * sources — is untouched, and no undo entry is created.
+ */
 function resetViewerView() {
-  const { zoom: z, pan } = defaultViewerState();
-  zoom = z;
-  viewerPan = { ...pan };
-  clampViewerPan();
+  zoom = DEFAULT_ZOOM;
+  recentreViewer();
   renderCanvas();
   renderZoomReadout();
   setStatus('View reset to 100% and re-centred. The saved design is unchanged.');
@@ -1754,9 +1874,9 @@ function fitViewerToProfile() {
   const c = canvas();
   const { w, h } = viewerViewport();
   zoom = fitZoom({ contentW: c.width, contentH: c.minHeight, viewportW: w, viewportH: h });
-  // Re-centre for the new scale: clampPan() centres anything that already fits.
-  viewerPan = { x: 0, y: 0 };
-  clampViewerPan();
+  // Re-centre for the new scale: the whole profile is centred, not just pushed
+  // back to the top-left corner.
+  recentreViewer();
   renderCanvas();
   renderZoomReadout();
   setStatus(`Profile fitted to the viewer at ${zoomPercent(zoom)}. The saved design is unchanged.`);
@@ -2674,6 +2794,9 @@ export async function initCreatorStudioPage() {
   window.addEventListener('beforeunload', beforeUnload);
   renderElementPanels();
   applyWorkspaceState();
+  // CREATOR-10: watch the viewer's real size so the canvas re-centres after a
+  // window resize, a side-panel drag, a viewer-height drag, or any other relayout.
+  observeViewerSize();
   attachEvents();
 
   try {
@@ -2720,6 +2843,7 @@ export function destroyCreatorStudioPage() {
   window.removeEventListener('pointermove', onPointerMove);
   window.removeEventListener('pointerup', onPointerUp);
   window.removeEventListener('resize', clampWorkspaceToWindow);
+  stopObservingViewerSize();
   currentDesign = null;
   designs = [];
   selectedId = null;

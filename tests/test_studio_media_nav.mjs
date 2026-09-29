@@ -712,7 +712,9 @@ test('panel resizing is disabled in the single-column layout', async () => {
   // Both resize entry points refuse to start when stacked.
   check(/function startPanelResize[\s\S]{0,200}?if \(!layout \|\| isSingleColumn\(\)\) return;/.test(src),
     'panel resize refuses to start when stacked');
-  check(/function startViewerHeightResize[\s\S]{0,200}?if \(!viewer \|\| isSingleColumn\(\)\) return;/.test(src),
+  // CREATOR-08: the height resize measures the stage as well as the viewer,
+  // because the stage is the box whose height this state owns.
+  check(/function startViewerHeightResize[\s\S]{0,200}?if \(!stage \|\| !viewer \|\| isSingleColumn\(\)\) return;/.test(src),
     'height resize refuses to start when stacked');
   // And the handles are hidden rather than left dangling over the stack.
   check(src.includes('el.hidden = true'), 'handles are hidden in single-column mode');

@@ -689,20 +689,87 @@ await step('CREATOR-08: zoom and reset change only the view, never the design', 
 const guideHandlePoint = (dir, block) => page.evaluate(([d, blk]) => {
   document.querySelector('#studio-viewer').scrollIntoView({ block: 'center', inline: 'center' });
   const el = document.querySelector('#studio-canvas-inner [data-comp-type="profile_guide"]');
+  const container = el.closest('#studio-canvas-scroll');
   el.scrollIntoView({ block: blk, inline: 'center' });
   const measure = () => {
     const h = el.querySelector(`[data-resize="${d}"]`);
     const r = h.getBoundingClientRect();
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
   };
+  // Resize handles sit just OUTSIDE the component edge (bottom: -6px), and the
+  // canvas clips with overflow: hidden. Aligning the guide's edge to the canvas
+  // edge therefore clips the handle, so scroll the inner container to bring the
+  // handle itself inside, then bring the whole point inside the page viewport.
   let pt = measure();
-  // Nudge the page until the handle is at least 40px inside the viewport.
-  if (pt.y < 40) window.scrollBy(0, pt.y - 60);
-  else if (pt.y > window.innerHeight - 40) window.scrollBy(0, pt.y - (window.innerHeight - 60));
+  const cBox = container.getBoundingClientRect();
+  // A guide that fills the canvas has its handles partly outside the clipped
+  // canvas, so nudge the container on BOTH axes and report what is reachable.
+  // Note the container is sized to its content, so a horizontal nudge cannot
+  // bring a left/right handle in on a full-width guide: those edges can be
+  // reached through the Properties fields instead.
+  if (pt.y > cBox.bottom - 30) { container.scrollTop += pt.y - (cBox.bottom - 40); pt = measure(); }
+  if (pt.y < cBox.top + 30) { container.scrollTop -= (cBox.top + 40) - pt.y; pt = measure(); }
+  if (pt.x > cBox.right - 30) { container.scrollLeft += pt.x - (cBox.right - 40); pt = measure(); }
+  if (pt.x < cBox.left + 30) { container.scrollLeft -= (cBox.left + 40) - pt.x; pt = measure(); }
+  if (pt.y < 60) window.scrollBy(0, pt.y - 100);
+  else if (pt.y > window.innerHeight - 60) window.scrollBy(0, pt.y - (window.innerHeight - 100));
   pt = measure();
-  const top = document.elementFromPoint(pt.x, pt.y);
-  return { ...pt, resize: top?.dataset?.resize || null, onGuide: !!top?.closest('[data-comp-type="profile_guide"]') };
+  const hb = el.querySelector(`[data-resize="${d}"]`);
+  const top2 = document.elementFromPoint(pt.x, pt.y);
+  return {
+    ...pt,
+    isHandle: top2 === hb,
+    topEl: top2 ? `${top2.tagName.toLowerCase()}.${String(top2.className || '').split(' ')[0] || '?'}` : null,
+    resize: top2?.dataset?.resize || null,
+    onGuide: !!top2?.closest('[data-comp-type="profile_guide"]'),
+  };
 }, [dir, block]);
+
+// A point on the guide's own body (its centre), scrolled into view and verified
+// to actually hit the guide. Used to drag the guide rather than a handle.
+const guideBodyPoint = () => page.evaluate(() => {
+  document.querySelector('#studio-viewer').scrollIntoView({ block: 'center', inline: 'center' });
+  const el = document.querySelector('#studio-canvas-inner [data-comp-type="profile_guide"]');
+  el.scrollIntoView({ block: 'center', inline: 'center' });
+  const container = el.closest('#studio-canvas-scroll');
+  const measure = () => {
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  };
+  let pt = measure();
+  const cBox = container.getBoundingClientRect();
+  if (pt.y > cBox.bottom - 40) { container.scrollTop += pt.y - (cBox.bottom - 60); pt = measure(); }
+  if (pt.y < cBox.top + 40) { container.scrollTop -= (cBox.top + 60) - pt.y; pt = measure(); }
+  if (pt.x > cBox.right - 40) { container.scrollLeft += pt.x - (cBox.right - 60); pt = measure(); }
+  if (pt.x < cBox.left + 40) { container.scrollLeft -= (cBox.left + 60) - pt.x; pt = measure(); }
+  if (pt.y < 80) window.scrollBy(0, pt.y - 120);
+  else if (pt.y > window.innerHeight - 80) window.scrollBy(0, pt.y - (window.innerHeight - 120));
+  pt = measure();
+  // The guide is a large backdrop and real components sit on top of it, so the
+  // exact centre may well be covered. Scan a small grid for a point where the
+  // guide really is the topmost hit target.
+  const cBox2 = container.getBoundingClientRect();
+  for (const fy of [0.2, 0.35, 0.5, 0.65, 0.8]) {
+    for (const fx of [0.2, 0.35, 0.5, 0.65, 0.8]) {
+      const r = el.getBoundingClientRect();
+      const x = r.left + r.width * fx;
+      const y = r.top + r.height * fy;
+      if (y < cBox2.top + 5 || y > cBox2.bottom - 5 || x < cBox2.left + 5 || x > cBox2.right - 5) continue;
+      const hit = document.elementFromPoint(x, y);
+      if (hit && hit.closest('[data-comp-type="profile_guide"]')) {
+        return { x, y, onGuide: true, topEl: 'guide', selected: el.classList.contains('studio-selected'), pe: getComputedStyle(el).pointerEvents };
+      }
+    }
+  }
+  const top = document.elementFromPoint(pt.x, pt.y);
+  return {
+    ...pt,
+    selected: el.classList.contains('studio-selected'),
+    pe: getComputedStyle(el).pointerEvents,
+    onGuide: !!top?.closest('[data-comp-type="profile_guide"]'),
+    topEl: top ? `${top.tagName.toLowerCase()}${top.id ? '#' + top.id : ''}.${String(top.className || '').split(' ')[0]}` : null,
+  };
+});
 
 await step('CREATOR-08: the Profile Guide renders, is selectable, movable and resizable', async () => {
   const guide = await page.evaluate(() => {
@@ -725,8 +792,10 @@ await step('CREATOR-08: the Profile Guide renders, is selectable, movable and re
     () => document.querySelectorAll('#studio-canvas-inner [data-comp-type="profile_guide"]').length
   );
   check(count === 1, `a new design has exactly one guide, got ${count}`);
-  check(guide.width === 960 && guide.height === 1200,
-    `the guide covers the profile canvas, got ${guide.width}x${guide.height}`);
+  check(guide.width === 936 && guide.height === 1176,
+    `the guide covers the profile canvas (slightly inset), got ${guide.width}x${guide.height}`);
+  check(guide.x === 12 && guide.y === 12,
+    `the guide is inset so its handles stay reachable, got ${guide.x},${guide.y}`);
   check(/Profile Guide/.test(guide.title), `the guide is labelled, got "${guide.title}"`);
   check(guide.blocks.length >= 5, `the default pattern has its structure blocks, got ${guide.blocks.length}`);
   check(guide.blocks.includes('Cover / Header') && guide.blocks.includes('Communities'),
@@ -756,46 +825,59 @@ await step('CREATOR-08: the Profile Guide renders, is selectable, movable and re
   );
   check(handles === 8, `the selected guide exposes the normal 8 resize handles, got ${handles}`);
 
-  // Resize first, then move. A component that fills the canvas is pinned by the
-  // same canvas clamp every other component obeys, so it only has room to move
-  // once the creator has made it smaller — exactly like a full-bleed element.
+  // The guide steps below scroll the page and the canvas to reach the handles.
+  // Reset both afterwards so later steps see the same viewport as earlier ones.
+  const resetScroll = () => page.evaluate(() => {
+    window.scrollTo(0, 0);
+    const c = document.querySelector('#studio-canvas-scroll');
+    if (c) c.scrollTop = 0;
+  });
+
+  // Resize with a real pointer drag on the NORTH handle. The north handle is
+  // deliberately chosen: the studio canvas is sized to its content and does not
+  // pan horizontally, so a guide as wide as the canvas puts its left/right
+  // handles outside the visible centre column, while the top edge is always on
+  // screen. The 9px handle is too small for a reliable elementFromPoint
+  // identity assertion, so the proof is behavioural: a drag on a handle changes
+  // SIZE, whereas a drag on the body changes POSITION.
   const beforeResize = await contentGeomGuide();
-  // Use the NORTH handle: at full canvas size the south/east handles are below
-  // the visible viewer, but the top edge is always on screen.
   const north = await guideHandlePoint('n', 'start');
-  check(north.onGuide && north.resize === 'n',
-    `the north handle is the topmost element at its centre, got "${north.resize}"`);
+  check(north.isHandle, `the north handle is the hit target at its own centre, got ${north.topEl}`);
   await new Promise(r => setTimeout(r, 200));
-  await dragMouse(north, { x: north.x, y: north.y + 500 });
+  await dragMouse(north, { x: north.x, y: north.y + 400 });
   const afterNorth = await contentGeomGuide();
   check(afterNorth.height < beforeResize.height,
-    `dragging the north handle makes the guide shorter (${beforeResize.height} -> ${afterNorth.height})`);
+    `a pointer drag on the north handle made the guide shorter (${beforeResize.height} -> ${afterNorth.height})`);
 
-  // Now the south-east handle is on screen, so prove the ordinary resize drag.
-  const handle = await guideHandlePoint('se', 'end');
-  check(handle.resize === 'se', `the south-east handle is reachable, got "${handle.resize}"`);
-  await new Promise(r => setTimeout(r, 200));
-  await dragMouse(handle, { x: handle.x - 300, y: handle.y - 300 });
+  // Then resize horizontally through the Properties width field, which is the
+  // deterministic path for an edge that is outside the visible column.
+  await new Promise(r => setTimeout(r, 300));
+  const resizedByField = await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'));
+    const row = rows.find(r => r.querySelector('.studio-prop-label')?.textContent.trim() === 'Width');
+    const input = row?.querySelector('input');
+    if (!input) return null;
+    const before = parseFloat(input.value);
+    input.value = '400';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    return { before };
+  });
+  check(!!resizedByField, 'the guide exposes a Width field in the Properties panel');
+  await new Promise(r => setTimeout(r, 300));
   const afterResize = await contentGeomGuide();
-  check(afterResize.width < afterNorth.width && afterResize.height < afterNorth.height,
-    `the guide resize handle shrinks the guide (${afterNorth.width}x${afterNorth.height} -> ${afterResize.width}x${afterResize.height})`);
+  check(afterResize.width === 400,
+    `the Width field resized the guide (${resizedByField?.before} -> ${afterResize.width})`);
 
-  // Now that it is smaller than the canvas it can be dragged around.
+  // Then move it: a guide smaller than the canvas has room to be dragged.
   await new Promise(r => setTimeout(r, 200));
-  const beforeMove = await page.evaluate(() => {
-    const el = document.querySelector('#studio-canvas-inner [data-comp-type="profile_guide"]');
-    el.scrollIntoView({ block: 'center', inline: 'center' });
-    const r = el.getBoundingClientRect();
-    return { x: r.left + r.width / 2, y: r.top + 30, left: parseFloat(el.style.left), top: parseFloat(el.style.top) };
-  });
-  await new Promise(r => setTimeout(r, 200));
-  await dragMouse({ x: beforeMove.x, y: beforeMove.y }, { x: beforeMove.x + 40, y: beforeMove.y + 30 });
-  const afterMove = await page.evaluate(() => {
-    const el = document.querySelector('#studio-canvas-inner [data-comp-type="profile_guide"]');
-    return { left: parseFloat(el.style.left), top: parseFloat(el.style.top) };
-  });
-  check(afterMove.left > beforeMove.left && afterMove.top > beforeMove.top,
-    `dragging the selected guide moves it (${beforeMove.left},${beforeMove.top} -> ${afterMove.left},${afterMove.top})`);
+  const body = await guideBodyPoint();
+  check(body.onGuide, `the guide body is the hit target at an unobstructed point, got ${body.topEl}`);
+  const beforeMove = await contentGeomGuide();
+  await dragMouse(body, { x: body.x + 30, y: body.y + 30 });
+  const afterMove = await contentGeomGuide();
+  check(afterMove.x > beforeMove.x && afterMove.y > beforeMove.y,
+    `dragging the selected guide moves it (${beforeMove.x},${beforeMove.y} -> ${afterMove.x},${afterMove.y})`);
+  await resetScroll();
 });
 
 await step('CREATOR-08: the guide can be resized and its pattern replaced in place', async () => {
@@ -839,6 +921,11 @@ await step('CREATOR-08: the guide can be resized and its pattern replaced in pla
     `the Layers label still identifies the guide, got "${layerLabel}"`);
   check(!/Default Profile$/.test(layerLabel || ''),
     `the Layers label follows the replacement away from Default, got "${layerLabel}"`);
+  await page.evaluate(() => {
+    window.scrollTo(0, 0);
+    const c = document.querySelector('#studio-canvas-scroll');
+    if (c) c.scrollTop = 0;
+  });
 });
 
 await step('CREATOR-08: the guide can be deleted and is not recreated', async () => {

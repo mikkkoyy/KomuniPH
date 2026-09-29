@@ -385,7 +385,7 @@
   pointer-events: none;
   opacity: 0.75;
 }
-.design-profile_guide.studio-comp-selected {
+.design-profile_guide.studio-selected {
   pointer-events: auto;
   opacity: 1;
 }

@@ -78,6 +78,16 @@ const GUIDE_SECTION = {
   h: 1200,
   config: { pattern: DEFAULT_GUIDE_PATTERN },
 };
+/**
+ * The guide starts just inside the canvas rather than exactly on its edges.
+ *
+ * A component that fills the canvas is unclippable in practice: its resize
+ * handles sit ~6px OUTSIDE the component box, so a full-bleed guide's handles
+ * are all cut off by the canvas viewport and the guide could never be resized or
+ * moved. A small inset keeps every handle reachable and gives the guide room to
+ * move immediately, while still reading as "the whole profile canvas".
+ */
+const GUIDE_INSET = 12;
 const ALL_SECTIONS = [...CONTROLLED_SECTIONS, ...CONTENT_SECTIONS];
 const CONTROLLED_TYPES = new Set(CONTROLLED_SECTIONS.map(s => s.type));
 
@@ -1186,10 +1196,10 @@ function makeDefaultGuide() {
   return {
     id: newId(),
     type: GUIDE_COMPONENT_TYPE,
-    x: 0,
-    y: 0,
-    width: DEFAULT_CANVAS.width,
-    height: DEFAULT_CANVAS.minHeight,
+    x: GUIDE_INSET,
+    y: GUIDE_INSET,
+    width: DEFAULT_CANVAS.width - GUIDE_INSET * 2,
+    height: DEFAULT_CANVAS.minHeight - GUIDE_INSET * 2,
     rotation: 0,
     zIndex: 0,
     visible: true,

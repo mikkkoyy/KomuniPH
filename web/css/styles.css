@@ -6221,7 +6221,7 @@ select:focus {
 }
 
 /* ---------------------------------------------------------------------------
-   CREATOR-11 — Card containers, masking and the controlled animation set.
+   CREATOR-11 - Card containers, masking and the controlled animation set.
 
    The @keyframes rules below are APPLICATION-OWNED and are the only animations
    a stored design can ever play. A design stores an animation id; the renderer
@@ -6288,7 +6288,7 @@ select:focus {
 /*
   Accessibility: when the visitor (or the Studio) asks for reduced motion, the
   animations are switched off at the RENDERING layer only. The stored design is
-  untouched, so switching the preference back off restores the animation — no
+  untouched, so switching the preference back off restores the animation - no
   design data is changed, removed or downgraded on the user's behalf.
 */
 @media (prefers-reduced-motion: reduce) {
@@ -6303,7 +6303,7 @@ select:focus {
    A card mounts its Image/Sticker children inside `.design-card-surface` and
    only becomes a positioning context here. With Content Mask on, that surface
    clips them to the card box, and because the clip follows the card's own
-   border-radius a rounded card produces a rounded mask for free — no second
+   border-radius a rounded card produces a rounded mask for free - no second
    mask element, no baked image, and the child still points at its ORIGINAL
    image source.
 

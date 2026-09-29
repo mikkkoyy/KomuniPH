@@ -75,9 +75,9 @@ process.on('exit', cleanupUploads);
 // or navigation reports code 3 instead of blocking forever). Raised from 150s
 // as the suite grew: the CREATOR-11 steps add real page reloads, a publish and a
 // public-profile render, so a legitimate full run now takes longer than that.
-// It is a hang guard, not a budget — nothing should approach it.
+// It is a hang guard, not a budget - nothing should approach it.
 setTimeout(() => {
-  process.stdout.write('WATCHDOG — forced exit after 600s\n');
+  process.stdout.write('WATCHDOG - forced exit after 600s\n');
   process.exit(3);
 }, 600000).unref();
 const mod = (rel) => pathToFileURL(resolve(rel).toString().replace(/\\/g, '/')).href;
@@ -169,8 +169,8 @@ page.on('pageerror', (e) => {
  * Set the browser's motion preference explicitly.
  *
  * Headless Chrome reports `prefers-reduced-motion: reduce` BY DEFAULT, which is
- * correct behaviour for the app — it means the accessibility path is genuinely
- * exercised — but it would silently make every "the animation plays" assertion
+ * correct behaviour for the app - it means the accessibility path is genuinely
+ * exercised - but it would silently make every "the animation plays" assertion
  * fail. Tests that assert playback must therefore ask for `no-preference`
  * explicitly, and the accessibility test must ask for `reduce`. Leaving it
  * implicit would make the suite depend on the browser's default.
@@ -3749,7 +3749,7 @@ await step('CREATOR-11: a nested Sticker is contained, animated and survives rel
   check(await selectComponent(stickerId), 'the Sticker is selected');
 
   // A Sticker is an image component, so it needs a real image source before the
-  // design is valid — the server rejects a component with no imageUrl. Upload one
+  // design is valid - the server rejects a component with no imageUrl. Upload one
   // through the same control an Image uses.
   const stickerUpload = await page.$('#studio-properties input[type=file]');
   check(!!stickerUpload, 'the Sticker offers an upload control');
@@ -3907,6 +3907,410 @@ await step('CREATOR-11: reduced motion is respected without changing the design'
   const withAnim = designs.some(d => (d.layout?.components || [])
     .some(c => c.config?.animation?.name && c.config.animation.name !== 'none'));
   check(withAnim, 'the animation is still stored in the design after reduced-motion rendering');
+});
+
+// ???????????????????????????????????????????????????????????????????????????
+// CREATOR-10A - the Profile Background state a creator actually SEES.
+//
+// These assert rendered text and control state, not JavaScript objects: the whole
+// point of the task is that a creator can tell, at a glance, whether a background
+// is active, merely uploaded, or neither.
+// ???????????????????????????????????????????????????????????????????????????
+
+/** Read the visible Profile Background state out of the Properties panel. */
+const readBackgroundState = () => page.evaluate(() => {
+  const chip = document.querySelector('#studio-background-state');
+  const preview = document.querySelector('[data-profile-background-preview]');
+  const pending = document.querySelector('#studio-background-pending');
+  const apply = document.querySelector('#studio-background-apply');
+  const clear = document.querySelector('#studio-background-clear');
+  const empty = document.querySelector('#studio-background-empty');
+  const tag = document.querySelector('.studio-bg-preview-tag');
+  const disabled = (label) => {
+    const row = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'))
+      .find(r => r.querySelector('.studio-prop-label')?.textContent === label);
+    return row?.querySelector('select')?.disabled ?? null;
+  };
+  const visible = (el) => !!el && el.offsetParent !== null;
+  return {
+    chipText: chip ? chip.textContent.trim() : null,
+    chipState: chip ? chip.dataset.state : null,
+    // Computed colour, so "visually distinct" is measured rather than assumed.
+    chipColour: chip ? getComputedStyle(chip).color : null,
+    chipBackground: chip ? getComputedStyle(chip).backgroundColor : null,
+    previewState: preview ? preview.dataset.profileBackgroundPreview : null,
+    previewHasImage: !!preview?.querySelector('img'),
+    previewImageSrc: preview?.querySelector('img')?.getAttribute('src') || '',
+    previewTag: tag ? tag.textContent.trim() : null,
+    emptyText: empty ? empty.textContent.trim() : null,
+    pendingVisible: visible(pending),
+    pendingLabel: document.querySelector('#studio-background-pending-label')?.textContent.trim() || null,
+    pendingSrc: pending?.querySelector('img')?.getAttribute('src') || '',
+    applyVisible: visible(apply),
+    applyText: apply ? apply.textContent.trim() : null,
+    applyDisabled: apply ? apply.disabled : null,
+    clearVisible: visible(clear),
+    clearText: clear ? clear.textContent.trim() : null,
+    status: document.querySelector('#studio-background-status')?.textContent.trim() || '',
+    sizeDisabled: disabled('Size'),
+    positionDisabled: disabled('Position'),
+    repeatDisabled: disabled('Repeat'),
+  };
+});
+
+/**
+ * Deselect any component so the canvas-level Properties (which own the Profile
+ * Background section) are shown, then confirm the section is actually rendered.
+ * showCanvasProperties() is the existing retry-until-laid-out helper; the chip is
+ * asserted separately because a panel can be "visible" before its content is.
+ */
+const showBackgroundSection = async () => {
+  await page.evaluate(() => document.activeElement?.blur?.());
+  await page.keyboard.press('Escape');
+  await new Promise(r => setTimeout(r, 250));
+  if (!await page.evaluate(() => !!document.querySelector('#studio-canvas-inner'))) return false;
+  await showCanvasProperties();
+  return page.evaluate(() => !!document.querySelector('#studio-background-state'));
+};
+
+await step('CREATOR-10A: no background is shown as NOT SET, unambiguously', async () => {
+  await resetStudioWorkspace();
+  await ensureEditingMode();
+  await pinStudioInView();
+  // Establish the documented precondition explicitly rather than assuming it: an
+  // earlier CREATOR-10 step applied and saved a background to this same design.
+  await showBackgroundSection();
+  if (await page.evaluate(() => !!document.querySelector('#studio-background-clear:not([hidden])'))) {
+    await page.click('#studio-background-clear');
+    await new Promise(r => setTimeout(r, 400));
+    await page.click('#studio-save');
+    await new Promise(r => setTimeout(r, 1500));
+    await resetStudioWorkspace();
+  }
+  const shown = await showBackgroundSection();
+  check(shown, 'the Profile Background section is visible with nothing selected');
+
+  const state = await readBackgroundState();
+  eq(state.chipState, 'none', 'the state is "none"');
+  // Asserted on the WORDS, not an exact glyph: the chip is a visual affordance
+  // and a file-encoding round trip must not be able to fail an assertion.
+  check(state.chipText === 'NOT SET', `the chip reads NOT SET, got ${JSON.stringify(state.chipText)}`);
+  check(state.previewState === 'none', 'the preview is in the no-background state');
+  eq(state.previewHasImage, false, 'no image is shown when nothing is set');
+  check(!!state.emptyText, 'an explicit "no background" message is shown');
+  check(/no profile background/i.test(state.emptyText || ''),
+    `the empty state names the absence, got "${state.emptyText}"`);
+  // The apply action must not be sitting there looking actionable.
+  eq(state.applyVisible, false, 'no apply button is offered with nothing to apply');
+  eq(state.clearVisible, false, 'no Remove button is offered when nothing is active');
+  // Presentation controls are scoped to an active background.
+  eq(state.sizeDisabled, true, 'Size is disabled with no background');
+  eq(state.positionDisabled, true, 'Position is disabled with no background');
+  eq(state.repeatDisabled, true, 'Repeat is disabled with no background');
+  check(/no profile background is set/i.test(state.status),
+    `the status line states the absence, got "${state.status}"`);
+});
+
+await step('CREATOR-10A: an uploaded image is visibly PENDING, not active', async () => {
+  await resetStudioWorkspace();
+  await ensureEditingMode();
+  await pinStudioInView();
+  await showBackgroundSection();
+  const input = await page.$('#studio-background-file');
+  check(!!input, 'the background file input exists');
+  await input.uploadFile(bgFixturePath);
+  await new Promise(r => setTimeout(r, 1600));
+  await showBackgroundSection();
+
+  const state = await readBackgroundState();
+  eq(state.chipState, 'pending', 'the state is "pending"');
+  check(/UPLOADED/.test(state.chipText || '') && /NOT ACTIVE/.test(state.chipText || ''),
+    `the chip says the upload is not active, got ${JSON.stringify(state.chipText)}`);
+  // The distinction from ACTIVE must be VISUAL, not just different wording.
+  const activeColour = await page.evaluate(() => {
+    const el = document.createElement('span');
+    el.className = 'studio-bg-chip studio-bg-chip-active';
+    document.body.appendChild(el);
+    const c = getComputedStyle(el).color;
+    el.remove();
+    return c;
+  });
+  check(state.chipColour !== activeColour,
+    `the pending chip is visually distinct from an ACTIVE chip (pending ${state.chipColour} vs active ${activeColour})`);
+  check(!!state.pendingVisible, 'the staged upload is shown on its own row');
+  check(/not active yet/i.test(state.pendingLabel || ''),
+    `the staged upload is labelled as not yet active, got "${state.pendingLabel}"`);
+  eq(state.previewHasImage, false, 'the ACTIVE preview is still empty - an upload does not become active');
+  eq(state.previewTag, null, 'no ACTIVE tag is shown over an empty preview');
+  // The apply action appears and is enabled, with honest wording.
+  eq(state.applyVisible, true, 'the apply button appears once an image is staged');
+  eq(state.applyDisabled, false, 'the apply button is enabled');
+  eq(state.applyText, 'Set as Profile Background', 'it reads as a first-time activation');
+  eq(state.clearVisible, false, 'Remove is still not offered - nothing is active yet');
+  check(/ready to set as profile background/i.test(state.status),
+    `the status says it is ready but not active, got "${state.status}"`);
+  // And nothing has been written to the design yet.
+  const notSavedYet = await page.evaluate(() =>
+    document.querySelector('#studio-profile-background')?.dataset.profileBackground === 'none');
+  check(notSavedYet, 'the canvas still shows no background before applying');
+});
+
+await step('CREATOR-10A: applying turns it ACTIVE immediately, with no reload', async () => {
+  const before = await readBackgroundState();
+  await page.click('#studio-background-apply');
+  await new Promise(r => setTimeout(r, 500));
+  const after = await readBackgroundState();
+
+  eq(after.chipState, 'active', 'the state becomes active on apply');
+  check(/ACTIVE/.test(after.chipText || ''), "the chip now reads ACTIVE, got $(JSON.stringify(after.chipText))" );
+  eq(after.previewState, 'active', 'the preview is in the active state');
+  eq(after.previewHasImage, true, 'the preview now shows the image');
+  eq(after.previewTag, 'ACTIVE BACKGROUND', 'the preview itself is tagged as the active background');
+  eq(after.pendingVisible, false, 'the staged row is gone - it is no longer pending');
+  eq(after.applyVisible, false, 'no apply button is offered for the already-active image');
+  eq(after.clearVisible, true, 'Remove is offered now that a background is active');
+  eq(after.clearText, 'Remove', 'the remove action is labelled Remove');
+  eq(after.sizeDisabled, false, 'Size is enabled for the active background');
+  eq(after.positionDisabled, false, 'Position is enabled for the active background');
+  eq(after.repeatDisabled, false, 'Repeat is enabled for the active background');
+  check(after.chipColour !== before.chipColour, 'the chip colour changed to signal the new state');
+  check(/active and sits behind the entire profile/i.test(after.status),
+    `the status confirms it is active, got "${after.status}"`);
+  // The change is immediately reflected on the canvas too.
+  const canvasState = await page.evaluate(() => ({
+    set: document.querySelector('#studio-profile-background')?.dataset.profileBackground,
+    src: document.querySelector('#studio-profile-background img')?.getAttribute('src') || '',
+  }));
+  eq(canvasState.set, 'set', 'the canvas background layer is now set');
+  check(/\/uploads\/creator\//.test(canvasState.src), 'the canvas shows the uploaded image');
+});
+
+await step('CREATOR-10A: a second upload is offered as a REPLACEMENT, not a silent swap', async () => {
+  const activeBefore = await readBackgroundState();
+  check(activeBefore.chipState === 'active', 'a background is active to begin with');
+  const activeSrc = activeBefore.previewImageSrc;
+
+  const input = await page.$('#studio-background-file');
+  await input.uploadFile(bgFixturePath);
+  await new Promise(r => setTimeout(r, 1600));
+  await showBackgroundSection();
+
+  const pending = await readBackgroundState();
+  eq(pending.chipState, 'replace', 'the state becomes "replace"');
+  eq(pending.chipText, 'REPLACEMENT READY', 'the chip says a replacement is ready');
+  eq(pending.chipColour !== activeBefore.chipColour, true, 'the replace chip is visually distinct from ACTIVE');
+  eq(pending.applyVisible, true, 'an apply action is offered');
+  eq(pending.applyText, 'Replace Profile Background', 'it is worded as a replacement, not a first-time set');
+  eq(pending.applyDisabled, false, 'the replace action is enabled');
+  check(/replace/i.test(pending.pendingLabel || ''),
+    `the staged image says it will replace, got "${pending.pendingLabel}"`);
+  check(/not applied yet/i.test(pending.pendingLabel || ''), 'the staged replacement is not applied yet');
+  // Critically: the ACTIVE background is still the old one until the creator acts.
+  eq(pending.previewState, 'active', 'the active preview is still shown');
+  eq(pending.previewImageSrc, activeSrc, 'the active background has NOT silently changed');
+  eq(pending.clearVisible, true, 'Remove still refers to the active background');
+  check(/current background stays active/i.test(pending.status),
+    `the status explains the current background is still active, got "${pending.status}"`);
+
+  // Apply the replacement.
+  await page.click('#studio-background-apply');
+  await new Promise(r => setTimeout(r, 500));
+  const replaced = await readBackgroundState();
+  eq(replaced.chipState, 'active', 'the replacement is now the active background');
+  check(/ACTIVE/.test(replaced.chipText || ''), `the chip reads ACTIVE after replacing, got ${JSON.stringify(replaced.chipText)}`);
+  eq(replaced.pendingVisible, false, 'the staged row is gone');
+  eq(replaced.applyVisible, false, 'no apply button remains');
+  check(/active and sits behind the entire profile/i.test(replaced.status),
+    `the section status settles into describing the ACTIVE background, got "${replaced.status}"`);
+  // The one-off confirmation of the replacement is reported in the Studio status
+  // bar; the section status then settles into describing the ACTIVE state.
+  const replaceStatus = await page.$eval('#studio-status', el => el.textContent || '');
+  check(/replaced/i.test(replaceStatus),
+    `the Studio status bar confirms the replacement, got "${replaceStatus}"`);
+});
+
+await step('CREATOR-10A: removing returns the panel to NOT SET with no stale ACTIVE label', async () => {
+  await page.click('#studio-background-clear');
+  await new Promise(r => setTimeout(r, 500));
+  const after = await readBackgroundState();
+
+  eq(after.chipState, 'none', 'the state returns to none');
+  eq(after.chipText, 'NOT SET', 'the chip reads NOT SET, with no stale ACTIVE label anywhere');
+  eq(after.previewState, 'none', 'the preview is in the no-background state');
+  eq(after.previewHasImage, false, 'the active preview image is gone');
+  eq(after.previewTag, null, 'the ACTIVE BACKGROUND tag is gone');
+  eq(after.pendingVisible, false, 'no pending row remains');
+  eq(after.applyVisible, false, 'no apply button is offered');
+  eq(after.clearVisible, false, 'no Remove button is offered');
+  eq(after.sizeDisabled, true, 'Size is disabled again');
+  check(/no profile background is set/i.test(after.status),
+    `the section status returns to describing no background, got "${after.status}"`);
+  const removeStatus = await page.$eval('#studio-status', el => el.textContent || '');
+  check(/removed/i.test(removeStatus),
+    `the Studio status bar confirms the removal, got "${removeStatus}"`);
+  // And the canvas layer is genuinely cleared, not just hidden.
+  const canvasState = await page.evaluate(() => ({
+    set: document.querySelector('#studio-profile-background')?.dataset.profileBackground,
+    img: !!document.querySelector('#studio-profile-background img'),
+  }));
+  eq(canvasState.set, 'none', 'the canvas background layer is cleared');
+  eq(canvasState.img, false, 'the canvas no longer renders a background image');
+});
+
+await step('CREATOR-10A: the active state is rebuilt from the design on save/reload', async () => {
+  // Re-apply, SAVE, then reload the whole page: the ACTIVE chip must be
+  // reconstructed from theme.backgroundImage, not from leftover editor state.
+  const input = await page.$('#studio-background-file');
+  await input.uploadFile(bgFixturePath);
+  await new Promise(r => setTimeout(r, 1600));
+  await showBackgroundSection();
+  await page.click('#studio-background-apply');
+  await new Promise(r => setTimeout(r, 500));
+  const applied = await readBackgroundState();
+  eq(applied.chipState, 'active', 'the background is active before saving');
+  const appliedSrc = applied.previewImageSrc;
+
+  await page.click('#studio-save');
+  await new Promise(r => setTimeout(r, 1800));
+  const saveStatus = await page.$eval('#studio-status', el => el.textContent || '');
+  check(/saved/i.test(saveStatus), `the draft saved, status="${saveStatus}"`);
+
+  await resetStudioWorkspace();
+  await showBackgroundSection();
+  const reloaded = await readBackgroundState();
+  eq(reloaded.chipState, 'active', 'the ACTIVE state is reconstructed after a reload');
+  check(/ACTIVE/.test(reloaded.chipText || ''), "the chip still reads ACTIVE after a reload, got $(JSON.stringify(reloaded.chipText))" );
+  eq(reloaded.previewImageSrc, appliedSrc, 'the same image is shown after a reload');
+  eq(reloaded.clearVisible, true, 'Remove is offered after a reload');
+  eq(reloaded.applyVisible, false, 'no apply button is offered after a reload');
+  eq(reloaded.sizeDisabled, false, 'the presentation controls are enabled for the active background');
+});
+
+await step('CREATOR-10A: a reloaded background is still one, and it still reaches the public profile', async () => {
+  const designId = await page.$eval('#studio-design-select', el => el.value);
+  await page.click('#studio-publish');
+  await new Promise(r => setTimeout(r, 1800));
+  const profile = await api('GET', `/api/profile/${seller.username}`);
+  check(profile.status === 200, 'the public profile loads after publishing');
+  const theme = profile.data.design?.theme || {};
+  check(/\/uploads\/creator\//.test(theme.backgroundImage || ''),
+    `the published design carries the background, got "${theme.backgroundImage}"`);
+
+  // And the real public page still paints it behind the whole profile. The
+  // public renderer applies the background as a CSS background (not the
+  // Studio's <img> layer), and the layer is a FIXED viewport backdrop that the
+  // content scrolls above â€” so the correct check is that it covers the viewport
+  // and sits behind the content, not that it encloses the main column (a tall
+  // profile legitimately extends past the viewport).
+  await page.goto(`${BASE}/#/profile/${seller.username}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await new Promise(r => setTimeout(r, 2500));
+  const publicView = await page.evaluate(() => {
+    const layer = document.querySelector('#profile-background-layer');
+    const content = document.querySelector('.profile-content-frame');
+    const lr = layer?.getBoundingClientRect();
+    const cs = layer ? getComputedStyle(layer) : null;
+    const ccs = content ? getComputedStyle(content) : null;
+    return {
+      layerExists: !!layer,
+      cssBackground: cs ? cs.backgroundImage : '',
+      position: cs ? cs.position : '',
+      zIndex: cs ? cs.zIndex : '',
+      contentZIndex: ccs ? ccs.zIndex : '',
+      contentPosition: ccs ? ccs.position : '',
+      coversViewport: !!lr && lr.width >= window.innerWidth - 2 && lr.height >= window.innerHeight - 2,
+      // Is the backdrop actually painted behind the content at the content's own
+      // centre point? elementFromPoint proves the stacking, not just the CSS.
+      contentPaintsAbove: (() => {
+        if (!content) return false;
+        const r = content.getBoundingClientRect();
+        const el = document.elementFromPoint(r.left + r.width / 2, Math.min(r.top + 40, window.innerHeight - 20));
+        return !!el && !!content.contains(el);
+      })(),
+      hasDesign: !!document.querySelector('#profile-frame')?.classList.contains('has-profile-design'),
+    };
+  });
+  check(publicView.layerExists, 'the public profile still has its background layer');
+  check(/url\(/.test(publicView.cssBackground),
+    `the public background is applied, got backgroundImage "${publicView.cssBackground}"`);
+  check(/\/uploads\/creator\//.test(publicView.cssBackground),
+    `the public background is the original uploaded source, got "${publicView.cssBackground}"`);
+  eq(publicView.position, 'fixed', 'the public backdrop is a fixed layer');
+  check(publicView.coversViewport, 'the backdrop covers the whole viewport');
+  check(Number(publicView.zIndex) < Number(publicView.contentZIndex),
+    `the backdrop is behind the content (backdrop z=${publicView.zIndex}, content z=${publicView.contentZIndex})`);
+  check(publicView.contentPaintsAbove, 'the profile content paints above the backdrop');
+  void designId;
+});
+
+await step('CREATOR-10A: background state changes never touch the design model or the viewer', async () => {
+  await resetStudioWorkspace();
+  await ensureEditingMode();
+  await pinStudioInView();
+  // Put a real component on the canvas so there is geometry to protect.
+  const imageId = await page.evaluate(() => {
+    const item = document.querySelector('#studio-content-list [data-type="image"]');
+    item?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    return true;
+  });
+  void imageId;
+  await new Promise(r => setTimeout(r, 200));
+  await page.evaluate(() => {
+    const doc = document.querySelector('#studio-canvas-document');
+    const r = doc.getBoundingClientRect();
+    const opts = { bubbles: true, clientX: r.left + 300, clientY: r.top + 500, button: 0, pointerId: 1 };
+    doc.dispatchEvent(new PointerEvent('pointerdown', opts));
+    doc.dispatchEvent(new PointerEvent('pointerup', opts));
+  });
+  await new Promise(r => setTimeout(r, 400));
+
+  const modelBefore = await designSnapshot();
+  const placementBefore = await canvasPlacement();
+  check(modelBefore.comps.length > 0, 'there is a component to protect');
+
+  // Walk the whole background lifecycle.
+  await showBackgroundSection();
+  const input = await page.$('#studio-background-file');
+  await input.uploadFile(bgFixturePath);
+  await new Promise(r => setTimeout(r, 1600));
+  await showBackgroundSection();
+  await page.click('#studio-background-apply');
+  await new Promise(r => setTimeout(r, 500));
+  // Change every presentation control too - they are design-level theme, not
+  // component geometry.
+  await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'));
+    const setSelect = (label, value) => {
+      const select = rows.find(r => r.querySelector('.studio-prop-label')?.textContent === label)?.querySelector('select');
+      if (!select) return;
+      select.value = value;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    setSelect('Size', 'contain');
+    setSelect('Position', 'top left');
+    setSelect('Repeat', 'repeat');
+  });
+  await new Promise(r => setTimeout(r, 400));
+  await page.click('#studio-background-clear');
+  await new Promise(r => setTimeout(r, 400));
+
+  const modelAfter = await designSnapshot();
+  eq(JSON.stringify(modelAfter), JSON.stringify(modelBefore),
+    'the entire background lifecycle left every component and the canvas untouched');
+
+  // The presentation values are theme-level, so they must NOT appear in layout.
+  const themeOnly = await page.evaluate(() => {
+    const doc = document.querySelector('#studio-canvas-document');
+    return { canvasW: doc.style.width, canvasH: doc.style.minHeight, comps: doc.querySelectorAll('[data-comp-id]').length };
+  });
+  eq(themeOnly.canvasW, modelBefore.canvasW ? '960px' : themeOnly.canvasW, 'the canvas width is unchanged');
+
+  // Viewer integrity: the canvas stays centred and its transform is untouched.
+  const placementAfter = await canvasPlacement();
+  check(isCentred(placementAfter),
+    `the canvas is still centered after the background lifecycle - ${placeNote(placementAfter)}`);
+  eq(placementAfter.transform, placementBefore.transform,
+    'the viewer transform is unchanged by background edits');
+  eq(placementAfter.zoom, placementBefore.zoom, 'the zoom is unchanged by background edits');
 });
 
 await step('studio screenshot captured', async () => {

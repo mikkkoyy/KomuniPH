@@ -169,6 +169,51 @@ function backgroundImageUrl() {
   return theme && typeof theme.backgroundImage === 'string' ? theme.backgroundImage : '';
 }
 
+// ── Profile Background state (CREATOR-10A) ─────────────────────────────────────
+//
+// "Uploaded" and "Active" are DIFFERENT states and the Properties panel has to
+// say so at a glance:
+//
+//   none      no background, nothing waiting
+//   pending   an image is uploaded and waiting; nothing is active yet
+//   active    theme.backgroundImage is set; this is the live background
+//   replace   something is already active AND a new image is waiting
+//
+// The ACTIVE state is derived from theme.backgroundImage alone, so it is always
+// reconstructed from the saved design. The PENDING upload is deliberately NOT
+// part of the design model — it is transient editor state that only becomes real
+// when the creator applies it.
+//
+// It is held at module scope rather than inside the properties closure because
+// that closure is rebuilt on every renderProperties(): a closure-local pending
+// URL was silently discarded by any unrelated re-render, which looked to a
+// creator like their upload had vanished.
+let pendingBackgroundUrl = '';
+
+/**
+ * A failed upload message, shown once on the next render and then cleared, so a
+ * failure is visible in the panel rather than only in the transient status text.
+ */
+let pendingUploadError = '';
+
+/** Discard a staged upload. Called whenever the design is swapped or loaded. */
+function resetPendingBackground() {
+  pendingBackgroundUrl = '';
+  pendingUploadError = '';
+}
+
+/** The single source of truth for what the Profile Background section shows. */
+function backgroundState() {
+  const active = backgroundImageUrl();
+  const pending = pendingBackgroundUrl;
+  if (active && pending && pending !== active) {
+    return { key: 'replace', active, pending, label: 'REPLACEMENT READY' };
+  }
+  if (active) return { key: 'active', active, pending: '', label: 'ACTIVE' };
+  if (pending) return { key: 'pending', active: '', pending, label: 'UPLOADED — NOT ACTIVE' };
+  return { key: 'none', active: '', pending: '', label: 'NOT SET' };
+}
+
 // ── Module state ─────────────────────────────────────────────────────────────
 let root = null;
 let currentDesign = null;
@@ -1461,11 +1506,22 @@ function setPath(object, path, value) {
 }
 
 /**
- * CREATOR-10: Profile Background control.
+ * CREATOR-10A: Profile Background control with an EXPLICIT active state.
  *
- * The flow is exactly the required one —
- *   Upload Image → Set as Profile Background → it becomes the background
- *   behind the entire profile (main column AND every sidebar card).
+ * The storage model is unchanged from CREATOR-10 — the background is still
+ * design-level theme configuration, never a component — but the creator can now
+ * tell at a glance which of the four states they are in, instead of having to
+ * infer it from a preview image:
+ *
+ *   none      NOT SET                  no background, nothing waiting
+ *   pending   UPLOADED — NOT ACTIVE    an image is staged; the profile is unchanged
+ *   active    ACTIVE                   this image is the live profile background
+ *   replace   REPLACEMENT READY        an active background, plus a staged swap
+ *
+ * The apply action only appears when it would actually do something: with an
+ * already-active background and nothing staged there is no "Set as Profile
+ * Background" button sitting there looking actionable, because the image it
+ * would apply is the one already in use.
  *
  * It is NOT an ordinary `image` component: it writes design-level theme
  * configuration, so it is never a small content card, never selectable on the
@@ -1474,29 +1530,75 @@ function setPath(object, path, value) {
  * (JPEG/PNG/WebP only) exactly as it does for any other studio image.
  */
 function profileBackgroundProperties(frag) {
-  frag.appendChild(sectionTitle('Profile Background'));
-
   const theme = designTheme();
-  const url = backgroundImageUrl();
+  const state = backgroundState();
+  const isActive = !!state.active;
 
+  // ── Section header with the state chip ──
+  const head = document.createElement('div');
+  head.className = 'studio-bg-head';
+  const heading = document.createElement('h3');
+  heading.className = 'studio-prop-section';
+  heading.textContent = 'Profile Background';
+  const chip = document.createElement('span');
+  chip.className = `studio-bg-chip studio-bg-chip-${state.key}`;
+  chip.id = 'studio-background-state';
+  // data-state mirrors the chip for assertions, but the visible TEXT is what a
+  // creator actually reads.
+  chip.dataset.state = state.key;
+  chip.textContent = state.key === 'active' ? '✓ ACTIVE' : state.label;
+  head.append(heading, chip);
+  frag.appendChild(head);
+
+  // ── Preview: the ACTIVE image, clearly labelled as such ──
+  // The preview element describes the ACTIVE background only, deliberately not
+  // the overall state: when a replacement is staged, the preview still shows the
+  // background that is genuinely live.
   const preview = document.createElement('div');
   preview.className = 'studio-bg-preview';
-  preview.dataset.profileBackgroundPreview = url ? 'set' : 'none';
-  if (url) {
+  preview.dataset.profileBackgroundPreview = isActive ? 'active' : 'none';
+  if (isActive) {
     const img = document.createElement('img');
     img.alt = '';
     img.referrerPolicy = 'no-referrer';
-    img.src = url;
+    img.src = state.active;
     img.style.objectFit = backgroundSizeCss(theme.backgroundSize);
     preview.appendChild(img);
+    const tag = document.createElement('span');
+    tag.className = 'studio-bg-preview-tag studio-bg-preview-tag-active';
+    tag.textContent = 'ACTIVE BACKGROUND';
+    preview.appendChild(tag);
   } else {
     const none = document.createElement('span');
     none.className = 'studio-bg-preview-empty';
-    none.textContent = 'No background set — the profile uses its theme background.';
+    none.id = 'studio-background-empty';
+    none.textContent = 'No Profile Background. Your profile uses the platform theme background.';
     preview.appendChild(none);
   }
   frag.appendChild(preview);
 
+  // ── A staged upload is shown SEPARATELY and marked as not yet active ──
+  if (state.pending) {
+    const pendingBox = document.createElement('div');
+    pendingBox.className = 'studio-bg-pending';
+    pendingBox.id = 'studio-background-pending';
+    pendingBox.dataset.pending = 'true';
+    const thumb = document.createElement('img');
+    thumb.alt = '';
+    thumb.referrerPolicy = 'no-referrer';
+    thumb.src = state.pending;
+    thumb.className = 'studio-bg-pending-thumb';
+    const label = document.createElement('span');
+    label.className = 'studio-bg-pending-label';
+    label.id = 'studio-background-pending-label';
+    label.textContent = isActive
+      ? 'Uploaded — ready to REPLACE the active background. Not applied yet.'
+      : 'Uploaded — ready to set as your Profile Background. Not active yet.';
+    pendingBox.append(thumb, label);
+    frag.appendChild(pendingBox);
+  }
+
+  // ── File input + actions ──
   const fileInput = document.createElement('input');
   fileInput.type = 'file';
   fileInput.accept = 'image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp';
@@ -1515,62 +1617,72 @@ function profileBackgroundProperties(frag) {
   applyBtn.type = 'button';
   applyBtn.id = 'studio-background-apply';
   applyBtn.className = 'btn btn-primary studio-upload-btn';
-  applyBtn.textContent = 'Set as Profile Background';
-  applyBtn.disabled = true;
-  applyBtn.title = url ? 'Replace the profile background with the uploaded image' : 'Use the uploaded image as the profile background';
+  // Only offer the apply action when a staged image is genuinely waiting.
+  const replacing = state.key === 'replace';
+  applyBtn.textContent = replacing ? 'Replace Profile Background' : 'Set as Profile Background';
+  applyBtn.hidden = !state.pending;
+  applyBtn.disabled = !state.pending;
+  applyBtn.title = replacing
+    ? 'Make the uploaded image the profile background, replacing the current one'
+    : 'Make the uploaded image the profile background';
 
   const clearBtn = document.createElement('button');
   clearBtn.type = 'button';
   clearBtn.id = 'studio-background-clear';
   clearBtn.className = 'btn btn-secondary studio-upload-btn';
   clearBtn.textContent = 'Remove';
-  clearBtn.disabled = !url;
-  clearBtn.title = 'Remove the profile background';
+  clearBtn.hidden = !isActive;
+  clearBtn.disabled = !isActive;
+  clearBtn.title = 'Remove the active profile background';
 
   const row = document.createElement('div');
   row.className = 'studio-image-row';
   row.append(uploadBtn, applyBtn, clearBtn);
 
+  // ── Status line: states the situation in words ──
   const status = document.createElement('p');
-  status.className = 'studio-prop-hint studio-upload-status';
+  status.className = 'studio-upload-status';
   status.id = 'studio-background-status';
-  status.textContent = 'JPG, JPEG, PNG or WebP, up to 5 MB.';
+  status.textContent = {
+    none: 'No Profile Background is set. Upload a JPG, JPEG, PNG or WebP (up to 5 MB) to add one.',
+    pending: 'Image uploaded. Ready to set as Profile Background — it is not active until you apply it.',
+    active: `Profile background is active and sits behind the entire profile, including the sidebar. Use "Upload Image" to replace it.`,
+    replace: 'Replacement uploaded. Choose "Replace Profile Background" to apply it; the current background stays active until then.',
+  }[state.key];
 
-  // An upload is staged, not applied: the creator picks a file, then explicitly
-  // promotes it to the profile background, so an upload can never silently
-  // replace the background of a design being edited.
-  let pendingUrl = '';
   fileInput.addEventListener('change', async () => {
     const file = fileInput.files && fileInput.files[0];
     fileInput.value = '';
     if (!file) return;
     uploadBtn.disabled = true;
-    applyBtn.disabled = true;
     status.textContent = 'Uploading…';
     try {
-      pendingUrl = await uploadStudioImage(file);
-      applyBtn.disabled = false;
-      status.textContent = 'Uploaded. Choose "Set as Profile Background" to use it.';
+      // Staged only. An upload NEVER changes the active background on its own.
+      pendingBackgroundUrl = await uploadStudioImage(file);
     } catch (err) {
-      pendingUrl = '';
-      status.textContent = err.message || 'Upload failed. Try a JPG, JPEG, PNG, or WebP image.';
+      pendingBackgroundUrl = '';
+      pendingUploadError = err.message || 'Upload failed. Try a JPG, JPEG, PNG, or WebP image.';
     } finally {
       uploadBtn.disabled = false;
     }
+    renderProperties();
   });
 
   applyBtn.addEventListener('click', () => {
-    const next = pendingUrl || url;
+    const next = pendingBackgroundUrl || backgroundImageUrl();
     if (!next) return;
     pushHistory();
     const t = designTheme();
+    const wasActive = !!backgroundImageUrl();
     t.backgroundImage = next;
     // Sensible presentation defaults the first time a background is applied.
     if (!t.backgroundSize) t.backgroundSize = 'cover';
     if (!t.backgroundPosition) t.backgroundPosition = 'center';
     if (!t.backgroundRepeat) t.backgroundRepeat = 'no-repeat';
-    pendingUrl = '';
-    markChanged('Profile background set. It sits behind the whole profile, including the sidebar.');
+    pendingBackgroundUrl = '';
+    markChanged(wasActive
+      ? 'Profile background replaced. It sits behind the whole profile, including the sidebar.'
+      : 'Profile background is active. It sits behind the whole profile, including the sidebar.');
     renderProperties();
   });
 
@@ -1579,26 +1691,46 @@ function profileBackgroundProperties(frag) {
     pushHistory();
     const t = designTheme();
     delete t.backgroundImage;
-    pendingUrl = '';
-    markChanged('Profile background removed.');
+    pendingBackgroundUrl = '';
+    markChanged('Profile background removed. Your profile uses the platform theme background.');
     renderProperties();
   });
 
   frag.appendChild(row);
   frag.appendChild(fileInput);
   frag.appendChild(status);
+  if (pendingUploadError) {
+    const errLine = document.createElement('p');
+    errLine.className = 'studio-prop-hint studio-bg-error';
+    errLine.id = 'studio-background-error';
+    errLine.textContent = pendingUploadError;
+    pendingUploadError = '';
+    frag.appendChild(errLine);
+  }
 
-  // Presentation: how the background is painted behind the profile. These are
-  // the platform's own background values, validated server-side.
-  frag.appendChild(fieldRow('Size', selectField(theme, 'backgroundSize', PROFILE_BACKGROUND_SIZES, {
+  // ── Presentation controls, scoped to the ACTIVE background ──
+  // Greyed out with no background, so they never read as unrelated generic
+  // theme settings that happen to sit under a Profile Background heading.
+  const sizeField = selectField(theme, 'backgroundSize', PROFILE_BACKGROUND_SIZES, {
     labels: ['Cover', 'Contain', 'Stretch'],
-  })));
-  frag.appendChild(fieldRow('Position', selectField(theme, 'backgroundPosition', PROFILE_BACKGROUND_POSITIONS)));
-  frag.appendChild(fieldRow('Repeat', selectField(theme, 'backgroundRepeat', PROFILE_BACKGROUND_REPEATS)));
+  });
+  const positionField = selectField(theme, 'backgroundPosition', PROFILE_BACKGROUND_POSITIONS);
+  const repeatField = selectField(theme, 'backgroundRepeat', PROFILE_BACKGROUND_REPEATS);
+  for (const [field, label] of [[sizeField, 'Size'], [positionField, 'Position'], [repeatField, 'Repeat']]) {
+    field.disabled = !isActive;
+    field.title = isActive
+      ? `How the ACTIVE Profile Background is ${label.toLowerCase()}ed`
+      : `Set a Profile Background first — this controls the active background`;
+  }
+  frag.appendChild(fieldRow('Size', sizeField));
+  frag.appendChild(fieldRow('Position', positionField));
+  frag.appendChild(fieldRow('Repeat', repeatField));
 
   const hint = document.createElement('p');
   hint.className = 'studio-prop-hint';
-  hint.textContent = 'The background covers the outer profile area, behind the main profile and every sidebar card. It is saved with the design and published with it — it is never a normal image card.';
+  hint.textContent = isActive
+    ? 'These settings control the active Profile Background above. It covers the outer profile area, behind the main profile and every sidebar card, and is saved and published with the design — it is never a normal image card.'
+    : 'Size, Position and Repeat apply once a Profile Background is active. The background covers the outer profile area, behind the main profile and every sidebar card — it is never a normal image card.';
   frag.appendChild(hint);
 }
 
@@ -2768,6 +2900,9 @@ async function saveDraft() {
       theme: isPlainTheme(currentDesign.theme) ? clone(currentDesign.theme) : null,
     });
     currentDesign = normalizeDesign(result.design);
+    // CREATOR-10A: a staged upload belongs to the design it was staged in, so
+    // switching designs must never carry it over as a phantom background.
+    resetPendingBackground();
     designs = designs.map(d => (d.id === currentDesign.id ? currentDesign : d));
     renderDesignSelect();
     renderProperties();
@@ -2788,6 +2923,9 @@ async function publish() {
     setStatus('Publishing…');
     const result = await designApi.publishDesign(currentDesign.id);
     currentDesign = normalizeDesign(result.design);
+    // CREATOR-10A: a staged upload belongs to the design it was staged in, so
+    // switching designs must never carry it over as a phantom background.
+    resetPendingBackground();
     designs = designs.map(d => (d.id === currentDesign.id ? currentDesign : d));
     renderDesignSelect();
     dirty = false;
@@ -2977,6 +3115,9 @@ async function switchDesign(designId) {
   await runAction(async () => {
     const result = await designApi.getDesign(design.id);
     currentDesign = normalizeDesign(result.design);
+    // CREATOR-10A: a staged upload belongs to the design it was staged in, so
+    // switching designs must never carry it over as a phantom background.
+    resetPendingBackground();
     selectedId = null;
     history = [];
     future = [];
@@ -3000,6 +3141,9 @@ async function createNewDesign() {
   if (!created) return;
   designs = [created, ...designs];
   currentDesign = normalizeDesign(created);
+    // CREATOR-10A: a staged upload belongs to the design it was staged in, so
+    // switching designs must never carry it over as a phantom background.
+    resetPendingBackground();
   selectedId = null;
   history = [];
   future = [];
@@ -3118,6 +3262,9 @@ export async function initCreatorStudioPage() {
       pick = created.design;
     }
     currentDesign = normalizeDesign(pick);
+    // CREATOR-10A: a staged upload belongs to the design it was staged in, so
+    // switching designs must never carry it over as a phantom background.
+    resetPendingBackground();
     selectedId = null;
     history = [];
     future = [];

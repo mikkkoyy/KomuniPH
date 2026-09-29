@@ -6219,3 +6219,109 @@ select:focus {
     text-align: center;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   CREATOR-11 — Card containers, masking and the controlled animation set.
+
+   The @keyframes rules below are APPLICATION-OWNED and are the only animations
+   a stored design can ever play. A design stores an animation id; the renderer
+   maps that id to `komuniph-anim-<id>`. There is no code path that accepts a
+   keyframes name, a CSS shorthand or any other animation value from user input,
+   so a saved design cannot smuggle arbitrary CSS into the page.
+
+   The same rules serve the Creator Studio canvas and the public profile, which
+   is what keeps a Studio preview and a published profile showing the same saved
+   design rather than two divergent approximations.
+   --------------------------------------------------------------------------- */
+
+@keyframes komuniph-anim-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes komuniph-anim-fade-up {
+  from { opacity: 0; transform: translate3d(0, 18px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes komuniph-anim-fade-down {
+  from { opacity: 0; transform: translate3d(0, -18px, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes komuniph-anim-fade-left {
+  from { opacity: 0; transform: translate3d(18px, 0, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes komuniph-anim-fade-right {
+  from { opacity: 0; transform: translate3d(-18px, 0, 0); }
+  to { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+@keyframes komuniph-anim-zoom-in {
+  from { opacity: 0; transform: scale3d(0.82, 0.82, 1); }
+  to { opacity: 1; transform: scale3d(1, 1, 1); }
+}
+@keyframes komuniph-anim-zoom-out {
+  from { opacity: 0; transform: scale3d(1.18, 1.18, 1); }
+  to { opacity: 1; transform: scale3d(1, 1, 1); }
+}
+@keyframes komuniph-anim-bounce {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  25% { transform: translate3d(0, -22%, 0); }
+  50% { transform: translate3d(0, 0, 0); }
+  75% { transform: translate3d(0, -9%, 0); }
+}
+@keyframes komuniph-anim-pulse {
+  0%, 100% { transform: scale3d(1, 1, 1); }
+  50% { transform: scale3d(1.09, 1.09, 1); }
+}
+@keyframes komuniph-anim-float {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(0, -12px, 0); }
+}
+@keyframes komuniph-anim-shake {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  20% { transform: translate3d(-6px, 0, 0); }
+  40% { transform: translate3d(6px, 0, 0); }
+  60% { transform: translate3d(-4px, 0, 0); }
+  80% { transform: translate3d(4px, 0, 0); }
+}
+@keyframes komuniph-anim-swing {
+  0%, 100% { transform: rotate3d(0, 0, 1, -5deg); }
+  50% { transform: rotate3d(0, 0, 1, 5deg); }
+}
+
+/*
+  Accessibility: when the visitor (or the Studio) asks for reduced motion, the
+  animations are switched off at the RENDERING layer only. The stored design is
+  untouched, so switching the preference back off restores the animation — no
+  design data is changed, removed or downgraded on the user's behalf.
+*/
+@media (prefers-reduced-motion: reduce) {
+  .design-animated {
+    animation-name: none !important;
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+  }
+}
+
+/* -- CREATOR-11: Card as a real masking container ---------------------------
+   A card mounts its Image/Sticker children inside `.design-card-surface` and
+   only becomes a positioning context here. With Content Mask on, that surface
+   clips them to the card box, and because the clip follows the card's own
+   border-radius a rounded card produces a rounded mask for free — no second
+   mask element, no baked image, and the child still points at its ORIGINAL
+   image source.
+
+   The clipping is on the SURFACE, not the card box: a component's resize
+   handles sit 6px outside its own box, so clipping the card itself would make
+   its own handles unreachable. This mirrors why an image clips in
+   `.design-image-inner`. */
+.design-card-container { position: absolute; }
+.design-card-surface {
+  position: absolute;
+  inset: 0;
+  /* An unrounded card clips square; a rounded card clips to the SAME radius, so
+     the surface simply inherits whatever radius the card carries. */
+  border-radius: inherit;
+}
+/* Content Mask off: children are still contained, they are simply not clipped. */
+.design-card-masked > .design-card-surface { overflow: hidden; }
+
+/* Children always paint above the card's own heading/body, which are not
+   positioned and therefore sit below in stacking order. */
+.design-card-surface > .design-component { z-index: 1; }

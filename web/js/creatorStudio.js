@@ -34,6 +34,24 @@ import {
   guidePattern,
   guideSectionLabel,
   guideLabel,
+  FONT_FAMILY_IDS,
+  FONT_FAMILIES,
+  FONT_STYLES,
+  ANIMATION_LABELS,
+  ANIMATION_NAMES,
+  ANIMATION_TIMINGS,
+  ANIMATION_ITERATION_CHOICES,
+  ANIMATION_DURATION_MIN,
+  ANIMATION_DURATION_MAX,
+  ANIMATION_DELAY_MIN,
+  ANIMATION_DELAY_MAX,
+  DEFAULT_ANIMATION,
+  CARD_CHILD_TYPES,
+  CARD_PARENT_TYPES,
+  applyTypographyToElement,
+  applyAnimationToElement,
+  resolveAnimation,
+  numOr,
 } from './profileDesign.js';
 import {
   stepPan,
@@ -746,6 +764,44 @@ function buildLegacyGuideNode(el, comp) {
   el.appendChild(inner);
 }
 
+// ── CREATOR-11: containers (Card → Image / Sticker) ───────────────────────────
+
+/** The card a component is nested inside, or null. */
+function parentCardOf(comp) {
+  if (!comp || typeof comp.parentId !== 'string' || !comp.parentId) return null;
+  const parent = components().find(c => c.id === comp.parentId);
+  if (!parent || !CARD_PARENT_TYPES.has(parent.type)) return null;
+  return CARD_CHILD_TYPES.has(comp.type) ? parent : null;
+}
+
+/** True when the component is nested inside a card. */
+function isNested(comp) {
+  return !!parentCardOf(comp);
+}
+
+/** Direct children of a card id, in stable order. */
+function childrenOf(cardId) {
+  return components().filter(c => c.parentId === cardId);
+}
+
+/**
+ * The absolute design position of a component. A child stores LOCAL coordinates
+ * inside its card, so every canvas-level calculation (drag, resize, drop, arrow
+ * keys) has to add the card's own origin. Keeping this in one place is what stops
+ * a child from jumping when its parent moves.
+ */
+function absolutePosition(comp) {
+  const card = parentCardOf(comp);
+  if (!card) return { x: comp.x, y: comp.y };
+  return { x: card.x + comp.x, y: card.y + comp.y };
+}
+
+function prefersReducedMotion() {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
 function buildContentNode(el, comp) {
   const config = comp.config || {};
   if (comp.type === GUIDE_CARD_COMPONENT_TYPE) {
@@ -769,27 +825,38 @@ function buildContentNode(el, comp) {
     const span = document.createElement('div');
     span.className = 'design-text-content';
     span.textContent = config.text || '';
-    if (config.fontSize) span.style.fontSize = `${config.fontSize}px`;
-    if (config.fontWeight) span.style.fontWeight = String(config.fontWeight);
-    if (config.textAlign) span.style.textAlign = config.textAlign;
-    if (config.lineHeight) span.style.lineHeight = String(config.lineHeight);
-    if (config.textColor) span.style.color = config.textColor;
+    // CREATOR-11: one shared typography helper, so the Studio preview and the
+    // public profile resolve a font id to the same CSS stack.
+    applyTypographyToElement(span, config);
     el.appendChild(span);
   } else if (comp.type === 'card') {
+    // CREATOR-11: a card is a container. Children mount into `.design-card-surface`
+    // rather than the card box, because a component's resize handles sit 6px
+    // outside its own box and clipping the card would make them unreachable. The
+    // surface carries the mask; the card box stays unclipped.
+    el.classList.add('design-card-container');
+    if (config.mask === true) el.classList.add('design-card-masked');
+    const surface = document.createElement('div');
+    surface.className = 'design-card-surface';
     const heading = document.createElement('div');
     heading.className = 'design-card-heading';
     heading.textContent = config.heading || '';
     if (config.headingColor) heading.style.color = config.headingColor;
-    el.appendChild(heading);
+    surface.appendChild(heading);
     if (config.body) {
       const body = document.createElement('div');
       body.className = 'design-card-body';
       body.textContent = config.body;
       if (config.textColor) body.style.color = config.textColor;
-      el.appendChild(body);
+      surface.appendChild(body);
     }
+    el.appendChild(surface);
     if (config.textAlign) el.style.textAlign = config.textAlign;
   }
+  // CREATOR-11: animation is presentation only — it never touches geometry, so
+  // it is applied after the element is built and is safe to leave running while
+  // the creator drags something else.
+  applyAnimationToElement(el, config.animation, { reducedMotion: prefersReducedMotion() });
 }
 
 function appendHandles(el) {
@@ -808,6 +875,7 @@ function buildComponentNode(comp) {
   // CREATOR-08: expose the type so the guide can be identified in the DOM
   // without matching on its label or class.
   el.dataset.compType = comp.type;
+  if (typeof comp.parentId === 'string' && comp.parentId) el.dataset.parentId = comp.parentId;
 
   if (CONTROLLED_TYPES.has(comp.type)) {
     const meta = CONTROLLED_SECTIONS.find(s => s.type === comp.type);
@@ -820,7 +888,20 @@ function buildComponentNode(comp) {
     buildContentNode(el, comp);
   }
 
-  applyGeometryToElement(el, comp, { applyVisibility: false });
+  if (isNested(comp)) {
+    // CREATOR-11: local coordinates inside the card. The card is the positioning
+    // context, so the stored x/y are used verbatim — the card's own origin is
+    // applied once, by the card's own geometry.
+    el.style.position = 'absolute';
+    el.style.left = `${comp.x}px`;
+    el.style.top = `${comp.y}px`;
+    el.style.width = `${comp.width}px`;
+    el.style.height = `${comp.height}px`;
+    el.style.zIndex = String(numOr(comp.zIndex, 0));
+    el.style.display = comp.visible === false ? 'none' : '';
+  } else {
+    applyGeometryToElement(el, comp, { applyVisibility: false });
+  }
   applyCommonStyleToElement(el, comp.style);
   if (comp.visible === false) el.classList.add('studio-comp-hidden');
   if (comp.locked) el.classList.add('studio-comp-locked');
@@ -984,13 +1065,93 @@ function renderCanvas() {
   const visible = previewMode
     ? ordered.filter(comp => !GUIDE_COMPONENT_TYPES.has(comp.type))
     : ordered;
-  visible.forEach(comp => doc.appendChild(buildComponentNode(comp)));
+
+  // CREATOR-11: mount containers before their children, then nest each child
+  // INSIDE its card element so the card's box genuinely clips it. A child whose
+  // card is missing (an invalid relationship the server would reject) still
+  // renders, un-nested, rather than disappearing.
+  const nodes = new Map();
+  const nested = visible.filter(comp => isNested(comp));
+  const topLevel = visible.filter(comp => !isNested(comp));
+  for (const comp of topLevel) {
+    const node = buildComponentNode(comp);
+    doc.appendChild(node);
+    nodes.set(comp.id, node);
+  }
+  for (const comp of nested) {
+    const parentNode = nodes.get(comp.parentId);
+    // Mount into the card's masking surface, matching the public renderer exactly.
+    const surface = parentNode ? (parentNode.querySelector(':scope > .design-card-surface')) : null;
+    const node = buildComponentNode(comp);
+    if (surface) surface.appendChild(node);
+    else if (parentNode) parentNode.appendChild(node);
+    else doc.appendChild(node);
+    nodes.set(comp.id, node);
+  }
 
   const zoomLayer = document.createElement('div');
   zoomLayer.id = 'studio-zoom-layer';
   zoomLayer.style.transform = viewerTransform({ zoom, panX: viewerPan.x, panY: viewerPan.y });
   zoomLayer.appendChild(doc);
   inner.replaceChildren(zoomLayer);
+}
+
+/**
+ * Build one Layers row for a component. Shared by the flat and nested paths so a
+ * row behaves identically wherever it appears.
+ */
+function buildLayerRow(comp, depth) {
+  const row = document.createElement('div');
+  row.className = `studio-layer-row${comp.id === selectedId ? ' studio-layer-selected' : ''}`;
+  row.dataset.layerId = comp.id;
+  if (depth > 0) {
+    row.classList.add('studio-layer-child');
+    row.style.paddingLeft = `${depth * 1.1}rem`;
+  }
+
+  const name = document.createElement('button');
+  name.type = 'button';
+  name.className = 'studio-layer-name';
+  name.dataset.action = 'select';
+  name.title = 'Select on canvas';
+  // Nesting is shown structurally, not by flattening: a child is indented under
+  // its card so the container relationship is visible at a glance.
+  const marker = isNested(comp) ? '↳ ' : '';
+  name.textContent = `${marker}${labelOf(comp)}`;
+  if (!comp.visible) name.textContent = `· ${name.textContent}`;
+  row.appendChild(name);
+
+  const z = document.createElement('input');
+  z.type = 'number';
+  z.className = 'studio-layer-z';
+  z.value = String(comp.zIndex ?? 0);
+  z.min = 0;
+  z.max = 10000;
+  z.title = 'Z-index (higher = on top)';
+  row.appendChild(z);
+
+  const actions = document.createElement('div');
+  actions.className = 'studio-layer-actions';
+  [
+    ['back', 'To bottom', 'Bot'],
+    ['backward', 'Send backward', 'Back'],
+    ['forward', 'Bring forward', 'Fwd'],
+    ['front', 'To top', 'Top'],
+    ['toggle-visibility', comp.visible ? 'Hide' : 'Show', 'Eye'],
+    ['toggle-lock', comp.locked ? 'Unlock' : 'Lock', 'Lock'],
+    ['duplicate', 'Duplicate', 'Dup'],
+    ['delete', 'Delete', 'Del'],
+  ].forEach(([action, title, text]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'studio-layer-action';
+    button.dataset.action = action;
+    button.title = title;
+    button.textContent = text;
+    actions.appendChild(button);
+  });
+  row.appendChild(actions);
+  return row;
 }
 
 function renderLayers() {
@@ -1004,53 +1165,26 @@ function renderLayers() {
     list.replaceChildren(empty);
     return;
   }
+
+  // CREATOR-11: emit containers first, each immediately followed by its own
+  // children, so the panel reads as a hierarchy instead of an unrelated list.
+  const emitted = new Set();
   const frag = document.createDocumentFragment();
-  ordered.forEach((comp, index) => {
-    const row = document.createElement('div');
-    row.className = `studio-layer-row${comp.id === selectedId ? ' studio-layer-selected' : ''}`;
-    row.dataset.layerId = comp.id;
-
-    const name = document.createElement('button');
-    name.type = 'button';
-    name.className = 'studio-layer-name';
-    name.dataset.action = 'select';
-    name.title = 'Select on canvas';
-    name.textContent = `${index + 1}. ${labelOf(comp)}`;
-    name.textContent = comp.visible ? name.textContent : `· ${name.textContent}`;
-    row.appendChild(name);
-
-    const z = document.createElement('input');
-    z.type = 'number';
-    z.className = 'studio-layer-z';
-    z.value = String(comp.zIndex ?? 0);
-    z.min = 0;
-    z.max = 10000;
-    z.title = 'Z-index (higher = on top)';
-    row.appendChild(z);
-
-    const actions = document.createElement('div');
-    actions.className = 'studio-layer-actions';
-    [
-      ['back', 'To bottom', 'Bot'],
-      ['backward', 'Send backward', 'Back'],
-      ['forward', 'Bring forward', 'Fwd'],
-      ['front', 'To top', 'Top'],
-      ['toggle-visibility', comp.visible ? 'Hide' : 'Show', comp.visible ? 'Eye' : 'Eye'],
-      ['toggle-lock', comp.locked ? 'Unlock' : 'Lock', 'Lock'],
-      ['duplicate', 'Duplicate', 'Dup'],
-      ['delete', 'Delete', 'Del'],
-    ].forEach(([action, title, text]) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'studio-layer-action';
-      button.dataset.action = action;
-      button.title = title;
-      button.textContent = text;
-      actions.appendChild(button);
-    });
-    row.appendChild(actions);
-    frag.appendChild(row);
-  });
+  for (const comp of ordered) {
+    if (emitted.has(comp.id)) continue;
+    if (isNested(comp)) continue; // emitted with its card below
+    emitted.add(comp.id);
+    frag.appendChild(buildLayerRow(comp, 0));
+    for (const child of childrenOf(comp.id).sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))) {
+      emitted.add(child.id);
+      frag.appendChild(buildLayerRow(child, 1));
+    }
+  }
+  // Defensive: anything not reachable through a valid parent (which the server
+  // would reject) still appears, rather than becoming unreachable in the UI.
+  for (const comp of ordered) {
+    if (!emitted.has(comp.id)) frag.appendChild(buildLayerRow(comp, 0));
+  }
   list.replaceChildren(frag);
 }
 
@@ -1648,8 +1782,15 @@ function componentProperties(frag, comp) {
     frag.appendChild(sectionTitle(section));
     if (comp.type === 'text') {
       frag.appendChild(fieldRow('Text', textField(comp, 'config.text', { max: 2000, rows: 3, trim: true })));
+      // CREATOR-11: Font Family and Style are SELECTS over the server allowlist,
+      // never a free-text field — the stored value is a font id, so there is no
+      // way to submit a CSS font-family string.
+      frag.appendChild(fieldRow('Font', selectField(comp, 'config.fontFamily', FONT_FAMILY_IDS, {
+        labels: FONT_FAMILY_IDS.map(id => FONT_FAMILIES.get(id).label),
+      })));
       frag.appendChild(fieldRow('Font size', numberField(comp, 'config.fontSize', { min: 8, max: 200 })));
       frag.appendChild(fieldRow('Font weight', numberField(comp, 'config.fontWeight', { min: 100, max: 900, integer: true })));
+      frag.appendChild(fieldRow('Style', selectField(comp, 'config.fontStyle', FONT_STYLES)));
       frag.appendChild(fieldRow('Align', selectField(comp, 'config.textAlign', ['left', 'center', 'right'])));
       frag.appendChild(fieldRow('Line height', numberField(comp, 'config.lineHeight', { min: 0.5, max: 3, step: 0.1 })));
       frag.appendChild(fieldRow('Text color', colorField(comp, 'config.textColor')));
@@ -1671,8 +1812,117 @@ function componentProperties(frag, comp) {
       frag.appendChild(fieldRow('Heading color', colorField(comp, 'config.headingColor')));
       frag.appendChild(fieldRow('Body color', colorField(comp, 'config.textColor')));
       frag.appendChild(fieldRow('Align', selectField(comp, 'config.textAlign', ['left', 'center', 'right'])));
+      // CREATOR-11: Content Mask. A plain On/Off switch — the renderer owns the
+      // actual clipping, so no CSS clip value is ever user-supplied.
+      frag.appendChild(fieldRow('Content Mask', toggleField(comp, 'config.mask')));
+      const kids = childrenOf(comp.id);
+      const maskHint = document.createElement('p');
+      maskHint.className = 'studio-prop-hint';
+      maskHint.textContent = kids.length === 0
+        ? 'Content Mask clips the Image and Sticker you place inside this card to its box and border radius. None placed yet — select an Image or Sticker and set its Container to this card.'
+        : `Contains ${kids.length} component${kids.length === 1 ? '' : 's'}: ${kids.map(k => labelOf(k)).join(', ')}. Deleting this card also deletes ${kids.length === 1 ? 'it' : 'them'}.`;
+      frag.appendChild(maskHint);
     }
+
+    // CREATOR-11: Container. Only Cards can contain things, and only Image and
+    // Sticker can be contained, so the options are pre-filtered from the live
+    // design rather than being a free-text id field.
+    if (CARD_CHILD_TYPES.has(comp.type) || CARD_PARENT_TYPES.has(comp.type)) {
+      frag.appendChild(sectionTitle('Container'));
+      if (CARD_CHILD_TYPES.has(comp.type)) {
+        const cardIds = components().filter(c => CARD_PARENT_TYPES.has(c.type)).map(c => c.id);
+        frag.appendChild(fieldRow('Inside Card', selectField(comp, 'parentId', ['', ...cardIds], {
+          labels: ['None', ...cardIds.map(id => labelOf(components().find(c => c.id === id) || { type: id }))],
+        })));
+        const nestHint = document.createElement('p');
+        nestHint.className = 'studio-prop-hint';
+        nestHint.textContent = 'Inside a card, X/Y are measured from the card\'s top-left and the image is clipped to the card when its Content Mask is on. Dragging the card moves this component with it.';
+        frag.appendChild(nestHint);
+      } else {
+        const note = document.createElement('p');
+        note.className = 'studio-prop-hint';
+        note.textContent = 'A Card is a container. Cards cannot be nested inside other cards.';
+        frag.appendChild(note);
+      }
+    }
+
+    // CREATOR-11: Animation. Exposes exactly the five validated fields and
+    // nothing else — there is no raw CSS/name field a creator could abuse.
+    animationProperties(frag, comp);
   }
+}
+
+/**
+ * CREATOR-11: the Repeat control.
+ *
+ * A dedicated field rather than a generic selectField, because the UI offers
+ * friendly labels ("2×", "Infinite") while the validated model stores an INTEGER
+ * or the exact string "infinite". A plain select would have stored the string
+ * "2", which the server correctly rejects — so the choice is translated here,
+ * once, at the boundary.
+ */
+function animationRepeatField(comp) {
+  const select = document.createElement('select');
+  const REPEAT_CHOICES = [
+    { value: 1, label: 'Once' },
+    { value: 2, label: '2×' },
+    { value: 3, label: '3×' },
+    { value: 5, label: '5×' },
+    { value: 'infinite', label: 'Infinite' },
+  ];
+  for (const choice of REPEAT_CHOICES) {
+    const option = document.createElement('option');
+    // The DOM value is the model's real value, so nothing is translated on save.
+    option.value = String(choice.value);
+    option.textContent = choice.label;
+    select.appendChild(option);
+  }
+  const current = getPath(comp, 'config.animation.iteration');
+  const matched = REPEAT_CHOICES.find(c => c.value === current);
+  select.value = String(matched ? matched.value : DEFAULT_ANIMATION.iteration);
+  select.addEventListener('change', () => {
+    const chosen = REPEAT_CHOICES.find(c => String(c.value) === select.value);
+    setPath(comp, 'config.animation.iteration', chosen ? chosen.value : DEFAULT_ANIMATION.iteration);
+    markChanged();
+  });
+  return select;
+}
+
+/**
+ * CREATOR-11: the Animation section for a selected component.
+ * Only the validated model is exposed; duration/delay/iteration are bounded by
+ * the same ranges the server enforces, so the Studio cannot build a payload the
+ * server would reject.
+ */
+function animationProperties(frag, comp) {
+  if (!comp || !comp.config) return;
+  frag.appendChild(sectionTitle('Animation'));
+  const animation = resolveAnimation(comp.config.animation) || { ...DEFAULT_ANIMATION };
+
+  frag.appendChild(fieldRow('Effect', selectField(comp, 'config.animation.name', ANIMATION_NAMES, {
+    labels: ANIMATION_NAMES.map(n => ANIMATION_LABELS[n]),
+  })));
+  frag.appendChild(fieldRow('Duration', numberField(comp, 'config.animation.duration', {
+    min: ANIMATION_DURATION_MIN, max: ANIMATION_DURATION_MAX, step: 0.1,
+  })));
+  frag.appendChild(fieldRow('Delay', numberField(comp, 'config.animation.delay', {
+    min: ANIMATION_DELAY_MIN, max: ANIMATION_DELAY_MAX, step: 0.1,
+  })));
+  frag.appendChild(fieldRow('Repeat', animationRepeatField(comp)));
+  frag.appendChild(fieldRow('Timing', selectField(comp, 'config.animation.timing', ANIMATION_TIMINGS)));
+
+  // Reflect the stored value back into the controls. The animation model is
+  // flat scalars, but the UI offers friendly choices, so map once on render.
+  const set = (path, value) => { setPath(comp, path, value); };
+  set('config.animation.duration', Number.isFinite(animation.duration) ? animation.duration : DEFAULT_ANIMATION.duration);
+  set('config.animation.delay', Number.isFinite(animation.delay) ? animation.delay : DEFAULT_ANIMATION.delay);
+  set('config.animation.timing', animation.timing);
+  set('config.animation.iteration', animation.iteration);
+
+  const hint = document.createElement('p');
+  hint.className = 'studio-prop-hint';
+  hint.textContent = 'Animation is presentation only — it never changes this component\'s position, size, rotation or layer order, and it is stored with the design so it plays on your public profile too.';
+  frag.appendChild(hint);
 }
 
 function renderProperties() {
@@ -1940,13 +2190,46 @@ function duplicateComponent(id) {
   markChanged('Component duplicated.');
 }
 
+/**
+ * Remove a component.
+ *
+ * CREATOR-11: deleting a Card CASCADES to the components it contains. A child
+ * that outlived its card would keep a dangling `parentId`, which the server
+ * rejects — so leaving them behind would turn a valid design into one that
+ * cannot be saved. Because this is a single deterministic edit to the layout
+ * array, undo, redo, save and publish all see the same result.
+ *
+ * The whole subtree is captured up front, so a deeper chain could not be left
+ * half-removed.
+ */
 function removeComponent(id) {
-  const index = components().findIndex(c => c.id === id);
+  const all = components();
+  const index = all.findIndex(c => c.id === id);
   if (index === -1) return;
+
   pushHistory();
-  components().splice(index, 1);
-  if (selectedId === id) selectedId = components()[0]?.id || null;
-  markChanged('Component removed.');
+  const doomed = new Set([id]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const comp of all) {
+      if (typeof comp.parentId === 'string' && doomed.has(comp.parentId) && !doomed.has(comp.id)) {
+        doomed.add(comp.id);
+        grew = true;
+      }
+    }
+  }
+  const removed = all.filter(c => doomed.has(c.id));
+  currentDesign.layout = { ...layout(), components: all.filter(c => !doomed.has(c.id)) };
+  if (doomed.has(selectedId)) selectedId = null;
+  // A selected child of a removed card must not stay selected.
+  for (const comp of removed) {
+    if (selectedId === comp.id) selectedId = null;
+  }
+  const extra = removed.length - 1;
+  markChanged(extra > 0
+    ? `Card and ${extra} contained component${extra === 1 ? '' : 's'} removed.`
+    : 'Component removed.');
 }
 
 // ── Canvas placement / dragging ──────────────────────────────────────────────
@@ -2162,31 +2445,47 @@ function onPointerMove(event) {
 
   clearGuides();
 
+  // CREATOR-11: a nested child stores LOCAL coordinates, so its drag/resize is
+  // clamped against its CARD, not the whole canvas. Moving the card does not
+  // touch the child at all — the child simply rides along, because the card's
+  // origin is applied when the child is drawn. A standalone component keeps the
+  // original canvas bounds.
+  const card = parentCardOf(comp);
+  const bounds = card ? { width: card.width, minHeight: card.height } : c;
+  // Snapping compares against siblings, which is only meaningful at the same
+  // level, so it is skipped for a child inside a card.
+  const canSnap = !card;
+
   if (drag.mode === 'move') {
-    const x = clamp(roundInt(drag.startX + dx), 0, Math.max(0, c.width - comp.width));
-    const y = clamp(roundInt(drag.startY + dy), 0, Math.max(0, c.minHeight - comp.height));
-    const result = snapMove(comp, x, y);
-    comp.x = result.x;
-    comp.y = result.y;
-    unionGuides = result.guides;
-    drawGuides();
+    const x = clamp(roundInt(drag.startX + dx), 0, Math.max(0, bounds.width - comp.width));
+    const y = clamp(roundInt(drag.startY + dy), 0, Math.max(0, bounds.minHeight - comp.height));
+    if (canSnap) {
+      const result = snapMove(comp, x, y);
+      comp.x = result.x;
+      comp.y = result.y;
+      unionGuides = result.guides;
+      drawGuides();
+    } else {
+      comp.x = x;
+      comp.y = y;
+    }
   } else {
     const dirs = drag.dir;
     let { x, y, width, height } = comp;
     if (dirs.includes('e')) {
-      width = clamp(roundInt(drag.startW + dx), MIN_SIZE, Math.max(MIN_SIZE, c.width - x));
+      width = clamp(roundInt(drag.startW + dx), MIN_SIZE, Math.max(MIN_SIZE, bounds.width - x));
     }
     if (dirs.includes('s')) {
-      height = clamp(roundInt(drag.startH + dy), MIN_SIZE, Math.max(MIN_SIZE, c.minHeight - y));
+      height = clamp(roundInt(drag.startH + dy), MIN_SIZE, Math.max(MIN_SIZE, bounds.minHeight - y));
     }
     if (dirs.includes('w')) {
       const newX = clamp(roundInt(drag.startX + dx), 0, Math.max(0, drag.startX + drag.startW - MIN_SIZE));
-      width = clamp(drag.startW + (drag.startX - newX), MIN_SIZE, Math.max(MIN_SIZE, c.width - newX));
+      width = clamp(drag.startW + (drag.startX - newX), MIN_SIZE, Math.max(MIN_SIZE, bounds.width - newX));
       x = newX;
     }
     if (dirs.includes('n')) {
       const newY = clamp(roundInt(drag.startY + dy), 0, Math.max(0, drag.startY + drag.startH - MIN_SIZE));
-      height = clamp(drag.startH + (drag.startY - newY), MIN_SIZE, Math.max(MIN_SIZE, c.minHeight - newY));
+      height = clamp(drag.startH + (drag.startY - newY), MIN_SIZE, Math.max(MIN_SIZE, bounds.minHeight - newY));
       y = newY;
     }
     comp.x = x;
@@ -2196,6 +2495,9 @@ function onPointerMove(event) {
     // CREATOR-09 §13: rotation is deliberately left untouched by move and
     // resize — the value is the design's, and the drag is applied in the
     // component's own rotated frame above, so the box does not swing either.
+    // CREATOR-11: resizing a CHILD never rescales its image source. Only the
+    // component box changes; the <img> keeps the same src and is refitted by
+    // CSS, so nothing is ever rasterised or re-encoded.
   }
   renderCanvas();
   renderLayers();

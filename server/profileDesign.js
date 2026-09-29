@@ -139,6 +139,80 @@ const FONT_WEIGHT_MAX = 900;
 const LINE_HEIGHT_MIN = 0.5;
 const LINE_HEIGHT_MAX = 3;
 
+// ── CREATOR-11: Fonts ─────────────────────────────────────────────────────────
+//
+// A design stores a FONT ID, never a CSS font-family string. A raw string is a
+// CSS-injection surface (`Georgia; background: url(...)`, or a quote-breaking
+// payload), and letting one reach `style.fontFamily` would defeat every other
+// validation in this file. Each id maps to an application-owned CSS stack
+// declared once, in web/js/profileDesign.js, and reused by BOTH the Creator
+// Studio preview and the public renderer so a saved design looks the same
+// everywhere.
+//
+// The set is deliberately limited to fonts that are present on the overwhelming
+// majority of desktop and mobile browsers with no webfont download: the classic
+// web-safe faces, plus the CSS generic families. Generic families are the
+// important part for correctness — they are how a design stays legible on a
+// device that lacks a named face, which is the only kind of "fallback" that is
+// honest rather than a silent substitution.
+export const FONT_FAMILIES = new Map([
+  ['system-ui', { label: 'System UI', stack: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }],
+  ['sans-serif', { label: 'Sans Serif', stack: 'Arial, Helvetica, "Liberation Sans", sans-serif' }],
+  ['serif', { label: 'Serif', stack: 'Georgia, "Times New Roman", "Liberation Serif", serif' }],
+  ['monospace', { label: 'Monospace', stack: '"Courier New", Courier, "Liberation Mono", monospace' }],
+  ['arial', { label: 'Arial', stack: 'Arial, Helvetica, "Liberation Sans", sans-serif' }],
+  ['helvetica', { label: 'Helvetica', stack: '"Helvetica Neue", Helvetica, Arial, "Liberation Sans", sans-serif' }],
+  ['verdana', { label: 'Verdana', stack: 'Verdana, Geneva, "DejaVu Sans", sans-serif' }],
+  ['tahoma', { label: 'Tahoma', stack: 'Tahoma, Geneva, Verdana, "DejaVu Sans", sans-serif' }],
+  ['trebuchet-ms', { label: 'Trebuchet MS', stack: '"Trebuchet MS", "Lucida Grande", "Lucida Sans Unicode", sans-serif' }],
+  ['georgia', { label: 'Georgia', stack: 'Georgia, "Times New Roman", "Liberation Serif", serif' }],
+  ['times-new-roman', { label: 'Times New Roman', stack: '"Times New Roman", Times, "Liberation Serif", serif' }],
+  ['courier-new', { label: 'Courier New', stack: '"Courier New", Courier, "Liberation Mono", monospace' }],
+  ['impact', { label: 'Impact', stack: 'Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif' }],
+  ['comic-sans-ms', { label: 'Comic Sans MS', stack: '"Comic Sans MS", "Chalkboard SE", "Comic Neue", cursive' }],
+]);
+export const FONT_FAMILY_IDS = [...FONT_FAMILIES.keys()];
+/** The font used when a text component has no `fontFamily` (backward compatible). */
+export const DEFAULT_FONT_FAMILY = 'system-ui';
+
+// Underline is a BOOLEAN, never a CSS value, so there is nothing to inject.
+export const FONT_STYLES = new Set(['normal', 'italic']);
+export const DEFAULT_FONT_STYLE = 'normal';
+
+// ── CREATOR-11: Animation ────────────────────────────────────────────────────
+//
+// Animation is a real, validated design property — not a CSS class the Studio
+// invents, and never a user-supplied `animation` shorthand. The stored model is
+// five explicit fields, each an allowlist entry or a bounded number, and each is
+// mapped to an application-owned @keyframes rule at render time. Nothing a user
+// types ever reaches `style.animation`.
+export const ANIMATION_NAMES = new Set([
+  'none', 'fade', 'fade-up', 'fade-down', 'fade-left', 'fade-right',
+  'zoom-in', 'zoom-out', 'bounce', 'pulse', 'float', 'shake', 'swing',
+]);
+export const ANIMATION_TIMINGS = new Set([
+  'linear', 'ease', 'ease-in', 'ease-out', 'ease-in-out',
+]);
+export const ANIMATION_DURATION_MIN = 0.1;
+export const ANIMATION_DURATION_MAX = 20;
+export const ANIMATION_DELAY_MIN = 0;
+export const ANIMATION_DELAY_MAX = 60;
+/** Finite repeat counts offered in the UI; a design may store any integer in [1, 1000]. */
+export const ANIMATION_ITERATION_MIN = 1;
+export const ANIMATION_ITERATION_MAX = 1000;
+export const ANIMATION_ITERATION_CHOICES = ['once', '2', '3', '5', 'infinite'];
+export const DEFAULT_ANIMATION = Object.freeze({
+  name: 'none', duration: 2, delay: 0, iteration: 1, timing: 'ease-in-out',
+});
+const ANIMATION_FIELDS = new Set(['name', 'duration', 'delay', 'iteration', 'timing']);
+
+/** How deep a component may be nested. Card → Image/Sticker is the only shape. */
+export const MAX_NEST_DEPTH = 1;
+/** Component types allowed to sit INSIDE a card. */
+export const CARD_CHILD_TYPES = new Set(['image', 'sticker']);
+/** Component types allowed to be a parent (a container). */
+export const CARD_PARENT_TYPES = new Set(['card']);
+
 // Content types accept only http(s) image URLs — never data:, javascript: or
 // any scheme that could smuggle script or bypass the render-time img element.
 // CREATOR-02: exported for reuse by creatorAssets.js validation.
@@ -151,11 +225,14 @@ export const HTTP_URL_RE = /^https?:\/\/[^\s'"<>]+$/i;
  */
 export const APP_IMAGE_URL_RE = /^(?:https?:\/\/[^\s'"<>]+|\/uploads\/[^\s'"<>]+)$/i;
 
+// CREATOR-11: `animation` is available on every user-created content type, and
+// `mask` controls whether a Card clips its children. `fontFamily`/`fontStyle`
+// are text-only. There is deliberately no field that accepts a raw CSS value.
 const CONTENT_TYPE_CONFIG_FIELDS = {
-  text: new Set(['text', 'fontSize', 'fontWeight', 'textAlign', 'lineHeight', 'textColor']),
-  image: new Set(['imageUrl', 'alt', 'fit', 'backgroundColor']),
-  sticker: new Set(['imageUrl', 'alt', 'fit', 'backgroundColor']),
-  card: new Set(['heading', 'body', 'headingColor', 'textAlign', 'textColor']),
+  text: new Set(['text', 'fontSize', 'fontWeight', 'fontStyle', 'fontFamily', 'textAlign', 'lineHeight', 'textColor', 'animation']),
+  image: new Set(['imageUrl', 'alt', 'fit', 'backgroundColor', 'animation']),
+  sticker: new Set(['imageUrl', 'alt', 'fit', 'backgroundColor', 'animation']),
+  card: new Set(['heading', 'body', 'headingColor', 'textAlign', 'textColor', 'mask', 'animation']),
 };
 
 // CREATOR-02: exported for reuse by creatorAssets.js validation.
@@ -276,6 +353,18 @@ function validateContentConfig(component, errors) {
     return;
   }
 
+  // CREATOR-11: controlled profile sections keep their freeish (json-safe)
+  // config, but they are NOT animatable in this milestone and the renderer never
+  // reads an animation for them. Rejecting it here — BEFORE the content-type
+  // contract below, which returns early for controlled types — keeps the stored
+  // model honest: a design must not be able to carry an animation that would
+  // silently never play.
+  if (!CONTENT_TYPE_CONFIG_FIELDS[type]
+    && isPlainObject(config)
+    && Object.prototype.hasOwnProperty.call(config, 'animation')) {
+    errors.push(`Component "${id}" is a ${type} and cannot carry an animation`);
+  }
+
   if (type !== 'text' && type !== 'image' && type !== 'card' && type !== 'sticker') return;
 
   if (config === null || config === undefined) {
@@ -310,6 +399,49 @@ function validateContentConfig(component, errors) {
     }
     if (config.textColor !== undefined && !isCssColor(config.textColor)) {
       errors.push(`Component "${id}" config.textColor must be a hex color or empty`);
+    }
+    // CREATOR-11: fonts are stored as an id from a fixed registry, so a design can
+    // never carry a CSS font-family string (an injection surface) or a name the
+    // renderer does not know how to map.
+    if (config.fontFamily !== undefined && config.fontFamily !== null
+      && !FONT_FAMILIES.has(config.fontFamily)) {
+      errors.push(`Component "${id}" config.fontFamily must be one of: ${FONT_FAMILY_IDS.join(', ')}`);
+    }
+    if (config.fontStyle !== undefined && config.fontStyle !== null
+      && !FONT_STYLES.has(config.fontStyle)) {
+      errors.push(`Component "${id}" config.fontStyle must be one of: ${[...FONT_STYLES].join(', ')}`);
+    }
+  }
+
+  // CREATOR-11: animation is validated identically for every content type.
+  if (config.animation !== undefined) {
+    if (config.animation === null) {
+      // Explicit "no animation" is a valid, back-compatible value.
+    } else if (!isPlainObject(config.animation)) {
+      errors.push(`Component "${id}" config.animation must be an object or null`);
+    } else {
+      const anim = config.animation;
+      for (const key of Object.keys(anim)) {
+        if (!ANIMATION_FIELDS.has(key)) errors.push(`Component "${id}" config.animation has unknown field: ${key}`);
+      }
+      if (anim.name !== undefined && !ANIMATION_NAMES.has(anim.name)) {
+        errors.push(`Component "${id}" config.animation.name must be one of: ${[...ANIMATION_NAMES].join(', ')}`);
+      }
+      if (anim.timing !== undefined && !ANIMATION_TIMINGS.has(anim.timing)) {
+        errors.push(`Component "${id}" config.animation.timing must be one of: ${[...ANIMATION_TIMINGS].join(', ')}`);
+      }
+      if (anim.duration !== undefined
+        && (!isFiniteNumber(anim.duration) || anim.duration < ANIMATION_DURATION_MIN || anim.duration > ANIMATION_DURATION_MAX)) {
+        errors.push(`Component "${id}" config.animation.duration must be a number between ${ANIMATION_DURATION_MIN} and ${ANIMATION_DURATION_MAX}`);
+      }
+      if (anim.delay !== undefined
+        && (!isFiniteNumber(anim.delay) || anim.delay < ANIMATION_DELAY_MIN || anim.delay > ANIMATION_DELAY_MAX)) {
+        errors.push(`Component "${id}" config.animation.delay must be a number between ${ANIMATION_DELAY_MIN} and ${ANIMATION_DELAY_MAX}`);
+      }
+      if (anim.iteration !== undefined && anim.iteration !== 'infinite'
+        && (!Number.isInteger(anim.iteration) || anim.iteration < ANIMATION_ITERATION_MIN || anim.iteration > ANIMATION_ITERATION_MAX)) {
+        errors.push(`Component "${id}" config.animation.iteration must be an integer between ${ANIMATION_ITERATION_MIN} and ${ANIMATION_ITERATION_MAX}, or "infinite"`);
+      }
     }
   }
 
@@ -348,6 +480,12 @@ function validateContentConfig(component, errors) {
     if (config.textAlign !== undefined && !TEXT_ALIGNS.has(config.textAlign)) {
       errors.push(`Component "${id}" config.textAlign must be one of: ${[...TEXT_ALIGNS].join(', ')}`);
     }
+    // CREATOR-11: Content Mask is a BOOLEAN switch, never a CSS clip value.
+    // A design can therefore only ask "clip my children to my box or not", and
+    // the actual clipping is produced by the renderer.
+    if (config.mask !== undefined && typeof config.mask !== 'boolean') {
+      errors.push(`Component "${id}" config.mask must be a boolean`);
+    }
   }
 }
 
@@ -357,7 +495,7 @@ function validateComponent(component, seenIds, errors) {
     return;
   }
 
-  const { id, type, x, y, width, height, zIndex, visible, locked, config } = component;
+  const { id, type, x, y, width, height, zIndex, visible, locked, config, parentId } = component;
 
   if (typeof id !== 'string' || !COMPONENT_ID_RE.test(id)) {
     errors.push(`Component id must match ${COMPONENT_ID_RE} (got: ${id === undefined ? 'missing' : JSON.stringify(id)})`);
@@ -395,6 +533,17 @@ function validateComponent(component, seenIds, errors) {
   if (typeof locked !== 'boolean') {
     errors.push(`Component "${id}" locked must be a boolean`);
   }
+
+  // CREATOR-11: optional container relationship. Shape/typing is checked here;
+  // existence, cycles and depth are checked across the whole component list in
+  // validateParentRelationships() once every id is known.
+  if (parentId !== undefined && parentId !== null) {
+    if (typeof parentId !== 'string' || !COMPONENT_ID_RE.test(parentId)) {
+      errors.push(`Component "${id}" parentId must be a component id string or null`);
+    } else if (parentId === id) {
+      errors.push(`Component "${id}" cannot be its own parent`);
+    }
+  }
   if (config !== null && config !== undefined && !isPlainObject(config)) {
     errors.push(`Component "${id}" config must be an object or null`);
   } else if (config !== null && config !== undefined && !jsonSafeValue(config)) {
@@ -404,6 +553,90 @@ function validateComponent(component, seenIds, errors) {
   // CREATOR-01B: rotation + style are optional; when present they must be sane.
   validateComponentRotateStyle(component, errors);
   validateContentConfig(component, errors);
+}
+
+/**
+ * CREATOR-11: validate the container relationships across the whole component
+ * list, where every id is finally known.
+ *
+ * The supported shape is exactly one level deep:
+ *
+ *   card            (no parent — a container is always top level)
+ *     ├── image     (local coordinates relative to the card)
+ *     └── sticker
+ *
+ * Rules enforced here, on the server, as the final authority:
+ *   • the parent must exist
+ *   • the parent must be a container (card)
+ *   • the child type must be allowed inside a card (image / sticker)
+ *   • a card may not itself be a child, so recursive nesting is impossible
+ *   • no cycles, checked explicitly for defence in depth even though the type
+ *     rules already make them unreachable
+ *   • the chain may not exceed MAX_NEST_DEPTH
+ *
+ * Clients are not trusted to have enforced any of this: a hand-built request
+ * body is validated on exactly the same path as a saved Studio design.
+ *
+ * Exported so the cycle/depth walk can be unit-tested directly. With the type
+ * rules above, a cycle is structurally impossible (only a card may be a parent
+ * and only image/sticker may be a child, so card→card is already rejected), which
+ * makes the explicit walk defence in depth for any future type expansion rather
+ * than the primary defence.
+ */
+export function validateParentRelationships(components, errors) {
+  if (!Array.isArray(components)) return;
+
+  const byId = new Map();
+  for (const component of components) {
+    if (isPlainObject(component) && typeof component.id === 'string' && !byId.has(component.id)) {
+      byId.set(component.id, component);
+    }
+  }
+
+  for (const component of components) {
+    if (!isPlainObject(component)) continue;
+    const { id, type, parentId } = component;
+    if (typeof id !== 'string') continue;
+    if (parentId === undefined || parentId === null) continue;
+
+    if (typeof parentId !== 'string') continue; // already reported per-component
+
+    const parent = byId.get(parentId);
+    if (!parent) {
+      errors.push(`Component "${id}" parentId "${parentId}" does not exist`);
+      continue;
+    }
+    if (!CARD_PARENT_TYPES.has(parent.type)) {
+      errors.push(`Component "${id}" cannot be nested inside a ${parent.type} — only cards are containers`);
+      continue;
+    }
+    if (!CARD_CHILD_TYPES.has(type)) {
+      errors.push(`Component "${id}" (${type}) cannot be nested inside a card — only: ${[...CARD_CHILD_TYPES].join(', ')}`);
+      continue;
+    }
+
+    // Walk the chain. The cycle check comes BEFORE the depth check so a genuine
+    // cycle is always reported as circular rather than as "too deep" — otherwise
+    // a 3-node cycle would be misreported the moment it crossed the depth
+    // limit. `seen` turns a cycle into a reported error instead of a hang.
+    const seen = new Set([id]);
+    let depth = 0;
+    let cursor = parent;
+    while (cursor) {
+      const next = typeof cursor.parentId === 'string' ? cursor.parentId : null;
+      if (next && seen.has(next)) {
+        errors.push(`Component "${id}" creates a circular parent relationship`);
+        break;
+      }
+      if (next) seen.add(next);
+      depth += 1;
+      if (depth > MAX_NEST_DEPTH) {
+        errors.push(`Component "${id}" is nested ${depth} levels deep — only ${MAX_NEST_DEPTH} level of nesting is supported`);
+        break;
+      }
+      cursor = next ? byId.get(next) : null;
+    }
+  }
 }
 
 function validateLayoutConfig(layout) {
@@ -451,6 +684,8 @@ function validateLayoutConfig(layout) {
     } else {
       const seenIds = new Set();
       layout.components.forEach(component => validateComponent(component, seenIds, errors));
+      // CREATOR-11: container relationships need every id resolved first.
+      validateParentRelationships(layout.components, errors);
     }
   }
 

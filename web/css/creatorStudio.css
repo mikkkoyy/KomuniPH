@@ -1135,3 +1135,47 @@
 }
 .studio-modal-status strong { color: var(--studio-text); }
 #studio-asset-result .studio-modal-actions { margin-top: 0.8rem; }
+/* ---------------------------------------------------------------------------
+   CREATOR-11 — Card containers, masking and animation inside the Studio.
+
+   The Studio must look like the published profile, so the same mask surface and
+   the same keyframes the public renderer uses apply here too. The extra rules
+   below are only the editing affordances: making a nested child visibly a child
+   and showing the container structure in Layers.
+   --------------------------------------------------------------------------- */
+
+/* A card is the positioning context for its children on the canvas. */
+#studio-canvas-inner .design-card-container { position: absolute; }
+#studio-canvas-inner .design-card-surface { position: absolute; inset: 0; border-radius: inherit; }
+#studio-canvas-inner .design-card-masked > .design-card-surface { overflow: hidden; }
+#studio-canvas-inner .design-card-surface > .studio-comp { z-index: 1; }
+
+/* A nested child is drawn from the card's top-left, so its box must be a
+   positioned element inside that card rather than an absolute canvas placement. */
+#studio-canvas-inner .studio-comp[data-parent-id] { position: absolute; }
+
+/* A selected CARD shows a dashed inner outline so it is obvious that a child is
+   masked by the surface rather than by the card's own border. */
+#studio-canvas-inner .design-card-container.studio-selected > .design-card-surface {
+  outline: 1px dashed rgba(124, 58, 237, 0.55);
+  outline-offset: 0;
+}
+
+/* Nested children in the Layers panel are indented and given a left rule, so the
+   container relationship is readable without flattening the hierarchy. */
+#studio-layers-list .studio-layer-child .studio-layer-name {
+  font-weight: 500;
+  opacity: 0.92;
+}
+#studio-layers-list .studio-layer-child {
+  position: relative;
+}
+#studio-layers-list .studio-layer-child::before {
+  content: '';
+  position: absolute;
+  left: 0.5rem;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(148, 163, 184, 0.45);
+}

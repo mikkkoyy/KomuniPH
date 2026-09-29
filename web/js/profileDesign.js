@@ -263,7 +263,7 @@ function px(value) {
   return `${value}px`;
 }
 
-function numOr(value, fallback) {
+export function numOr(value, fallback) {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
@@ -285,6 +285,136 @@ function applyTransform(el, component) {
  * With applyVisibility false (used by the editor canvas), hidden components are
  * left visible so the user can still select them in the layers panel.
  */
+// ── CREATOR-11: Fonts, animation and containers ───────────────────────────────
+//
+// These registries mirror the server's allowlists exactly and are the ONLY place
+// a design id becomes a CSS value. The stored model never contains a CSS string;
+// the renderer looks an id up here and applies the value. That is what keeps the
+// Studio preview and the public profile rendering the same saved design, and it
+// is why a stored design cannot carry `fontFamily: "x; color:red"` or a user
+// supplied keyframes string — there is nowhere for one to be stored.
+
+/** Font id → { label for the UI, stack for CSS }. */
+export const FONT_FAMILIES = new Map([
+  ['system-ui', { label: 'System UI', stack: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }],
+  ['sans-serif', { label: 'Sans Serif', stack: 'Arial, Helvetica, "Liberation Sans", sans-serif' }],
+  ['serif', { label: 'Serif', stack: 'Georgia, "Times New Roman", "Liberation Serif", serif' }],
+  ['monospace', { label: 'Monospace', stack: '"Courier New", Courier, "Liberation Mono", monospace' }],
+  ['arial', { label: 'Arial', stack: 'Arial, Helvetica, "Liberation Sans", sans-serif' }],
+  ['helvetica', { label: 'Helvetica', stack: '"Helvetica Neue", Helvetica, Arial, "Liberation Sans", sans-serif' }],
+  ['verdana', { label: 'Verdana', stack: 'Verdana, Geneva, "DejaVu Sans", sans-serif' }],
+  ['tahoma', { label: 'Tahoma', stack: 'Tahoma, Geneva, Verdana, "DejaVu Sans", sans-serif' }],
+  ['trebuchet-ms', { label: 'Trebuchet MS', stack: '"Trebuchet MS", "Lucida Grande", "Lucida Sans Unicode", sans-serif' }],
+  ['georgia', { label: 'Georgia', stack: 'Georgia, "Times New Roman", "Liberation Serif", serif' }],
+  ['times-new-roman', { label: 'Times New Roman', stack: '"Times New Roman", Times, "Liberation Serif", serif' }],
+  ['courier-new', { label: 'Courier New', stack: '"Courier New", Courier, "Liberation Mono", monospace' }],
+  ['impact', { label: 'Impact', stack: 'Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif' }],
+  ['comic-sans-ms', { label: 'Comic Sans MS', stack: '"Comic Sans MS", "Chalkboard SE", "Comic Neue", cursive' }],
+]);
+export const FONT_FAMILY_IDS = [...FONT_FAMILIES.keys()];
+export const DEFAULT_FONT_FAMILY = 'system-ui';
+export const FONT_STYLES = ['normal', 'italic'];
+export const DEFAULT_FONT_STYLE = 'normal';
+
+/** Human labels for the Animation dropdown, keyed by animation id. */
+export const ANIMATION_LABELS = {
+  none: 'None',
+  fade: 'Fade',
+  'fade-up': 'Fade up',
+  'fade-down': 'Fade down',
+  'fade-left': 'Fade from left',
+  'fade-right': 'Fade from right',
+  'zoom-in': 'Zoom in',
+  'zoom-out': 'Zoom out',
+  bounce: 'Bounce',
+  pulse: 'Pulse',
+  float: 'Float',
+  shake: 'Shake',
+  swing: 'Swing',
+};
+export const ANIMATION_NAMES = Object.keys(ANIMATION_LABELS);
+export const ANIMATION_TIMINGS = ['linear', 'ease', 'ease-in', 'ease-out', 'ease-in-out'];
+export const ANIMATION_ITERATION_CHOICES = ['once', '2', '3', '5', 'infinite'];
+export const ANIMATION_DURATION_MIN = 0.1;
+export const ANIMATION_DURATION_MAX = 20;
+export const ANIMATION_DELAY_MIN = 0;
+export const ANIMATION_DELAY_MAX = 60;
+export const DEFAULT_ANIMATION = Object.freeze({ name: 'none', duration: 2, delay: 0, iteration: 1, timing: 'ease-in-out' });
+
+/** Component types that may be nested inside a card, and containers. */
+export const CARD_CHILD_TYPES = new Set(['image', 'sticker']);
+export const CARD_PARENT_TYPES = new Set(['card']);
+
+/**
+ * Normalise a stored animation into safe, bounded values.
+ * Anything unknown falls back to the default rather than being passed through.
+ */
+export function resolveAnimation(animation) {
+  if (!animation || typeof animation !== 'object') return null;
+  const name = ANIMATION_LABELS[animation.name] ? animation.name : 'none';
+  if (name === 'none') return null;
+  const clamp = (v, lo, hi, dflt) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return dflt;
+    return Math.min(hi, Math.max(lo, n));
+  };
+  const iteration = animation.iteration === 'infinite'
+    ? 'infinite'
+    : (Number.isInteger(animation.iteration)
+      ? Math.min(1000, Math.max(1, animation.iteration))
+      : DEFAULT_ANIMATION.iteration);
+  return {
+    name,
+    duration: clamp(animation.duration, ANIMATION_DURATION_MIN, ANIMATION_DURATION_MAX, DEFAULT_ANIMATION.duration),
+    delay: clamp(animation.delay, ANIMATION_DELAY_MIN, ANIMATION_DELAY_MAX, DEFAULT_ANIMATION.delay),
+    iteration,
+    timing: ANIMATION_TIMINGS.includes(animation.timing) ? animation.timing : DEFAULT_ANIMATION.timing,
+  };
+}
+
+/**
+ * Apply a component's animation to an element.
+ *
+ * The animation NAME maps to an application-owned @keyframes rule (declared in
+ * the stylesheets); only the four bounded timing numbers are taken from the
+ * design. Nothing user-supplied ever becomes a keyframes name or a CSS
+ * shorthand, so this cannot be used to smuggle arbitrary CSS.
+ *
+ * `reducedMotion` disables the animation for the preview only — it never edits
+ * the stored design, so turning the preference back off restores the animation.
+ */
+export function applyAnimationToElement(el, animation, { reducedMotion = false } = {}) {
+  if (!el) return;
+  const resolved = resolveAnimation(animation);
+  if (!resolved || reducedMotion) {
+    el.style.animationName = '';
+    el.classList.remove('design-animated');
+    return;
+  }
+  el.classList.add('design-animated');
+  el.style.animationName = `komuniph-anim-${resolved.name}`;
+  el.style.animationDuration = `${resolved.duration}s`;
+  el.style.animationDelay = `${resolved.delay}s`;
+  el.style.animationIterationCount = resolved.iteration === 'infinite' ? 'infinite' : String(resolved.iteration);
+  el.style.animationTimingFunction = resolved.timing;
+  // A paused animation must not transform the element, or a creator measuring
+  // geometry would see the animated offset. Playback is purely visual.
+  el.style.animationFillMode = 'none';
+}
+
+/** Apply typography to a text element from a validated text config. */
+export function applyTypographyToElement(el, config = {}) {
+  if (!el) return;
+  const family = FONT_FAMILIES.get(config.fontFamily) || FONT_FAMILIES.get(DEFAULT_FONT_FAMILY);
+  el.style.fontFamily = family.stack;
+  el.style.fontStyle = FONT_STYLES.includes(config.fontStyle) ? config.fontStyle : DEFAULT_FONT_STYLE;
+  if (config.fontSize) el.style.fontSize = px(config.fontSize);
+  if (config.fontWeight) el.style.fontWeight = String(config.fontWeight);
+  if (config.textAlign) el.style.textAlign = config.textAlign;
+  if (config.lineHeight) el.style.lineHeight = String(config.lineHeight);
+  if (config.textColor) el.style.color = config.textColor;
+}
+
 export function applyGeometryToElement(el, component, { applyVisibility = true } = {}) {
   if (applyVisibility && component.visible === false) {
     el.style.display = 'none';
@@ -333,7 +463,7 @@ function clearChildren(el) {
 }
 
 /** Build (or refresh) the DOM for a user-content component, safely. */
-function renderContentComponent(component, content) {
+function renderContentComponent(component, content, { parentEl = null } = {}) {
   const { type, config = {} } = component;
   const key = component.id;
   let el = contentElements.get(key);
@@ -343,14 +473,36 @@ function renderContentComponent(component, content) {
     el.className = 'design-component';
     el.dataset.componentId = key;
     el.dataset.componentType = type;
-    content.appendChild(el);
+    if (parentEl) {
+      // CREATOR-11: a child is mounted INSIDE its card, so x/y are local to it.
+      el.dataset.parentId = parentEl.dataset.componentId;
+      parentEl.appendChild(el);
+    } else {
+      content.appendChild(el);
+    }
     contentElements.set(key, el);
   }
 
   el.className = `design-component design-${type}`;
-  clearChildren(el);
-  applyGeometry(el, component);
+  // Never wipe a card's mounted children: clearChildren() runs below, so a card
+  // re-render must re-attach its children afterwards.
+  const isContainer = type === 'card' && !!parentIdsFor.has(key);
+  if (!isContainer) clearChildren(el);
+  if (parentEl) {
+    // Local geometry: the card is the origin, so no absolute-canvas maths.
+    el.style.position = 'absolute';
+    el.style.left = px(component.x);
+    el.style.top = px(component.y);
+    el.style.width = px(component.width);
+    el.style.height = px(component.height);
+    el.style.zIndex = String(numOr(component.zIndex, 0));
+    el.style.display = component.visible === false ? 'none' : '';
+    applyTransform(el, component);
+  } else {
+    applyGeometry(el, component);
+  }
   applyCommonStyleToElement(el, component.style);
+  applyAnimationToElement(el, config.animation, { reducedMotion: prefersReducedMotion() });
 
   if (type === 'image' || type === 'sticker') {
     const wrapper = document.createElement('div');
@@ -374,31 +526,72 @@ function renderContentComponent(component, content) {
     const span = document.createElement('div');
     span.className = 'design-text-content';
     span.textContent = config.text || '';
-    if (config.fontSize) span.style.fontSize = px(config.fontSize);
-    if (config.fontWeight) span.style.fontWeight = String(config.fontWeight);
-    if (config.textAlign) span.style.textAlign = config.textAlign;
-    if (config.lineHeight) span.style.lineHeight = String(config.lineHeight);
-    if (config.textColor) span.style.color = config.textColor;
+    applyTypographyToElement(span, config);
     el.appendChild(span);
     return;
   }
 
   if (type === 'card') {
+    // CREATOR-11: a card is a real CONTAINER.
+    //
+    // Children mount into a `surface` element rather than the card box itself,
+    // for the same reason an image clips in `.design-image-inner`: a component's
+    // resize handles sit 6px OUTSIDE its own box, so clipping the card directly
+    // would make its own handles unreachable. The surface carries the mask, the
+    // card box stays unclipped, and the relationship is still a real design-model
+    // parent/child link rather than a CSS coincidence.
+    el.classList.add('design-card-container');
+    if (config.mask === true) el.classList.add('design-card-masked');
+    const surface = document.createElement('div');
+    surface.className = 'design-card-surface';
     const heading = document.createElement('div');
     heading.className = 'design-card-heading';
     heading.textContent = config.heading || '';
     if (config.headingColor) heading.style.color = config.headingColor;
-    el.appendChild(heading);
+    surface.appendChild(heading);
     if (config.body) {
       const body = document.createElement('div');
       body.className = 'design-card-body';
       body.textContent = config.body;
       if (config.textColor) body.style.color = config.textColor;
-      el.appendChild(body);
+      surface.appendChild(body);
     }
+    el.appendChild(surface);
     if (config.textAlign) el.style.textAlign = config.textAlign;
-    return;
   }
+}
+
+/** The element a card's children mount into (its masking surface). */
+export function cardSurfaceOf(cardEl) {
+  return cardEl ? cardEl.querySelector(':scope > .design-card-surface') : null;
+}
+
+/**
+ * True when the visitor (or the Studio) has asked for reduced motion.
+ * Read live so toggling the OS/browser preference takes effect immediately.
+ */
+function prefersReducedMotion() {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/**
+ * Ids of cards that own children, tracked for the current render pass so a card
+ * knows whether to preserve its mounted children across a re-render.
+ */
+let parentIdsFor = new Set();
+
+/** Index a design's components by id so children can find their card. */
+function buildComponentIndex(components) {
+  const byId = new Map();
+  for (const component of components) {
+    if (component && typeof component === 'object'
+      && typeof component.id === 'string' && CONTENT_COMPONENT_TYPES.has(component.type)) {
+      byId.set(component.id, component);
+    }
+  }
+  return byId;
 }
 
 function IMAGE_FIT_CLASSES(fit) {
@@ -483,37 +676,70 @@ export function applyProfileDesign(profile) {
       if (!contentIds.has(key)) contentElements.delete(key);
     }
 
-    layout.components.forEach(component => {
-      // CREATOR-09: explicit public exclusion. A guide card is a Studio-only
-      // wireframe and must never reach a real profile, a published design, a
-      // marketplace listing or an installed theme/asset.
-      if (PUBLIC_RENDER_EXCLUDED_TYPES.has(component.type)) return;
+    // CREATOR-11: render containers before their children so a child can be
+    // mounted into its card, and record which cards own children.
+    const byId = buildComponentIndex(layout.components);
+    const childrenOf = new Map();
+    for (const component of layout.components) {
+      if (!component || typeof component !== 'object') continue;
+      const { id, type, parentId } = component;
+      if (typeof id !== 'string' || typeof parentId !== 'string') continue;
+      if (PUBLIC_RENDER_EXCLUDED_TYPES.has(type)) continue;
+      const parent = byId.get(parentId);
+      // Trust the structure, but re-check the type rules defensively: a stored
+      // design could predate the rules or arrive from another writer.
+      if (!parent || !CARD_PARENT_TYPES.has(parent.type) || !CARD_CHILD_TYPES.has(type)) continue;
+      if (!childrenOf.has(parentId)) childrenOf.set(parentId, []);
+      childrenOf.get(parentId).push(component);
+    }
+    parentIdsFor = new Set(childrenOf.keys());
 
+    // Parents first, so every card element exists before a child mounts into it.
+    const renderable = layout.components.filter(
+      c => c && typeof c === 'object' && !PUBLIC_RENDER_EXCLUDED_TYPES.has(c.type),
+    );
+    const children = renderable.filter(c => typeof c.parentId === 'string' && childrenOf.has(c.parentId));
+    const parents = renderable.filter(c => typeof c.parentId !== 'string');
+
+    for (const component of parents) {
       if (CONTENT_COMPONENT_TYPES.has(component.type)) {
         renderContentComponent(component, content);
-        return;
+        continue;
       }
+      applyControlledComponent(component, content);
+    }
 
-      const selector = COMPONENT_SELECTORS[component.type];
-      if (!selector) return;
-      const el = content.querySelector(selector);
-      if (!el) return;
-
-      if (component.visible === false) {
-        el.style.display = 'none';
-        return;
-      }
-      el.style.position = 'absolute';
-      el.style.left = px(component.x);
-      el.style.top = px(component.y);
-      el.style.width = px(component.width);
-      el.style.height = px(component.height);
-      el.style.zIndex = String(numOr(component.zIndex, 0));
-      applyTransform(el, component);
-      applyCommonStyleToElement(el, component.style);
-    });
+    // Children are mounted inside their card's masking surface with LOCAL
+    // coordinates.
+    for (const component of children) {
+      const parentEl = contentElements.get(component.parentId);
+      const surface = parentEl ? cardSurfaceOf(parentEl) : null;
+      if (!surface) continue;
+      renderContentComponent(component, content, { parentEl: surface });
+    }
   } catch (err) {
     // Cosmetic only — never break the page over a design.
     console.warn('[DESIGN] Could not apply profile design:', err.message || err);
   }
+}
+
+/** Apply a controlled profile-module component to its existing public element. */
+function applyControlledComponent(component, content) {
+  const selector = COMPONENT_SELECTORS[component.type];
+  if (!selector) return;
+  const el = content.querySelector(selector);
+  if (!el) return;
+
+  if (component.visible === false) {
+    el.style.display = 'none';
+    return;
+  }
+  el.style.position = 'absolute';
+  el.style.left = px(component.x);
+  el.style.top = px(component.y);
+  el.style.width = px(component.width);
+  el.style.height = px(component.height);
+  el.style.zIndex = String(numOr(component.zIndex, 0));
+  applyTransform(el, component);
+  applyCommonStyleToElement(el, component.style);
 }

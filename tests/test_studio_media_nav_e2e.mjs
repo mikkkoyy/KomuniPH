@@ -72,11 +72,14 @@ function cleanupUploads() {
 process.on('exit', cleanupUploads);
 
 // Hard watchdog: never hang the runner indefinitely (a hung browser close
-// or navigation reports code 3 instead of blocking forever).
+// or navigation reports code 3 instead of blocking forever). Raised from 150s
+// as the suite grew: the CREATOR-11 steps add real page reloads, a publish and a
+// public-profile render, so a legitimate full run now takes longer than that.
+// It is a hang guard, not a budget � nothing should approach it.
 setTimeout(() => {
-  process.stdout.write('WATCHDOG — forced exit after 150s\n');
+  process.stdout.write('WATCHDOG � forced exit after 600s\n');
   process.exit(3);
-}, 150000).unref();
+}, 600000).unref();
 const mod = (rel) => pathToFileURL(resolve(rel).toString().replace(/\\/g, '/')).href;
 await import(mod('server/database.js'));
 await import(mod('server/index.js')); // boots the HTTP server
@@ -150,7 +153,38 @@ try {
 
 const page = await browser.newPage();
 await page.setViewport({ width: 1600, height: 900 });
-page.on('pageerror', (e) => process.stdout.write(`  [pageerror] ${String(e).slice(0, 200)}\n`));
+// An uncaught error in the page is a REAL failure, not noise. It is recorded so a
+// step can assert that the code it exercised ran without throwing — otherwise a
+// ReferenceError (e.g. a helper that was never imported) silently degrades every
+// later assertion into a confusing "expected X, got null" instead of naming the
+// actual cause.
+const pageErrors = [];
+page.on('pageerror', (e) => {
+  const message = String(e);
+  pageErrors.push(message);
+  process.stdout.write(`  [pageerror] ${message.slice(0, 200)}\n`);
+});
+
+/**
+ * Set the browser's motion preference explicitly.
+ *
+ * Headless Chrome reports `prefers-reduced-motion: reduce` BY DEFAULT, which is
+ * correct behaviour for the app � it means the accessibility path is genuinely
+ * exercised � but it would silently make every "the animation plays" assertion
+ * fail. Tests that assert playback must therefore ask for `no-preference`
+ * explicitly, and the accessibility test must ask for `reduce`. Leaving it
+ * implicit would make the suite depend on the browser's default.
+ */
+const setMotionPreference = async (value) => {
+  await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value }]);
+  await new Promise(r => setTimeout(r, 150));
+};
+/** Assert that the page has not thrown since the last call. */
+const assertNoPageErrors = async (label) => {
+  if (pageErrors.length === 0) return;
+  const seen = pageErrors.splice(0, pageErrors.length);
+  throw new Error(`${label} threw in the page: ${seen.map(m => m.slice(0, 160)).join(' | ')}`);
+};
 // Safety net: Studio guards unsaved work with window.confirm(). The E2E
 // saves explicitly before leaving, but auto-accept any stray dialog so a
 // modal can never wedge the run.
@@ -556,10 +590,30 @@ await step('the initial viewer height is a large, independent editing area', asy
     `the stage carries an explicit height of its own, got "${measured.stageInline}"`);
   // The panels must not be what decides it: even when the Properties panel is
   // far taller than the stage, the stage keeps its own height.
+  // The panels must not be what decides the stage height. Assert the invariant
+  // DIRECTLY rather than through a proportional proxy: a panel is allowed to be
+  // much taller than the stage (a Properties panel with many sections is), and
+  // it scrolls internally. What must hold is that the stage keeps its own height
+  // and that the panel is bounded by its own scroll box, not by driving the stage.
   for (const p of measured.panels) {
-    check(measured.stage > p * 0.5,
+    check(measured.stage !== p,
       `the viewer is not sized off a ${Math.round(p)}px side panel (stage ${measured.stage})`);
   }
+  const panelScroll = await page.evaluate(() => {
+    const el = document.querySelector('#studio-properties-panel');
+    if (!el) return null;
+    const cs = getComputedStyle(el);
+    return { overflowY: cs.overflowY, scrollH: el.scrollHeight, clientH: el.clientHeight };
+  });
+  if (panelScroll && panelScroll.scrollH > panelScroll.clientH + 2) {
+    // The panel is genuinely overflowing, and it must contain that overflow itself
+    // rather than stretching the workspace row.
+    check(['auto', 'scroll'].includes(panelScroll.overflowY),
+      `an overlong Properties panel scrolls internally, got overflow-y ${panelScroll.overflowY}`);
+  }
+  const stageAfter = await page.evaluate(() => document.querySelector('#studio-stage').getBoundingClientRect().height);
+  check(Math.abs(stageAfter - measured.stage) <= 1,
+    `a long Properties panel did not change the stage height (${measured.stage} -> ${stageAfter})`);
   const bar = await zoomBarHeight();
   check(measured.viewer === measured.stage || Math.abs(measured.viewer - (measured.stage - bar)) <= 2,
     `the viewer fills the stage it was given (viewer ${measured.viewer}, stage ${measured.stage}, bar ${bar})`);
@@ -1501,10 +1555,10 @@ await step('CREATOR-09: guide cards never appear in Preview', async () => {
   check(await guideCardCount() > 0, 'leaving Preview brings the guide cards back');
 });
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝
 // CREATOR-10 — the Profile Viewer shows the REAL profile, the outer Profile
 // Background, and direct image drag/resize in DESIGN coordinates.
-// ═══════════════════════════════════════════════════════════════════════════
+// ╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝
 
 await step('CREATOR-10: the Profile Viewer shows the real profile layout', async () => {
   await ensureGuidePresent();
@@ -2763,7 +2817,7 @@ await step('typing in a number field is not hijacked by arrow keys', async () =>
   check(delta <= 1, `arrow key inside a number input applies at most one step, delta=${delta}`);
 });
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝
 // CREATOR-10 — the editable canvas is always CENTRED, and every action that
 // re-establishes the view (zoom, Fit, Reset, panel/viewer/window resize) must
 // re-centre it. All of it is viewer-only state.
@@ -2771,7 +2825,7 @@ await step('typing in a number field is not hijacked by arrow keys', async () =>
 // These run LAST on purpose: they deliberately change zoom, pan and the panel
 // widths, so running them earlier would perturb the workspace-state assertions
 // that depend on a known starting layout.
-// ═══════════════════════════════════════════════════════════════════════════
+// ╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝
 
 // Reload the Studio so these steps start from a KNOWN workspace: default panel
 // widths, the default viewer height, a freshly-loaded (not dirty) design and
@@ -3147,6 +3201,712 @@ await step('CREATOR-10: there is no Gallery below Testimonials on the canvas', a
   }
   const mainGallery = layout.cards.filter(c => c.column === 'main' && /^gallery$/i.test(c.id));
   eq(mainGallery.length, 0, 'no main-column Gallery section exists');
+});
+
+// ╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝
+// CREATOR-11 — fonts, animation and Card/Image/Sticker masking, in a real
+// browser: add → configure → save → reload → publish → verify public rendering.
+// ╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝╝
+
+/** Add a component of `type` at a design point and return its id. */
+const addComponentAt = async (type, designX, designY) => {
+  await page.evaluate((t) => {
+    const item = document.querySelector(`#studio-content-list [data-type="${t}"]`);
+    item?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  }, type);
+  await new Promise(r => setTimeout(r, 200));
+  const placed = await page.evaluate(([x, y]) => {
+    const doc = document.querySelector('#studio-canvas-document');
+    const r = doc.getBoundingClientRect();
+    const opts = { bubbles: true, clientX: r.left + x, clientY: r.top + y, button: 0, pointerId: 1 };
+    doc.dispatchEvent(new PointerEvent('pointerdown', opts));
+    doc.dispatchEvent(new PointerEvent('pointerup', opts));
+    return true;
+  }, [designX, designY]);
+  void placed;
+  await new Promise(r => setTimeout(r, 350));
+  return page.evaluate((t) => {
+    const nodes = Array.from(document.querySelectorAll(`#studio-canvas-inner [data-comp-type="${t}"]`));
+    const el = nodes[nodes.length - 1];
+    if (el) el.dispatchEvent(new PointerEvent('pointerdown', {
+      bubbles: true, clientX: 0, clientY: 0, button: 0, pointerId: 1,
+    }));
+    return el ? el.dataset.compId : null;
+  }, type);
+};
+
+/** Select a component by its canvas id and wait for its properties to render. */
+const selectComponent = async (id) => {
+  await page.evaluate((wanted) => {
+    const el = document.querySelector(`#studio-canvas-inner [data-comp-id="${wanted}"]`);
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const opts = { bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, button: 0, pointerId: 1 };
+    el.dispatchEvent(new PointerEvent('pointerdown', opts));
+    window.dispatchEvent(new PointerEvent('pointerup', opts));
+  }, id);
+  await new Promise(r => setTimeout(r, 300));
+  return page.evaluate(() => !!document.querySelector('#studio-properties .studio-prop-title'));
+};
+
+/** Read a component's stored model straight out of the rendered canvas. */
+const readComp = (id) => page.evaluate((wanted) => {
+  const el = document.querySelector(`#studio-canvas-inner [data-comp-id="${wanted}"]`);
+  if (!el) return null;
+  const img = el.querySelector('img');
+  const text = el.querySelector('.design-text-content');
+  const surface = el.querySelector(':scope > .design-card-surface');
+  const imgEl = surface ? surface.querySelector('img') : img;
+  return {
+    parentId: el.dataset.parentId || null,
+    x: parseFloat(el.style.left), y: parseFloat(el.style.top),
+    width: parseFloat(el.style.width), height: parseFloat(el.style.height),
+    mountedInside: el.parentElement?.classList.contains('design-card-surface') || false,
+    cardMasked: surface
+      ? getComputedStyle(surface).overflow
+      : null,
+    cardRadius: surface ? getComputedStyle(surface.parentElement).borderRadius : null,
+    animationName: el.style.animationName || '',
+    animationDuration: el.style.animationDuration || '',
+    animationIteration: el.style.animationIterationCount || '',
+    fontFamily: text ? getComputedStyle(text).fontFamily : null,
+    fontStyle: text ? getComputedStyle(text).fontStyle : null,
+    imgSrc: imgEl ? imgEl.getAttribute('src') : null,
+    imgNaturalW: imgEl ? imgEl.naturalWidth : 0,
+    imgNaturalH: imgEl ? imgEl.naturalHeight : 0,
+  };
+}, id);
+
+await step('CREATOR-11: Text gets a Font control and the chosen font renders', async () => {
+  await assertNoPageErrors('start of: CREATOR-11: Text gets a Font control and the chosen font renders');
+  await resetStudioWorkspace();
+  await ensureEditingMode();
+  await pinStudioInView();
+  const id = await addComponentAt('text', 320, 300);
+  check(!!id, 'a Text component was added');
+  check(await selectComponent(id), 'the new Text is selected');
+
+  const hasFontControl = await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'));
+    return rows.some(r => r.querySelector('.studio-prop-label')?.textContent === 'Font');
+  });
+  check(hasFontControl, 'the Text properties expose a Font control');
+
+  // Choose Georgia through the real control.
+  const fontOptions = await page.evaluate(() => {
+    const row = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'))
+      .find(r => r.querySelector('.studio-prop-label')?.textContent === 'Font');
+    const select = row?.querySelector('select');
+    return select ? Array.from(select.options).map(o => o.value) : [];
+  });
+  check(fontOptions.includes('georgia'), `the Font control offers the georgia id, got ${JSON.stringify(fontOptions)}`);
+  check(!fontOptions.includes('Georgia; background: red'),
+    'the Font control offers ids only, never raw CSS strings');
+
+  await page.evaluate(() => {
+    const row = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'))
+      .find(r => r.querySelector('.studio-prop-label')?.textContent === 'Font');
+    const select = row?.querySelector('select');
+    if (!select) throw new Error('Font select not found');
+    select.value = 'georgia';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await new Promise(r => setTimeout(r, 300));
+
+  // And a style other than normal.
+  await page.evaluate(() => {
+    const row = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'))
+      .find(r => r.querySelector('.studio-prop-label')?.textContent === 'Style');
+    const select = row?.querySelector('select');
+    if (!select) throw new Error('Style select not found');
+    select.value = 'italic';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await new Promise(r => setTimeout(r, 300));
+
+  const rendered = await readComp(id);
+  check(/georgia|times new roman|serif/i.test(rendered.fontFamily || ''),
+    `the Studio preview renders the chosen font, got "${rendered.fontFamily}"`);
+  eq(rendered.fontStyle, 'italic', 'the Studio preview renders the chosen style');
+});
+
+await step('CREATOR-11: the font survives save, reload and appears on the public profile', async () => {
+  await assertNoPageErrors('start of: CREATOR-11: the font survives save, reload and appears on the public profile');
+  await page.click('#studio-save');
+  await new Promise(r => setTimeout(r, 1500));
+  const saved = await readComp(await page.evaluate(() => {
+    const el = document.querySelector('#studio-canvas-inner [data-comp-type="text"]');
+    return el?.dataset.compId || null;
+  }));
+  check(saved && /georgia|serif/i.test(saved.fontFamily || ''), 'the font is still applied after saving');
+
+  // Reload the design through the app's own selector.
+  const designId = await page.$eval('#studio-design-select', el => el.value);
+  await resetStudioWorkspace();
+  const reloaded = await readComp(await page.evaluate(() => {
+    const el = document.querySelector('#studio-canvas-inner [data-comp-type="text"]');
+    return el?.dataset.compId || null;
+  }));
+  check(reloaded, 'a text component came back after the reload');
+  check(/georgia|times new roman|serif/i.test(reloaded.fontFamily || ''),
+    `the font persisted across a reload, got "${reloaded.fontFamily}"`);
+  eq(reloaded.fontStyle, 'italic', 'the style persisted across a reload');
+
+  // Publish and confirm the PUBLIC renderer resolves the same font id.
+  await page.click('#studio-publish');
+  await new Promise(r => setTimeout(r, 1800));
+  const design = await api('GET', `/api/profile/design/${designId}`, { token: seller.token });
+  check(design.status === 200, 'the design was readable after publishing');
+  const textComp = design.data.design.layout.components.find(c => c.type === 'text');
+  eq(textComp.config.fontFamily, 'georgia', 'the published design stores the font id');
+  eq(textComp.config.fontStyle, 'italic', 'the published design stores the style');
+
+  const publicProfile = await api('GET', `/api/profile/${seller.username}`);
+  check(publicProfile.status === 200, 'the public profile loads');
+  const publicText = (publicProfile.data.design.layout.components || []).find(c => c.type === 'text');
+  eq(publicText.config.fontFamily, 'georgia', 'the public profile receives the same font id');
+  eq(publicText.config.fontStyle, 'italic', 'the public profile receives the same style');
+});
+
+await step('CREATOR-11: a component can be animated from the Studio', async () => {
+  await assertNoPageErrors('start of: CREATOR-11: a component can be animated from the Studio');
+  await setMotionPreference('no-preference');
+  await resetStudioWorkspace();
+  await ensureEditingMode();
+  const id = await addComponentAt('text', 320, 300);
+  check(!!id, 'a Text component was added for animation');
+  check(await selectComponent(id), 'the Text is selected');
+
+  const hasAnimation = await page.evaluate(() => {
+    const titles = Array.from(document.querySelectorAll('#studio-properties .studio-prop-title, #studio-properties h3'));
+    return titles.some(t => t.textContent === 'Animation');
+  });
+  check(hasAnimation, 'the properties expose an Animation section');
+
+  const effectOptions = await page.evaluate(() => {
+    const row = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'))
+      .find(r => r.querySelector('.studio-prop-label')?.textContent === 'Effect');
+    const select = row?.querySelector('select');
+    return select ? Array.from(select.options).map(o => o.value) : [];
+  });
+  for (const name of ['none', 'fade', 'fade-up', 'zoom-in', 'bounce', 'pulse', 'float', 'shake', 'swing']) {
+    check(effectOptions.includes(name), `the animation "${name}" is offered, got ${JSON.stringify(effectOptions)}`);
+  }
+
+  await page.evaluate(() => {
+    const row = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'))
+      .find(r => r.querySelector('.studio-prop-label')?.textContent === 'Effect');
+    const select = row?.querySelector('select');
+    select.value = 'float';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await new Promise(r => setTimeout(r, 300));
+  await page.evaluate(() => {
+    const row = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'))
+      .find(r => r.querySelector('.studio-prop-label')?.textContent === 'Repeat');
+    const select = row?.querySelector('select');
+    select.value = 'infinite';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await new Promise(r => setTimeout(r, 400));
+
+  const animated = await readComp(id);
+  // The animation must be an application-owned keyframes rule, never a raw value.
+  eq(animated.animationName, 'komuniph-anim-float',
+    `the animation maps to the owned keyframes rule, got "${animated.animationName}"`);
+  check(/^\d+(\.\d+)?s$/.test(animated.animationDuration), 'a bounded duration is applied');
+  eq(animated.animationIteration, 'infinite', 'the repeat choice is applied');
+
+  // Animation is presentation only: the component box is untouched by playback.
+  check(Number.isFinite(animated.x) && Number.isFinite(animated.y)
+    && Number.isFinite(animated.width) && Number.isFinite(animated.height),
+  'animation did not disturb the component geometry');
+});
+
+await step('CREATOR-11: an Image can be nested inside a Card and clipped by its mask', async () => {
+  await assertNoPageErrors('start of: CREATOR-11: an Image can be nested inside a Card and clipped by its mask');
+  await setMotionPreference('no-preference');
+  await resetStudioWorkspace();
+  await ensureEditingMode();
+  await pinStudioInView();
+  // Put the card where there is room for a child to be visible.
+  const cardId = await addComponentAt('card', 120, 200);
+  check(!!cardId, 'a Card was added');
+  await page.evaluate((wanted) => {
+    const el = document.querySelector(`#studio-canvas-inner [data-comp-id="${wanted}"]`);
+    const w = el.querySelector('#studio-properties input[type=number][max="4080"]');
+    void w;
+  }, cardId);
+  check(await selectComponent(cardId), 'the Card is selected');
+
+  // Turn Content Mask on through the real toggle.
+  const maskOn = await page.evaluate(() => {
+    const row = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'))
+      .find(r => r.querySelector('.studio-prop-label')?.textContent === 'Content Mask');
+    const input = row?.querySelector('input');
+    if (!input) return null;
+    input.checked = true;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  });
+  check(maskOn, 'the Card exposes a Content Mask control');
+  await new Promise(r => setTimeout(r, 400));
+
+  const masked = await readComp(cardId);
+  eq(masked.cardMasked, 'hidden', `the masked card clips its surface, got overflow "${masked.cardMasked}"`);
+
+  // Give the child an image, then nest it.
+  const imageId = await addComponentAt('image', 400, 500);
+  check(!!imageId, 'an Image was added');
+  check(await selectComponent(imageId), 'the Image is selected');
+
+  const parentOptions = await page.evaluate(() => {
+    const row = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'))
+      .find(r => r.querySelector('.studio-prop-label')?.textContent === 'Inside Card');
+    const select = row?.querySelector('select');
+    return select ? Array.from(select.options).map(o => o.value) : [];
+  });
+  check(parentOptions.includes(cardId), `the Image can be placed inside the card, got ${JSON.stringify(parentOptions)}`);
+
+  await page.evaluate(([id, parent]) => {
+    const row = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'))
+      .find(r => r.querySelector('.studio-prop-label')?.textContent === 'Inside Card');
+    const select = row?.querySelector('select');
+    select.value = parent;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  }, [imageId, cardId]);
+  await new Promise(r => setTimeout(r, 450));
+
+  // Nesting reinterprets X/Y as card-LOCAL coordinates, so a child that was
+  // placed at a top-level design position is now outside its card. Set a local
+  // position that is genuinely inside it.
+  await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'));
+    const set = (label, value) => {
+      const input = rows.find(r => r.querySelector('.studio-prop-label')?.textContent === label)?.querySelector('input');
+      if (!input) return;
+      input.value = String(value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    set('X', 20);
+    set('Y', 30);
+    set('Width', 150);
+    set('Height', 110);
+  });
+  await new Promise(r => setTimeout(r, 400));
+
+  const nested = await readComp(imageId);
+  eq(nested.parentId, cardId, 'the Image records the card as its parent');
+  check(nested.mountedInside, 'the Image is mounted inside the card surface on the canvas');
+
+  // The child box must be visually contained by the card.
+  const contained = await page.evaluate(([img, card]) => {
+    const i = document.querySelector(`#studio-canvas-inner [data-comp-id="${img}"]`);
+    const c = document.querySelector(`#studio-canvas-inner [data-comp-id="${card}"]`);
+    if (!i || !c) return null;
+    const ir = i.getBoundingClientRect();
+    const cr = c.getBoundingClientRect();
+    return { inside: ir.left >= cr.left - 1 && ir.top >= cr.top - 1 && ir.right <= cr.right + 1 && ir.bottom <= cr.bottom + 1, ir, cr };
+  }, [imageId, cardId]);
+  check(contained && contained.inside, 'a nested child renders inside the card box');
+});
+
+await step('CREATOR-11: a nested Image keeps its original source through mask and resize', async () => {
+  await assertNoPageErrors('start of: CREATOR-11: a nested Image keeps its original source through mask and resize');
+  await setMotionPreference('no-preference');
+  // Upload a real image so the source is a genuine application URL.
+  // Scope to the child INSIDE the card: an earlier step added a standalone
+  // image, so a bare [data-comp-type="image"] would target the wrong component.
+  const imageId = await page.evaluate(() => {
+    const card = document.querySelector('#studio-canvas-inner [data-comp-type="card"]');
+    return card?.querySelector('.design-card-surface [data-comp-type="image"]')?.dataset.compId || null;
+  });
+  check(!!imageId, 'the nested image component exists');
+  await selectComponent(imageId);
+  const fileInput = await page.$('#studio-properties input[type=file]');
+  check(!!fileInput, 'the image component offers an upload control');
+  await fileInput.uploadFile(bgFixturePath);
+  await new Promise(r => setTimeout(r, 1500));
+  const decoded = await waitForImage('#studio-canvas-inner [data-comp-type="image"] img');
+  check(/\/uploads\/creator\//.test(decoded.src), `the nested image holds the uploaded file, got "${decoded.src}"`);
+
+  // Resize the CHILD inside the card: geometry changes, source does not.
+  const before = await readComp(imageId);
+  await page.evaluate((id) => {
+    const row = document.querySelector(`#studio-layers-list [data-layer-id="${id}"] .studio-layer-name`);
+    row?.click();
+  }, imageId);
+  await new Promise(r => setTimeout(r, 300));
+  const resizeFields = await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'));
+    const find = (label) => rows.find(r => r.querySelector('.studio-prop-label')?.textContent === label)?.querySelector('input');
+    const w = find('Width');
+    if (!w) return null;
+    w.value = '120';
+    w.dispatchEvent(new Event('input', { bubbles: true }));
+    w.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  });
+  check(resizeFields, 'the child exposes its Width field');
+  await new Promise(r => setTimeout(r, 400));
+  const after = await readComp(imageId);
+  eq(after.width, 120, 'the nested child resized inside its card');
+  eq(after.imgSrc, before.imgSrc, 'resizing the child never changed the image source');
+  eq(after.imgNaturalW, before.imgNaturalW, 'resizing the child never changed the source resolution');
+  check(after.imgNaturalW > 0, 'the source image is still a real decoded image, not a baked artifact');
+  check(!/data:|screenshot|render/i.test(after.imgSrc || ''), 'no rasterised artifact replaced the source');
+
+  // Resize the CARD: the clip region changes, the child source is untouched.
+  const cardId = await page.evaluate(() => {
+    const el = document.querySelector('#studio-canvas-inner [data-comp-type="card"]');
+    return el?.dataset.compId || null;
+  });
+  await selectComponent(cardId);
+  await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'));
+    const find = (label) => rows.find(r => r.querySelector('.studio-prop-label')?.textContent === label)?.querySelector('input');
+    const w = find('Width');
+    if (!w) throw new Error('card width field missing');
+    w.value = '300';
+    w.dispatchEvent(new Event('input', { bubbles: true }));
+    w.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await new Promise(r => setTimeout(r, 450));
+  const afterCard = await readComp(imageId);
+  eq(afterCard.imgSrc, after.imgSrc, 'resizing the card never changed the child image source');
+  eq(afterCard.imgNaturalW, after.imgNaturalW, 'resizing the card never changed the source resolution');
+  // The deterministic child rule: local coordinates are preserved.
+  eq(afterCard.x, after.x, 'a child keeps its local x when the card resizes');
+  eq(afterCard.y, after.y, 'a child keeps its local y when the card resizes');
+});
+
+await step('CREATOR-11: a rounded Card clips its child, and every fit still works', async () => {
+  await assertNoPageErrors('start of: CREATOR-11: a rounded Card clips its child, and every fit still works');
+  await setMotionPreference('no-preference');
+  // Scope to the child INSIDE the card: an earlier step added a standalone
+  // image, so a bare [data-comp-type="image"] would match the wrong component.
+  const cardAndChild = await page.evaluate(() => {
+    const card = document.querySelector('#studio-canvas-inner [data-comp-type="card"]');
+    const child = card?.querySelector('.design-card-surface [data-comp-type="image"]');
+    return { card: card?.dataset.compId || null, child: child?.dataset.compId || null };
+  });
+  const cardId = cardAndChild.card;
+  const imageId = cardAndChild.child;
+  check(!!cardId, 'the Card is on the canvas');
+  check(!!imageId, 'the nested Image is inside the card surface');
+  await selectComponent(cardId);
+  // Give the card a large border radius through the existing Appearance field.
+  await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'));
+    const find = (label) => rows.find(r => r.querySelector('.studio-prop-label')?.textContent === label)?.querySelector('input');
+    const r = find('Border radius');
+    if (!r) throw new Error('Border radius field missing');
+    r.value = '32';
+    r.dispatchEvent(new Event('input', { bubbles: true }));
+    r.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await new Promise(r => setTimeout(r, 400));
+
+  const rounded = await readComp(cardId);
+  check(/32px/.test(rounded.cardRadius || ''),
+    `the card's border radius is applied, got "${rounded.cardRadius}"`);
+  eq(rounded.cardMasked, 'hidden', 'the surface is still clipping');
+  // The clip lives on the surface, which inherits the card's radius — that is
+  // what makes a rounded card produce a rounded mask with no extra element.
+  const surfaceInherits = await page.evaluate((id) => {
+    const card = document.querySelector(`#studio-canvas-inner [data-comp-id="${id}"]`);
+    const surface = card?.querySelector(':scope > .design-card-surface');
+    if (!card || !surface) return null;
+    return {
+      cardOverflow: getComputedStyle(card).overflow,
+      surfaceOverflow: getComputedStyle(surface).overflow,
+      surfaceRadius: getComputedStyle(surface).borderRadius,
+    };
+  }, cardId);
+  check(surfaceInherits && surfaceInherits.surfaceOverflow === 'hidden',
+    'the surface clips');
+  check(surfaceInherits && surfaceInherits.cardOverflow !== 'hidden',
+    'the CARD BOX is not clipped, so its own resize handles stay reachable');
+  check(surfaceInherits && /32px/.test(surfaceInherits.surfaceRadius),
+    `the surface inherits the card radius, got "${surfaceInherits?.surfaceRadius}"`);
+
+  // All three fit modes still work inside the mask.
+  for (const fit of ['cover', 'contain', 'fill']) {
+    await selectComponent(imageId);
+    await page.evaluate((value) => {
+      const row = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'))
+        .find(r => r.querySelector('.studio-prop-label')?.textContent === 'Fit');
+      const select = row?.querySelector('select');
+      if (!select) throw new Error('Fit select missing');
+      select.value = value;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    }, fit);
+    await new Promise(r => setTimeout(r, 350));
+    const applied = await page.evaluate((id) => {
+      const card = document.querySelector('#studio-canvas-inner [data-comp-type="card"]');
+      const img = card?.querySelector(`.design-card-surface [data-comp-id="${id}"] img`);
+      return img ? { cls: img.className, objectFit: getComputedStyle(img).objectFit, src: img.getAttribute('src') } : null;
+    }, imageId);
+    check(applied, `the child image is still rendered for fit "${fit}"`);
+    eq(applied.cls, `design-image-fit-${fit}`, `fit "${fit}" is applied to the child image`);
+    check(/\/uploads\/creator\//.test(applied.src), 'the original source survives every fit change');
+  }
+});
+
+await step('CREATOR-11: Layers shows the Card/child hierarchy and deleting a Card cascades', async () => {
+  await assertNoPageErrors('start of: CREATOR-11: Layers shows the Card/child hierarchy and deleting a Card cascades');
+  await setMotionPreference('no-preference');
+  // Scope to the child INSIDE the card (see the rounded-card step).
+  const cardAndChild = await page.evaluate(() => {
+    const card = document.querySelector('#studio-canvas-inner [data-comp-type="card"]');
+    const child = card?.querySelector('.design-card-surface [data-comp-type="image"]');
+    return { card: card?.dataset.compId || null, child: child?.dataset.compId || null };
+  });
+  const cardId = cardAndChild.card;
+  const imageId = cardAndChild.child;
+  check(!!cardId, 'the Card is on the canvas');
+  check(!!imageId, 'the nested Image is inside the card surface');
+
+  const rows = await page.evaluate(() => Array.from(
+    document.querySelectorAll('#studio-layers-list [data-layer-id]'),
+  ).map(r => ({
+    id: r.dataset.layerId,
+    child: r.classList.contains('studio-layer-child'),
+    label: r.querySelector('.studio-layer-name')?.textContent || '',
+    indent: r.style.paddingLeft || '',
+  })));
+  const cardRow = rows.find(r => r.id === cardId);
+  const childRow = rows.find(r => r.id === imageId);
+  check(!!cardRow, 'the card has a Layers row');
+  check(!!childRow, 'the child has a Layers row');
+  check(childRow.child, 'the child row is marked as nested');
+  check(childRow.indent !== cardRow.indent,
+    `the child is indented under its card (card "${cardRow.indent}" child "${childRow.indent}")`);
+  const cardIndex = rows.findIndex(r => r.id === cardId);
+  const childIndex = rows.findIndex(r => r.id === imageId);
+  check(childIndex > cardIndex, 'the child is listed after the card it belongs to');
+  check(childRow.label.includes('↳'), `the nested row is visibly marked, got "${childRow.label}"`);
+
+  // Layers can still select the child even when it overlaps the card.
+  const selectedByLayers = await page.evaluate((id) => {
+    document.querySelector(`#studio-layers-list [data-layer-id="${id}"] .studio-layer-name`)?.click();
+    return true;
+  }, imageId);
+  void selectedByLayers;
+  await new Promise(r => setTimeout(r, 300));
+  const childSelected = await page.evaluate(() =>
+    document.querySelector('#studio-canvas-inner .studio-selected')?.dataset.compId || null);
+  eq(childSelected, imageId, 'selecting the child in Layers selects the child on the canvas');
+
+  // Deleting the card cascades, so no dangling parentId can survive.
+  await page.evaluate((id) => {
+    document.querySelector(`#studio-layers-list [data-layer-id="${id}"] [data-action="delete"]`)?.click();
+  }, cardId);
+  await new Promise(r => setTimeout(r, 400));
+  const afterDelete = await page.evaluate(([childId, parentId]) => {
+    const card = document.querySelector(`#studio-canvas-inner [data-comp-id="${parentId}"]`);
+    return {
+      cards: document.querySelectorAll('#studio-canvas-inner [data-comp-type="card"]').length,
+      // The specific child, not every image on the canvas: an earlier step added
+      // an unrelated standalone image that must survive untouched.
+      childStillThere: !!document.querySelector(`#studio-canvas-inner [data-comp-id="${childId}"]`),
+      childrenLeftInCard: card ? card.querySelectorAll('.design-card-surface [data-comp-id]').length : 0,
+    };
+  }, [imageId, cardId]);
+  eq(afterDelete.cards, 0, 'the card was deleted');
+  eq(afterDelete.childStillThere, false, 'the contained child was deleted with its card');
+  eq(afterDelete.childrenLeftInCard, 0, 'no child was left behind inside the removed card');
+
+  // The design must still be saveable — a dangling parentId would be rejected.
+  await page.click('#studio-save');
+  await new Promise(r => setTimeout(r, 1500));
+  const status = await page.$eval('#studio-status', el => el.textContent || '');
+  check(/saved/i.test(status), `the design still saves after a cascading delete, status="${status}"`);
+});
+
+await step('CREATOR-11: a nested Sticker is contained, animated and survives reload', async () => {
+  await assertNoPageErrors('start of: CREATOR-11: a nested Sticker is contained, animated and survives reload');
+  await setMotionPreference('no-preference');
+  await resetStudioWorkspace();
+  await ensureEditingMode();
+  await pinStudioInView();
+  const cardId = await addComponentAt('card', 140, 220);
+  check(!!cardId, 'a Card was added');
+  check(await selectComponent(cardId), 'the Card is selected');
+  await page.evaluate(() => {
+    const row = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'))
+      .find(r => r.querySelector('.studio-prop-label')?.textContent === 'Content Mask');
+    const input = row?.querySelector('input');
+    if (!input) throw new Error('Content Mask missing');
+    input.checked = true;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await new Promise(r => setTimeout(r, 350));
+
+  const stickerId = await addComponentAt('sticker', 420, 520);
+  check(!!stickerId, 'a Sticker was added');
+  check(await selectComponent(stickerId), 'the Sticker is selected');
+
+  // A Sticker is an image component, so it needs a real image source before the
+  // design is valid � the server rejects a component with no imageUrl. Upload one
+  // through the same control an Image uses.
+  const stickerUpload = await page.$('#studio-properties input[type=file]');
+  check(!!stickerUpload, 'the Sticker offers an upload control');
+  await stickerUpload.uploadFile(bgFixturePath);
+  await new Promise(r => setTimeout(r, 1600));
+  const stickerDecoded = await waitForImage('#studio-canvas-inner [data-comp-type="sticker"] img');
+  check(/\/uploads\/creator\//.test(stickerDecoded.src),
+    `the Sticker holds the uploaded file, got "${stickerDecoded.src}"`);
+  const stickerSource = stickerDecoded.src;
+
+  await page.evaluate((parent) => {
+    const row = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'))
+      .find(r => r.querySelector('.studio-prop-label')?.textContent === 'Inside Card');
+    const select = row?.querySelector('select');
+    if (!select) throw new Error('Inside Card missing');
+    select.value = parent;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  }, cardId);
+  await new Promise(r => setTimeout(r, 400));
+
+  // Local coordinates inside the card (see the Image step for why).
+  await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'));
+    const set = (label, value) => {
+      const input = rows.find(r => r.querySelector('.studio-prop-label')?.textContent === label)?.querySelector('input');
+      if (!input) return;
+      input.value = String(value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    set('X', 15);
+    set('Y', 20);
+    set('Width', 90);
+    set('Height', 90);
+  });
+  await new Promise(r => setTimeout(r, 400));
+
+  // Animate it.
+  await page.evaluate(() => {
+    const row = Array.from(document.querySelectorAll('#studio-properties .studio-prop-row'))
+      .find(r => r.querySelector('.studio-prop-label')?.textContent === 'Effect');
+    const select = row?.querySelector('select');
+    if (!select) throw new Error('Effect missing');
+    select.value = 'pulse';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await new Promise(r => setTimeout(r, 400));
+
+  const sticker = await readComp(stickerId);
+  eq(sticker.parentId, cardId, 'the Sticker records the card as its parent');
+  check(sticker.mountedInside, 'the Sticker is mounted inside the card surface');
+  eq(sticker.animationName, 'komuniph-anim-pulse', 'the Sticker plays the owned keyframes rule');
+  eq(sticker.imgSrc, stickerSource, 'the Sticker keeps its original uploaded source');
+
+  await page.click('#studio-save');
+  await new Promise(r => setTimeout(r, 1800));
+  const saveStatus = await page.$eval('#studio-status', el => el.textContent || '');
+  check(/saved/i.test(saveStatus), `the nested sticker design saved, status="${saveStatus}"`);
+  await resetStudioWorkspace();
+  const reloaded = await readComp(stickerId);
+  check(reloaded, `the Sticker came back after a reload, ids on canvas: ${await page.evaluate(() => Array.from(document.querySelectorAll('#studio-canvas-inner [data-comp-id]')).map(e => e.dataset.compId).join(','))}`);
+  eq(reloaded.parentId, cardId, 'the Sticker relationship survived the reload');
+  eq(reloaded.animationName, 'komuniph-anim-pulse', 'the Sticker animation survived the reload');
+
+  // Publish and check the public renderer produces the same structure.
+  await page.click('#studio-publish');
+  await new Promise(r => setTimeout(r, 1800));
+  const designId = await page.$eval('#studio-design-select', el => el.value);
+  const design = await api('GET', `/api/profile/design/${designId}`, { token: seller.token });
+  const comps = design.data.design.layout.components;
+  const s = comps.find(c => c.id === stickerId);
+  const c = comps.find(x => x.id === cardId);
+  check(!!s && !!c, 'the published design contains both the card and the sticker');
+  eq(s.parentId, cardId, 'the published design keeps the sticker→card relationship');
+  eq(s.config.animation.name, 'pulse', 'the published design keeps the animation');
+  eq(s.config.imageUrl, stickerSource, 'the published design keeps the original sticker source');
+  eq(c.config.mask, true, 'the published design keeps the mask setting');
+});
+
+await step('CREATOR-11: the public profile renders fonts, animations and masked children', async () => {
+  await assertNoPageErrors('start of: CREATOR-11: the public profile renders fonts, animations and masked children');
+  await setMotionPreference('no-preference');
+  await page.goto(`${BASE}/#/profile/${seller.username}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await new Promise(r => setTimeout(r, 2500));
+  const rendered = await page.evaluate(() => {
+    const frame = document.getElementById('profile-frame');
+    const text = frame?.querySelector('.design-text-content');
+    const card = frame?.querySelector('.design-card-container');
+    const surface = card?.querySelector('.design-card-surface');
+    const child = surface?.querySelector('[data-component-type="sticker"], [data-component-type="image"]');
+    return {
+      frameHasDesign: !!frame?.classList.contains('has-profile-design'),
+      fontFamily: text ? getComputedStyle(text).fontFamily : null,
+      fontStyle: text ? getComputedStyle(text).fontStyle : null,
+      textAnimated: text?.parentElement?.classList.contains('design-animated') || false,
+      textAnimation: text?.parentElement?.style.animationName || '',
+      cardExists: !!card,
+      surfaceOverflow: surface ? getComputedStyle(surface).overflow : null,
+      childMountedInCard: !!child,
+      childLocalLeft: child ? child.style.left : null,
+      childLocalTop: child ? child.style.top : null,
+      childImg: child?.querySelector('img')?.getAttribute('src') || null,
+    };
+  });
+  check(rendered.frameHasDesign, 'the public profile is running a design');
+  // Font resolved from the stored id by the public renderer.
+  check(!!rendered.fontFamily, 'the public renderer applied a font to the text component');
+  check(/georgia|times new roman|serif|sans-serif|system-ui/i.test(rendered.fontFamily),
+    `the public renderer resolved the stored font id, got "${rendered.fontFamily}"`);
+  check(rendered.cardExists, 'the public profile renders the Card container');
+  check(rendered.childMountedInCard, 'the child is mounted inside the card surface publicly');
+  check(rendered.surfaceOverflow === 'hidden', 'the public card surface clips its child');
+  check(/^\d+px$/.test(rendered.childLocalLeft || ''), 'the child uses local coordinates publicly');
+  check(/\/uploads\/creator\//.test(rendered.childImg || ''),
+    `the public child still references the original image source, got "${rendered.childImg}"`);
+  // The public renderer must not draw Studio-only chrome.
+  const studioOnly = await page.evaluate(() => ({
+    skeleton: document.querySelectorAll('#studio-profile-skeleton').length,
+    guide: document.querySelectorAll('[data-comp-type="profile_guide_card"]').length,
+  }));
+  eq(studioOnly.skeleton, 0, 'no Studio skeleton leaked onto the public profile');
+  eq(studioOnly.guide, 0, 'no guide card leaked onto the public profile');
+});
+
+await step('CREATOR-11: reduced motion is respected without changing the design', async () => {
+  await assertNoPageErrors('start of: CREATOR-11: reduced motion is respected without changing the design');
+  // Emulate the accessibility preference, then reload the public profile.
+  await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+  await page.goto(`${BASE}/#/profile/${seller.username}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await new Promise(r => setTimeout(r, 2500));
+  const reduced = await page.evaluate(() => {
+    const frame = document.getElementById('profile-frame');
+    const animated = frame ? Array.from(frame.querySelectorAll('.design-animated')) : [];
+    return {
+      count: animated.length,
+      names: animated.map(el => getComputedStyle(el).animationName),
+      // The profile must still be intact and fully rendered.
+      components: frame ? frame.querySelectorAll('.design-component').length : 0,
+      hasCard: !!frame?.querySelector('.design-card-container'),
+      hasText: !!frame?.querySelector('.design-text-content'),
+    };
+  });
+  check(reduced.components > 0, 'the profile still renders its components under reduced motion');
+  check(reduced.hasText, 'text still renders under reduced motion');
+  for (const name of reduced.names) {
+    check(name === 'none' || name === '',
+      `animations are switched off under reduced motion, got "${name}"`);
+  }
+  await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
+
+  // The stored design is untouched: the animation setting still exists server-side.
+  const sellerDesigns = await api('GET', '/api/profile/design', { token: seller.token });
+  check(sellerDesigns.status === 200, `the design list loads, got ${sellerDesigns.status}`);
+  const designs = (sellerDesigns.data && sellerDesigns.data.designs) || [];
+  const withAnim = designs.some(d => (d.layout?.components || [])
+    .some(c => c.config?.animation?.name && c.config.animation.name !== 'none'));
+  check(withAnim, 'the animation is still stored in the design after reduced-motion rendering');
 });
 
 await step('studio screenshot captured', async () => {

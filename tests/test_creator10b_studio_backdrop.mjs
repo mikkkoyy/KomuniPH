@@ -200,14 +200,46 @@ eq(withBgState.canvasW, '960px', 'the design canvas is still 960 wide');
 eq(withBgState.canvasH, '1200px', 'the design canvas is still 1200 tall');
 eq(withBgState.backdropIsComponent, 0, 'the backdrop is not a design component');
 
-// ── 3. The measured pixels: the picture is actually visible through the canvas ─
-const pixels = await sampleCanvas();
-const visible = pixels.filter(isBg).length;
-check(visible > pixels.length * 0.25,
-  `the background is visible across the canvas (${visible}/${pixels.length} sampled pixels are the background)`);
+// ── 3. The measured pixels ───────────────────────────────────────────────────
+// CREATOR-10C changed what this must assert. It used to require the background to
+// be visible ACROSS the canvas, which is exactly the fully-transparent canvas
+// that CREATOR-10C removed: the canvas has to be a distinct FOREGROUND sheet now.
+// The background is therefore shown in the VIEWER, around the canvas, and the
+// canvas interior must be its own surface rather than the raw picture.
+const sampleAt = async (shot, pt) => {
+  try {
+    const p = await sharp(shot).extract({ left: Math.round(pt[0]), top: Math.round(pt[1]), width: 1, height: 1 }).raw().toBuffer();
+    return [p[0], p[1], p[2]];
+  } catch { return null; }
+};
+const frame = await page.evaluate(() => {
+  const s = document.querySelector('#studio-canvas-scroll').getBoundingClientRect();
+  const d = document.querySelector('#studio-canvas-document').getBoundingClientRect();
+  // A viewer margin that is genuinely outside the canvas.
+  const margin = d.left > s.left + 12
+    ? [s.left + 5, s.top + s.height / 2]
+    : [s.left + 5, s.top + 5];
+  return {
+    margin,
+    canvas: [Math.round((Math.max(d.left, s.left) + Math.min(d.right, s.right)) / 2),
+      Math.round(Math.max(d.top, s.top) + 40)],
+  };
+});
+const shot = await page.screenshot({ encoding: 'binary' });
+const marginPx = await sampleAt(shot, frame.margin);
+const canvasPx = await sampleAt(shot, frame.canvas);
+const isBgColour = (p) => !!p && Math.abs(p[0] - BG[0]) + Math.abs(p[1] - BG[1]) + Math.abs(p[2] - BG[2]) < 70;
 
-// And compare against the SAME design with the structure hidden, so the
-// structure demonstrably is not what is hiding the picture.
+check(isBgColour(marginPx),
+  `the background is visible in the viewer around the canvas (got ${JSON.stringify(marginPx)})`);
+check(!isBgColour(canvasPx),
+  `the canvas interior is not the raw background, so it reads as a surface (got ${JSON.stringify(canvasPx)})`);
+const dist = (a, b) => (a && b) ? Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) : 0;
+check(dist(canvasPx, marginPx) > 40,
+  `the canvas surface is visibly distinct from the backdrop (${dist(canvasPx, marginPx)}/765 apart)`);
+
+// And the structure still must not bury the background where the backdrop is
+// genuinely exposed — compare against the same render with the chrome hidden.
 await page.evaluate(() => {
   document.querySelectorAll('#studio-profile-skeleton, .studio-guide-card').forEach((el) => {
     el.dataset.c10bsSaved = el.style.display;
@@ -215,18 +247,15 @@ await page.evaluate(() => {
   });
 });
 await new Promise(r => setTimeout(r, 400));
-const bare = await sampleCanvas();
+const bare = await sampleAt(await page.screenshot({ encoding: 'binary' }), frame.margin);
 await page.evaluate(() => {
   document.querySelectorAll('[data-c10bs-saved]').forEach((el) => { el.style.display = el.dataset.c10bsSaved; });
 });
-const bareVisible = bare.filter(isBg).length;
-const dist = (a, b) => (a && b) ? Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) : 0;
-const meanDelta = pixels.reduce((sum, p, i) => sum + dist(p, bare[i]), 0) / pixels.length;
-// The structure must not paint an opaque sheet over the picture.
-check(meanDelta < 90,
-  `the Studio structure does not bury the background (mean per-pixel shift ${meanDelta.toFixed(1)}/765)`);
-check(bareVisible >= visible,
-  `the structure is what remains once it is hidden (${visible} vs ${bareVisible} visible pixels)`);
+// The Studio chrome is a viewer backdrop, not canvas content, so hiding the
+// structure must leave the exposed background exactly as it was.
+const bareDist = dist(marginPx, bare);
+check(bareDist < 30,
+  `the Studio structure does not alter the exposed background (${bareDist}/765 apart with it hidden)`);
 
 // ── 4. Structure and controls survive ────────────────────────────────────────
 check(withBgState.skeletonCards >= 12, 'every real profile module is still drawn');

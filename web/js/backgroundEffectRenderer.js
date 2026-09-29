@@ -58,7 +58,13 @@ export function clearProfileBackgroundEffect(layer) {
   }
   detachMotionListener();
   const target = layer || document.getElementById(EFFECT_LAYER_ID);
-  if (target) target.replaceChildren();
+  if (target) {
+    target.replaceChildren();
+    // Never leave a stale frame count or motion marker behind: a cleared layer
+    // must not keep claiming an animation is running.
+    delete target.dataset.frame;
+    delete target.dataset.motion;
+  }
   return target;
 }
 
@@ -269,22 +275,36 @@ function renderParticles(target, resolved, config, reduce, bounds, reapply) {
   if (reduce) {
     // Deterministic still frame: the effect is visible, nothing moves. Repeated
     // motion is exactly what a motion-sensitive visitor asked us not to do.
-    // The marker makes that decision observable to the Studio and to tests.
+    // The marker makes that decision observable to the Studio and to tests, and
+    // a frame count of 0 is the honest "nothing is playing" signal.
     target.dataset.motion = 'static';
+    target.dataset.frame = '0';
     return true;
   }
 
   let last = 0;
   let raf = 0;
+  // CREATOR-10C: a monotonically increasing frame counter on the layer.
+  //
+  // Without it, "the effect works" can only be shown by comparing screenshots,
+  // and two frames of falling snow can easily look near-identical — a flaky
+  // proof at best. Counting real animation frames proves the rAF loop is
+  // actually running, which is the thing that can genuinely break (a throttled
+  // background tab, a hidden document). It is a bare counter: no state, no
+  // positions, nothing about the user.
+  let frameCount = 0;
   const frame = (now) => {
     if (!last) last = now;
     // Clamp the delta so a backgrounded tab does not teleport every particle.
     const delta = Math.min(50, now - last) * 0.06;
     last = now;
     draw(delta);
+    frameCount += 1;
+    target.dataset.frame = String(frameCount);
     raf = requestAnimationFrame(frame);
   };
   target.dataset.motion = 'animated';
+  target.dataset.frame = '0';
   raf = requestAnimationFrame(frame);
   // The Studio's canvas is resized when the viewer or the panels change, so the
   // effect re-measures with it rather than drifting out of the design area.
@@ -335,7 +355,11 @@ function renderAtmosphere(target, config, reduce) {
     anims.push(puff);
   }
   target.replaceChildren(wrap);
+  // CSS-animated engines report the same observable state as the particle one, so a
+  // caller never has to care which engine it is looking at. No rAF loop here, so
+  // the frame counter stays at 0.
   target.dataset.motion = reduce ? 'static' : 'animated';
+  target.dataset.frame = '0';
   if (reduce) return true;
 
   const duration = Math.max(6, 26 / Math.max(0.1, config.speed));
@@ -355,6 +379,7 @@ function renderLighting(target, config, reduce) {
   if (reduce) {
     // A single still tint instead of repeated flashes.
     target.dataset.motion = 'static';
+    target.dataset.frame = '0';
     flash.style.opacity = String(config.intensity * 0.25);
     return true;
   }
@@ -372,5 +397,7 @@ function renderOverlay(target, config) {
   wash.style.backgroundColor = config.color;
   wash.style.opacity = String(config.opacity);
   target.replaceChildren(wash);
+  target.dataset.motion = 'static';
+  target.dataset.frame = '0';
   return true;
 }

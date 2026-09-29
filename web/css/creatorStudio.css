@@ -618,9 +618,31 @@
   position: absolute;
   inset: 0;
 }
-/* The canvas only stops painting its own surface when a background is really
-   behind it, so the picture is not hidden by the canvas's light sheet. */
-#studio-canvas-document.studio-canvas-transparent { background: transparent; }
+/* CREATOR-10C: the canvas is the FOREGROUND editing surface.
+   It used to go fully `transparent` whenever a background was active, which
+   removed the canvas's own surface entirely: the picture then showed through
+   every part of the 960x1200 document and the canvas stopped reading as a
+   sheet at all — the "background painted inside the canvas" result.
+
+   So it is a SUBTLE surface rather than either extreme: opaque enough that the
+   canvas is unmistakably a distinct foreground panel sitting on the backdrop,
+   translucent enough that the viewer background and the effect layer beneath it
+   still read through as a soft presence instead of being cut off at the canvas
+   edge. The border and shadow are what really sell it as a floating sheet, and
+   they are what the eye uses to tell "panel on top of background" apart from
+   "background showing through a hole".
+
+   This is the CANVAS surface only. The profile skeleton and guide cards keep
+   their own low-fill CREATOR-10B treatment — the compounded ~80% white problem
+   those fixed is not brought back. */
+#studio-canvas-document.studio-canvas-transparent {
+  background:
+    linear-gradient(180deg, rgba(250, 251, 253, 0.80) 0%, rgba(237, 241, 247, 0.80) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow:
+    0 18px 50px -18px rgba(0, 0, 0, 0.8),
+    0 0 0 1px rgba(15, 23, 42, 0.18);
+}
 #studio-zoom-layer {
   transform-origin: 0 0;
   display: inline-block;
@@ -1417,4 +1439,33 @@
   background: rgba(148, 163, 184, 0.1);
   font-size: 0.76rem;
   color: var(--studio-text);
+}
+
+/* -- CREATOR-10C: effect playback state ----------------------------------------
+   The panel must distinguish an effect that is genuinely animating from one the
+   browser has deliberately stilled, so a creator is never told an effect is
+   playing when the visitor's reduced-motion preference has stopped it. The two
+   states reuse the CREATOR-10A chip language: teal for live, amber for stilled. */
+.studio-effect-playback {
+  display: inline-block;
+  align-self: flex-start;
+  margin: -0.25rem 0 0.5rem;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--studio-line);
+  background: rgba(148, 163, 184, 0.16);
+  color: var(--studio-muted);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.studio-effect-playback-animated {
+  border-color: rgba(20, 184, 166, 0.55);
+  background: rgba(20, 184, 166, 0.18);
+  color: #5eead4;
+}
+.studio-effect-playback-static {
+  border-color: rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.16);
+  color: #fcd34d;
 }

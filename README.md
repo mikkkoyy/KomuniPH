@@ -169,6 +169,28 @@ The Profile Viewer used to be a plain surface with unrelated placeholder boxes f
   - `npm run test:studio-media` runs the CREATOR-06/07/07A/07B/08 upload/nav/viewer suite (42 checks: upload security + formats, uploaded-URL integration, back navigation, workspace column/height resize geometry and clamping, viewer height independence from the panels and the window, workspace wiring, non-edit behavior, removed-toolbar and removed-grip regressions, zoom step/clamp/reset arithmetic and the rule that the guide is absent from the public component types and selectors, a guard that **every named import in `creatorStudio.js` resolves**, studio layout, responsive rules and the panel/viewer decoupling rules)
   - `npm run test:studio-media-e2e` runs the headless-browser E2E (69 checks, including the CREATOR-10 centered canvas and the CREATOR-11 font/animation/masking flows end to end)
   - `npm run test:creator11` runs the CREATOR-11 suite (21 checks: font/animation/mask validation, registry agreement, backward compatibility, rendering and persistence)
+  - `npm run test:creator10c` runs the CREATOR-10C suite (44 checks in a real browser): the backdrop and the effect are both viewer-sized, the backdrop precedes the canvas and paints below it, the background is ordered before the effect, the design canvas is still 960×1200, and the background is neither a component nor in Layers nor interactive. It then measures real pixels — the background must be visible in the viewer around the canvas while the canvas interior must be its own light surface, visibly distinct from the backdrop and not fully opaque — and proves **playback** by watching the frame counter climb under `prefers-reduced-motion: no-preference`, stay put under `reduce` while the effect remains visible, and climb again once motion is allowed, with the Studio panel reporting `ANIMATED` and `STATIC — REDUCED MOTION` to match
+  - `npm run test:creator10b-studio` runs the CREATOR-10B Studio suite (21 checks in a real browser): with no background the canvas keeps its own surface exactly as before, and with one the backdrop reports `set`, fills the whole viewer rather than a rectangle inside the canvas, the canvas stops painting over it and floats above it, the design canvas is still 960×1200, the backdrop is not a component, and the real profile structure, the independent sidebar cards, Photo Gallery in the sidebar and the guide cards all survive
+
+### CREATOR-10C — Studio background layering and effect playback
+
+The Creator Studio has two background layers that are **viewer-wide**: the Profile Background image and the Profile Background Effect. They are siblings of the design canvas, not children of it, and the canvas is a separate **960×1200 floating editing surface** that sits on top of them.
+
+```
+lowest ──────────────────────────────
+  viewer-wide Profile Background      (pointer-events: none, not a component)
+  viewer-wide Profile Background Effect (pointer-events: none, aria-hidden)
+  960×1200 design canvas surface
+  profile skeleton / guide outlines
+  creator components
+  selection handles
+highest ─────────────────────────────
+```
+
+- **The canvas is a foreground surface, not a hole.** It previously went fully `transparent` whenever a background was active, so the picture showed through every part of the 960×1200 document and the canvas stopped reading as a sheet. It is now a *subtle* surface: opaque enough to be unmistakably a distinct panel sitting on the backdrop, translucent enough that the backdrop and the effect beneath it still read through as a soft presence. Its border, radius and shadow are what sell it as a floating sheet. The canvas size, zoom, pan, centring and saved coordinates are untouched — only its stacking against the backdrop changed.
+- **Playback is proven, not assumed.** Two frames of falling snow can look near-identical, so screenshots are a poor proof of motion. The renderer publishes a **frame counter** next to `data-motion` on the effect layer — a bare counter, no state, no positions, nothing about the user — so a browser test can watch real animation frames advance. Under `prefers-reduced-motion: no-preference` it climbs; under `reduce` it stays put while the effect remains visible as a still frame; it climbs again as soon as the preference is lifted, with no reload.
+- **The Studio never lies about playback.** The Properties panel shows `ANIMATED — playing on your profile` or `STATIC — REDUCED MOTION (your device asks for less motion)`, read from the renderer's live state. This has to be live: the renderer decides reduced motion *after* it has sized and attached its canvas, which is after the panel was built, so sampling the state once at render time reported the opposite answer and then stuck. The panel watches the effect layer and refreshes only when the motion state genuinely changes — the frame counter is deliberately excluded, so playback never re-renders the panel or steals focus mid-edit.
+- **Unchanged by design:** the background remains design-level theme configuration (`backgroundImage`/`Size`/`Position`/`Repeat`), never a component, never in Layers, never with resize handles; the effect stays a separate viewer-wide layer between the background and the canvas; zoom, Fit, Reset, pan and centring are untouched; and the CREATOR-10A background states, CREATOR-11 fonts/animation/masking and the CREATOR-12 effect registry and `.kpeffect` support are all unaffected.
 
 ### CREATOR-11 — Fonts, animation, and Card / Image / Sticker masking
 

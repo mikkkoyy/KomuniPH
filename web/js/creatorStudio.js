@@ -1940,6 +1940,22 @@ function backgroundEffectProperties(frag) {
   }
   frag.appendChild(activeBox);
 
+  // CREATOR-10C: say whether it is genuinely animating. An effect held still by
+  // the visitor's reduced-motion preference is still shown, but the panel must not
+  // claim it is playing.
+  if (state.active) {
+    const playback = effectPlaybackState();
+    const playBox = document.createElement('div');
+    playBox.className = `studio-effect-playback studio-effect-playback-${playback.animated ? 'animated' : 'static'}`;
+    playBox.id = 'studio-effect-playback';
+    playBox.dataset.motion = playback.motion;
+    if (playback.frame !== null) playBox.dataset.frame = String(playback.frame);
+    playBox.textContent = playback.animated
+      ? 'ANIMATED — playing on your profile'
+      : 'STATIC — REDUCED MOTION (your device asks for less motion)';
+    frag.appendChild(playBox);
+  }
+
   if (state.pending) {
     const pendingBox = document.createElement('div');
     pendingBox.className = 'studio-bg-pending';
@@ -2176,6 +2192,66 @@ function stepFor(spec) {
   if (range <= 20) return 0.5;
   if (range <= 200) return 1;
   return 10;
+}
+
+/**
+ * CREATOR-10C: whether the active effect is actually PLAYING, read from the
+ * renderer's own live state rather than guessed from the effect id.
+ *
+ * The renderer sets `data-motion` on the effect layer, so this reflects reality:
+ * a visitor who has asked for reduced motion gets a still frame, and the panel
+ * must not then tell the creator the effect is animating when it is not.
+ */
+let studioMotionQuery = null;
+let studioMotionHandler = null;
+let effectPlaybackObserver = null;
+let lastPlaybackMotion = null;
+
+function effectPlaybackState() {
+  const layer = root?.querySelector('#studio-profile-effect-layer');
+  const motion = layer?.dataset?.motion || 'none';
+  const frame = Number(layer?.dataset?.frame);
+  return {
+    motion,
+    frame: Number.isFinite(frame) ? frame : null,
+    animated: motion === 'animated',
+    staticFrame: motion === 'static',
+  };
+}
+
+/**
+ * CREATOR-10C: keep the playback badge a LIVE view of the renderer.
+ *
+ * The renderer is the only thing that knows whether an effect is really running —
+ * it decides that after it has sized and attached its canvas, which is after the
+ * Properties panel has already been built. Reading its state once at render time
+ * therefore reports the wrong answer, and the panel would then sit there claiming
+ * "static" for an animating effect (or the reverse) until something else happened
+ * to rebuild it.
+ *
+ * So the panel watches the effect layer and refreshes only when the motion state
+ * genuinely CHANGES. The frame counter is deliberately excluded: it ticks on
+ * every animation frame, and reacting to it would re-render the whole panel sixty
+ * times a second, stealing focus from whatever the creator is typing into.
+ */
+function observeEffectPlayback() {
+  const backdrop = root?.querySelector('#studio-profile-backdrop');
+  if (!backdrop || typeof MutationObserver === 'undefined') return;
+  try { effectPlaybackObserver?.disconnect(); } catch { /* best effort */ }
+  lastPlaybackMotion = backdrop.querySelector('#studio-profile-effect-layer')?.dataset?.motion || 'none';
+  effectPlaybackObserver = new MutationObserver(() => {
+    const motion = root?.querySelector('#studio-profile-effect-layer')?.dataset?.motion || 'none';
+    if (motion === lastPlaybackMotion) return;
+    lastPlaybackMotion = motion;
+    renderProperties();
+  });
+  effectPlaybackObserver.observe(backdrop, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    // The frame counter is NOT watched, so playback itself never triggers work.
+    attributeFilter: ['data-motion'],
+  });
 }
 
 function canvasProperties(frag) {
@@ -3599,7 +3675,22 @@ async function createNewDesign() {
 }
 
 function attachEvents() {
+  // CREATOR-10C: keep the effect playback badge honest. The renderer reacts to a
+  // reduced-motion change on its own, but the Properties panel is not rebuilt by
+  // that, so it would keep claiming the old state. Re-rendering here is viewer
+  // and UI only: no design change, no undo entry.
+  if (typeof window.matchMedia === 'function' && !studioMotionQuery) {
+    try {
+      studioMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+      const onMotionChange = () => { renderProperties(); };
+      if (typeof studioMotionQuery.addEventListener === 'function') {
+        studioMotionQuery.addEventListener('change', onMotionChange);
+        studioMotionHandler = onMotionChange;
+      }
+    } catch { /* the preference is simply not observable here */ }
+  }
   root.querySelector('#studio-sections-list').addEventListener('click', onElementListClick);
+  observeEffectPlayback();
   root.querySelector('#studio-content-list').addEventListener('click', onElementListClick);
   // CREATOR-08: zoom controls. Viewer state only — no design mutation.
   root.querySelector('#studio-zoom-in').addEventListener('click', () => zoomBy('in'));
@@ -3740,6 +3831,15 @@ export function destroyCreatorStudioPage() {
   window.removeEventListener('pointermove', onPointerMove);
   window.removeEventListener('pointerup', onPointerUp);
   window.removeEventListener('resize', clampWorkspaceToWindow);
+  if (studioMotionQuery && studioMotionHandler
+    && typeof studioMotionQuery.removeEventListener === 'function') {
+    studioMotionQuery.removeEventListener('change', studioMotionHandler);
+  }
+  studioMotionQuery = null;
+  studioMotionHandler = null;
+  try { effectPlaybackObserver?.disconnect(); } catch { /* best effort */ }
+  effectPlaybackObserver = null;
+  lastPlaybackMotion = null;
   stopObservingViewerSize();
   currentDesign = null;
   designs = [];

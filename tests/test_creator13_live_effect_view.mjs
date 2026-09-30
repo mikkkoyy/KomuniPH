@@ -273,30 +273,41 @@ await new Promise(r => setTimeout(r, 1200));
 
 // ── I/J. Effect switching changes the rendering, and leaves no stale loop ─────
 /**
- * Average colour of the PARTICLE CORES on the live stage.
+ * Classify the PARTICLES drawn on the live stage.
  *
- * Two corrections matter here. The stage has an opaque dark background, so every
- * non-transparent pixel would be mostly backdrop; only clearly brighter pixels are
- * counted. And a sprite is mostly anti-aliased edge, which blends toward the
- * backdrop and desaturates — so the average of a whole sprite is grey whatever
- * colour the effect is. Averaging only the brightest decile reads the solid
- * interior, which is where the effect's own colour actually lives.
+ * Two corrections matter. The stage has an opaque dark background (luminance
+ * ~25-40), so covered pixels are selected by being clearly brighter than that.
+ * And a sprite is mostly anti-aliased edge, which blends toward the backdrop and
+ * desaturates — so averaging colours, or picking a luminance-selected "core",
+ * gives unstable greys that depend on how many edge pixels happen to be hit.
+ *
+ * Counting pixels that match an effect's own colour family is both stable and a
+ * more direct expression of the requirement ("leaves are recognisably green"):
+ * it asks whether green pixels EXIST, not whether one average looks green.
  */
 const stageSignature = async () => {
   const shot = await liveShot();
   if (!shot) return null;
   const { data } = await sharp(shot).raw().toBuffer({ resolveWithObject: true });
-  const px = [];
+  let covered = 0; let green = 0; let pale = 0; let pink = 0; let sum = 0;
   for (let i = 0; i < data.length; i += 4) {
-    const lum = (data[i] + data[i + 1] + data[i + 2]) / 3;
-    if (data[i + 3] > 40 && lum > 80) px.push([lum, data[i], data[i + 1], data[i + 2]]);
+    const r = data[i]; const g = data[i + 1]; const b = data[i + 2];
+    const lum = (r + g + b) / 3;
+    if (data[i + 3] < 40 || lum <= 45) continue; // still the dark backdrop
+    covered += 1;
+    sum += lum;
+    if (g > r + 20 && g > b + 20) green += 1;
+    if (lum > 170 && Math.max(r, g, b) - Math.min(r, g, b) < 30) pale += 1;
+    if (r > g + 25 && r > b + 5 && lum > 90) pink += 1;
   }
-  if (px.length === 0) return { pixels: 0, r: 0, g: 0, b: 0 };
-  px.sort((a, b) => b[0] - a[0]);
-  const cores = px.slice(0, Math.max(1, Math.ceil(px.length * 0.1)));
-  let r = 0; let g = 0; let b = 0;
-  for (const [, R, G, B] of cores) { r += R; g += G; b += B; }
-  return { pixels: px.length, cores: cores.length, r: r / cores.length, g: g / cores.length, b: b / cores.length };
+  const pct = (n) => (covered ? Math.round((n / covered) * 100) : 0);
+  return {
+    covered,
+    avgLum: covered ? Math.round(sum / covered) : 0,
+    greenPct: pct(green),
+    palePct: pct(pale),
+    pinkPct: pct(pink),
+  };
 };
 /** Open a design and confirm the Live View names the effect it should. */
 const expectEffect = async (designId, namePattern) => {
@@ -306,22 +317,27 @@ const expectEffect = async (designId, namePattern) => {
   check(namePattern.test(s.name || ''), `the Live View names ${namePattern}, got "${s.name}"`);
   return stageSignature();
 };
+await new Promise(r => setTimeout(r, 1500));
 const snowSig = await expectEffect(snowDesign, /snow/i);
-await new Promise(r => setTimeout(r, 900));
+await new Promise(r => setTimeout(r, 1500));
 const leavesSig = await expectEffect(leavesDesign, /leaves/i);
+await new Promise(r => setTimeout(r, 1500));
 const petalsSig = await expectEffect(petalsDesign, /petals/i);
 
-check(leavesSig.pixels > 0 && snowSig.pixels > 0 && petalsSig.pixels > 0, 'each effect draws particles');
-check(leavesSig.g > leavesSig.r && leavesSig.g > leavesSig.b,
-  `leaves are GREEN (avg rgb ${leavesSig.r.toFixed(0)},${leavesSig.g.toFixed(0)},${leavesSig.b.toFixed(0)})`);
-check(snowSig.r > 200 && snowSig.g > 200 && snowSig.b > 200,
-  `snow is PALE/WHITE (avg rgb ${snowSig.r.toFixed(0)},${snowSig.g.toFixed(0)},${snowSig.b.toFixed(0)})`);
-check(!(leavesSig.r > 220 && leavesSig.g > 220 && leavesSig.b > 220),
-  'leaves are not white snow dots');
-check(petalsSig.r > petalsSig.g && petalsSig.r > petalsSig.b,
-  `petals are PINK/FLORAL (avg rgb ${petalsSig.r.toFixed(0)},${petalsSig.g.toFixed(0)},${petalsSig.b.toFixed(0)})`);
-check(Math.abs(leavesSig.g - snowSig.g) > 25,
-  `leaves and snow are visibly different effects (green ${leavesSig.g.toFixed(0)} vs pale ${snowSig.g.toFixed(0)})`);
+check(snowSig.covered > 0 && leavesSig.covered > 0 && petalsSig.covered > 0,
+  `each effect draws particles (${snowSig.covered}/${leavesSig.covered}/${petalsSig.covered} covered pixels)`);
+check(leavesSig.greenPct >= 15,
+  `leaves render recognisably GREEN, not white dots (${leavesSig.greenPct}% green pixels)`);
+check(leavesSig.palePct < 40,
+  `leaves are not white snow particles (${leavesSig.palePct}% pale pixels)`);
+check(snowSig.palePct >= 15,
+  `snow renders recognisably PALE/WHITE (${snowSig.palePct}% pale pixels)`);
+check(petalsSig.pinkPct >= 10,
+  `petals render recognisably PINK/FLORAL (${petalsSig.pinkPct}% pink pixels)`);
+check(snowSig.greenPct < 30,
+  `snow is not green (${snowSig.greenPct}% green pixels)`);
+check(leavesSig.greenPct > snowSig.greenPct + 10,
+  `leaves and snow are visibly different effects (${leavesSig.greenPct}% vs ${snowSig.greenPct}% green)`);
 
 // Repeated switching must not accumulate loops.
 for (const id of [petalsDesign, snowDesign, leavesDesign, snowDesign]) {

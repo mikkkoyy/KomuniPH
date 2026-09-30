@@ -87,6 +87,16 @@ const bgPlusEffect = await makeDesign('BgEffect', {
   backgroundSize: 'cover',
   backgroundEffect: { enabled: true, effectId: 'builtin.snow', source: 'builtin', version: 1, config: { count: 90 } },
 });
+// Leaves and petals are the effects a creator is most likely to call "it just
+// looks like snow", so they get their own design.
+const bgLeaves = await makeDesign('BgLeaves', {
+  backgroundImage: `/uploads/creator/${bgName}`,
+  backgroundSize: 'cover',
+  backgroundEffect: {
+    enabled: true, effectId: 'builtin.leaves', source: 'builtin', version: 1,
+    config: { count: 40, speed: 2, size: 22, direction: 'down', drift: 60, rotation: true, rotationSpeed: 90 },
+  },
+});
 await makeDesign('NoBg', {});
 
 let browser;
@@ -265,6 +275,81 @@ await new Promise(r => setTimeout(r, 400));
 const b2 = await readEffect();
 eq(b1.motion, 'animated', 'the effect animates again once motion is allowed');
 check(b2.frame > b1.frame, `frames advance again after the preference is lifted (${b1.frame} -> ${b2.frame})`);
+
+// ── C. The motion is VISIBLE, and each effect actually looks like itself ──────
+// A rising frame counter proves the rAF loop runs. It does NOT prove a creator
+// can SEE anything move, and it certainly does not prove the effect is
+// recognisable: an earlier build advanced frames happily while every particle
+// was a white dot, so "leaves" was indistinguishable from "snow".
+const shotOf = async () => Buffer.from(await page.screenshot({ encoding: 'binary' }));
+const changedPixels = async (a, b) => {
+  const ra = await sharp(a).raw().toBuffer();
+  const rb = await sharp(b).raw().toBuffer();
+  let n = 0;
+  for (let i = 0; i < Math.min(ra.length, rb.length); i += 4) {
+    if (Math.abs(ra[i] - rb[i]) > 6) n += 1;
+  }
+  return n;
+};
+const particleColours = () => page.evaluate(() => {
+  const c = document.querySelector('#studio-profile-effect-layer canvas');
+  if (!c) return null;
+  const { data } = c.getContext('2d').getImageData(0, 0, c.width, c.height);
+  const seen = new Map();
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] > 40) {
+      const k = `${data[i]},${data[i + 1]},${data[i + 2]}`;
+      seen.set(k, (seen.get(k) || 0) + 1);
+    }
+  }
+  return [...seen.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+});
+
+await openDesign(bgPlusEffect);
+const snowA = await shotOf();
+await new Promise(r => setTimeout(r, 600));
+const snowB = await shotOf();
+const snowMoved = await changedPixels(snowA, snowB);
+check(snowMoved > 300,
+  `the effect is VISIBLY moving, not just counting frames (${snowMoved} pixels changed in 600ms)`);
+const snowCols = await particleColours();
+check(!!snowCols && snowCols.length > 0, 'snow has visible particles');
+const snowIsPale = snowCols.some(([c]) => {
+  const [r, g, b] = c.split(',').map(Number);
+  return r > 200 && g > 200 && b > 200;
+});
+check(snowIsPale, `snow renders as pale/white particles, got ${JSON.stringify(snowCols)}`);
+
+// Leaves must not be snow in different clothing.
+await openDesign(bgLeaves);
+const leafA = await shotOf();
+await new Promise(r => setTimeout(r, 600));
+const leafB = await shotOf();
+const leafMoved = await changedPixels(leafA, leafB);
+check(leafMoved > 300, `leaves are visibly moving (${leafMoved} pixels changed in 600ms)`);
+
+const leafCols = await particleColours();
+check(!!leafCols && leafCols.length > 0, 'leaves have visible particles');
+const greens = leafCols.filter(([c]) => {
+  const [r, g, b] = c.split(',').map(Number);
+  return g > r && g > b;
+});
+check(greens.length > 0, `leaves render green rather than white, got ${JSON.stringify(leafCols)}`);
+check(!leafCols.some(([c]) => {
+  const [r, g, b] = c.split(',').map(Number);
+  return r > 220 && g > 220 && b > 220;
+}), 'leaves are not drawn as white dots');
+// A leaf is a real drawn shape, so the particles must cover a meaningful part of
+// the canvas rather than being a handful of stray dots.
+const leafCoverage = await page.evaluate(() => {
+  const c = document.querySelector('#studio-profile-effect-layer canvas');
+  if (!c) return 0;
+  const { data } = c.getContext('2d').getImageData(0, 0, c.width, c.height);
+  let n = 0;
+  for (let i = 3; i < data.length; i += 4) if (data[i] > 40) n += 1;
+  return n;
+});
+check(leafCoverage > 500, `leaves actually cover the canvas (${leafCoverage} pixels drawn)`);
 
 // ── Structure and the public profile are untouched ──
 const struct = await page.evaluate(() => ({

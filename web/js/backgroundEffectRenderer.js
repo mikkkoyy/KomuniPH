@@ -174,8 +174,21 @@ function renderParticles(target, resolved, config, reduce, bounds, reapply) {
   const isFire = resolved.palette === 'fire' || resolved.effectId === 'builtin.fire';
   const isSparkle = resolved.effectId === 'builtin.sparkles';
   const isStar = resolved.effectId === 'builtin.stars';
+  // Leaves and petals are their own shapes and their own palettes. Falling
+  // back to the generic white dot made them indistinguishable from snow, which
+  // is exactly what a creator would report as "it does not look like leaves".
+  const isLeaves = resolved.effectId === 'builtin.leaves';
+  const isPetals = resolved.effectId === 'builtin.petals';
+  // Fixed palettes, chosen per effect, never a user-supplied colour.
+  const LEAF_COLOURS = ['#4f7a28', '#6b8f2e', '#3f6320', '#7fa23a', '#587f26'];
+  const PETAL_COLOURS = ['#f4a7c3', '#f8c4d8', '#e88ab0', '#fbe0ea', '#ef96b6'];
 
-  const speed = config.speed * 0.5;
+  // Speed is in CSS pixels per (scaled) frame-step, and the delta below is
+  // normalised so a value of 1 reads as a clearly perceptible fall rather than an
+  // imperceptible crawl. These factors were previously half again smaller, which
+  // made a default effect drift only a few pixels per second: mathematically
+  // animating, visually indistinguishable from a still frame.
+  const speed = config.speed;
   const size = config.size;
   const opacity = config.opacity;
   const rotate = config.rotation && config.rotationSpeed > 0;
@@ -213,6 +226,10 @@ function renderParticles(target, resolved, config, reduce, bounds, reapply) {
       z: rand(0.5, 1.5),
       r: rand(0, Math.PI * 2),
       s: rand(size * 0.5, size) * (isSparkle || isStar ? 1 : 1),
+      // A stable per-particle colour, so a leaf is a leaf rather than a dot.
+      c: isLeaves
+        ? LEAF_COLOURS[Math.floor(rand(0, LEAF_COLOURS.length))]
+        : (isPetals ? PETAL_COLOURS[Math.floor(rand(0, PETAL_COLOURS.length))] : null),
     });
   }
 
@@ -255,6 +272,23 @@ function renderParticles(target, resolved, config, reduce, bounds, reapply) {
         ctx.beginPath();
         ctx.arc(0, 0, sz * 0.5, 0, Math.PI * 2);
         ctx.fill();
+      } else if (isLeaves || isPetals) {
+        // A leaf and a petal are elongated, not round: an ellipse twice as long
+        // as it is wide, drawn with the particle's own rotation so the tumble
+        // reads as a leaf turning over rather than a dot sliding down.
+        ctx.fillStyle = p.c;
+        ctx.beginPath();
+        const rx = sz * 0.62;
+        const ry = sz * 0.26;
+        ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // A darker midrib, so the shape is legible against a busy background.
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.22)';
+        ctx.lineWidth = Math.max(0.6, sz * 0.05);
+        ctx.beginPath();
+        ctx.moveTo(-rx, 0);
+        ctx.lineTo(rx, 0);
+        ctx.stroke();
       } else {
         ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
         ctx.beginPath();
@@ -295,8 +329,9 @@ function renderParticles(target, resolved, config, reduce, bounds, reapply) {
   let frameCount = 0;
   const frame = (now) => {
     if (!last) last = now;
-    // Clamp the delta so a backgrounded tab does not teleport every particle.
-    const delta = Math.min(50, now - last) * 0.06;
+    // Clamp the delta so a backgrounded tab does not teleport every particle, and
+    // scale it so the default speeds are plainly visible.
+    const delta = Math.min(50, now - last) * 0.12;
     last = now;
     draw(delta);
     frameCount += 1;

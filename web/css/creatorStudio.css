@@ -1438,3 +1438,94 @@
   background: rgba(245, 158, 11, 0.16);
   color: #fcd34d;
 }
+
+/* ---------------------------------------------------------------------------
+   CREATOR-13 — the Creator Studio LIVE VIEW.
+
+   A real rendered preview of the selected Profile Background Effect, in the
+   Properties panel. It uses the same effect engine as the public profile and the
+   design canvas, so what a creator sees here is what a visitor gets.
+
+   The stage is a fixed-size, dark, neutral surface: pale particles (snow,
+   sparkles) must be as visible as green ones (leaves), so the preview never
+   flatters or hides an effect by choosing a friendly backdrop.
+   --------------------------------------------------------------------------- */
+
+.studio-effect-live {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0.25rem 0 0.6rem;
+}
+
+.studio-effect-live-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.studio-effect-live-name {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--studio-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.studio-effect-live-engine {
+  font-size: 0.64rem;
+  color: var(--studio-muted);
+  white-space: nowrap;
+}
+
+.studio-effect-live-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: 200px;
+  border-radius: 8px;
+  border: 1px solid var(--studio-line);
+  background:
+    linear-gradient(180deg, #1b2436 0%, #111827 100%);
+  overflow: hidden;
+}
+.studio-effect-live-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.studio-effect-live-layer canvas { width: 100%; height: 100%; display: block; }
+
+.studio-effect-live-status {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+.studio-effect-live-badge {
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid rgba(20, 184, 166, 0.55);
+  background: rgba(20, 184, 166, 0.18);
+  color: #5eead4;
+}
+.studio-effect-live-badge[data-state="paused"] {
+  border-color: rgba(148, 163, 184, 0.5);
+  background: rgba(148, 163, 184, 0.16);
+  color: var(--studio-muted);
+}
+.studio-effect-live-badge[data-state="static"] {
+  border-color: rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.16);
+  color: #fcd34d;
+}
+.studio-effect-live-motion { color: var(--studio-muted); }
+.studio-effect-live-motion[data-motion="active"] { color: #5eead4; }
+.studio-effect-live-motion[data-motion="no-movement"] { color: #fca5a5; }
+
+.studio-effect-live-controls {
+  display: flex;
+  gap: 0.4rem;
+}

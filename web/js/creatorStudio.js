@@ -61,7 +61,13 @@ import {
   BUILTIN_EFFECT_IDS,
   ENGINE_SCHEMAS,
 } from './backgroundEffects.js';
-import { applyProfileBackgroundEffect } from './backgroundEffectRenderer.js';
+import {
+  applyProfileBackgroundEffect,
+  getEffectController,
+  clearProfileBackgroundEffect,
+  createMotionProbe,
+  prefersReducedMotion,
+} from './backgroundEffectRenderer.js';
 import { creatorEffectApi } from './api.js';
 import {
   stepPan,
@@ -915,11 +921,8 @@ function absolutePosition(comp) {
   return { x: card.x + comp.x, y: card.y + comp.y };
 }
 
-function prefersReducedMotion() {
-  return typeof window !== 'undefined'
-    && typeof window.matchMedia === 'function'
-    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
+// CREATOR-13: prefersReducedMotion() is imported from the renderer, so the Studio
+// and the public profile can never disagree about the accessibility preference.
 
 function buildContentNode(el, comp) {
   const config = comp.config || {};
@@ -1919,18 +1922,7 @@ function backgroundEffectProperties(frag) {
   // CREATOR-10C: say whether it is genuinely animating. An effect held still by
   // the visitor's reduced-motion preference is still shown, but the panel must not
   // claim it is playing.
-  if (state.active) {
-    const playback = effectPlaybackState();
-    const playBox = document.createElement('div');
-    playBox.className = `studio-effect-playback studio-effect-playback-${playback.animated ? 'animated' : 'static'}`;
-    playBox.id = 'studio-effect-playback';
-    playBox.dataset.motion = playback.motion;
-    if (playback.frame !== null) playBox.dataset.frame = String(playback.frame);
-    playBox.textContent = playback.animated
-      ? 'ANIMATED — playing on your profile'
-      : 'STATIC — REDUCED MOTION (your device asks for less motion)';
-    frag.appendChild(playBox);
-  }
+  if (state.active) frag.appendChild(liveEffectView(state));
 
   if (state.pending) {
     const pendingBox = document.createElement('div');
@@ -2171,29 +2163,248 @@ function stepFor(spec) {
 }
 
 /**
- * CREATOR-10C: whether the active effect is actually PLAYING, read from the
- * renderer's own live state rather than guessed from the effect id.
+ * CREATOR-13: the LIVE VIEW.
  *
- * The renderer sets `data-motion` on the effect layer, so this reflects reality:
- * a visitor who has asked for reduced motion gets a still frame, and the panel
- * must not then tell the creator the effect is animating when it is not.
+ * A real rendering of the selected effect, in the Properties panel, so a creator
+ * can see whether it renders, moves, and looks like itself — without publishing.
+ *
+ * It is NOT a mock and NOT a second engine: it calls the same
+ * `applyProfileBackgroundEffect()` with the same validated effect definition the
+ * public profile and the design canvas use. The renderer keeps playback state per
+ * layer, so the Live View and the canvas preview animate independently and
+ * starting one never tears the other down.
+ *
+ * The Motion status is a FACT about pixels, not a frame counter. A loop that runs
+ * but never moves anything reports NO MOVEMENT DETECTED, which is the failure a
+ * creator would otherwise see as "it just doesn't animate".
+ *
+ * Nothing here writes to the design. Pause, Resume and Restart are preview-only
+ * operations on the layer's own controller.
  */
+function liveEffectView(state) {
+  const wrap = document.createElement('div');
+  wrap.className = 'studio-effect-live';
+  wrap.id = 'studio-effect-live';
+
+  // ── Effect identity ──
+  const head = document.createElement('div');
+  head.className = 'studio-effect-live-head';
+  const nameEl = document.createElement('span');
+  nameEl.className = 'studio-effect-live-name';
+  nameEl.id = 'studio-effect-live-name';
+  nameEl.textContent = effectChoiceLabel(state.active.effectId);
+  const engineEl = document.createElement('span');
+  engineEl.className = 'studio-effect-live-engine';
+  engineEl.id = 'studio-effect-live-engine';
+  const def = effectDefinitionFor(state.active.effectId);
+  engineEl.textContent = `Engine: ${(def && def.engine) || 'unknown'}`;
+  head.append(nameEl, engineEl);
+  wrap.appendChild(head);
+
+  // ── The live surface ──
+  const stage = document.createElement('div');
+  stage.className = 'studio-effect-live-stage';
+  stage.id = 'studio-effect-live-stage';
+  // A neutral, dark surface so pale particles (snow, sparkles) are as visible as
+  // green ones (leaves) — the preview must not flatter or hide an effect.
+  const layer = document.createElement('div');
+  layer.className = 'studio-effect-live-layer';
+  layer.id = 'studio-effect-live-layer';
+  stage.appendChild(layer);
+  wrap.appendChild(stage);
+
+  // ── Status ──
+  const statusRow = document.createElement('div');
+  statusRow.className = 'studio-effect-live-status';
+  const badge = document.createElement('span');
+  badge.className = 'studio-effect-live-badge';
+  badge.id = 'studio-effect-live-badge';
+  badge.textContent = 'LIVE';
+  const motion = document.createElement('span');
+  motion.className = 'studio-effect-live-motion';
+  motion.id = 'studio-effect-live-motion';
+  motion.textContent = 'Motion: detecting…';
+  statusRow.append(badge, motion);
+  wrap.appendChild(statusRow);
+
+  // ── Controls ──
+  const controls = document.createElement('div');
+  controls.className = 'studio-effect-live-controls';
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.id = 'studio-effect-live-toggle';
+  toggle.className = 'btn btn-secondary studio-upload-btn';
+  const restart = document.createElement('button');
+  restart.type = 'button';
+  restart.id = 'studio-effect-live-restart';
+  restart.className = 'btn btn-secondary studio-upload-btn';
+  restart.textContent = 'Restart';
+  restart.title = 'Re-create the effect and start it again (preview only)';
+  controls.append(toggle, restart);
+  wrap.appendChild(controls);
+
+  const hint = document.createElement('p');
+  hint.className = 'studio-prop-hint';
+  hint.textContent = 'A real preview, rendered by the same effect engine your public profile uses. Pausing, resuming and restarting change nothing about your design.';
+  wrap.appendChild(hint);
+
+  // ── Start the preview once the node is in the document ──
+  queueMicrotask(() => {
+    if (!layer.isConnected) return;
+    startLiveEffect(layer, state);
+  });
+
+  return wrap;
+}
+
+/**
+ * CREATOR-13: (re)start the Live View for a layer and wire its controls.
+ * Always tears the previous preview down first, so switching effects can never
+ * leave two animation loops competing for the same surface.
+ */
+function startLiveEffect(layer, state) {
+  stopLiveEffect();
+  liveEffectLayer = layer;
+  liveEffectPaused = false;
+  liveEffectMotion = 'detecting';
+
+  const def = effectDefinitionFor(state.active.effectId);
+  const engine = (def && def.engine) || 'particles';
+  const bounds = { width: LIVE_VIEW_W, height: LIVE_VIEW_H };
+
+  applyProfileBackgroundEffect(
+    { enabled: true, effectId: state.active.effectId, source: state.active.source, config: state.active.config || {} },
+    { layer, creatorEffect: installedEffectDefinition(state.active.effectId), bounds },
+  );
+
+  liveEffectController = getEffectController(layer);
+  // The probe reads the live surface's own pixels, so "ACTIVE" means the creator
+  // can see movement — not merely that a loop is running.
+  liveEffectProbe = createMotionProbe(layer.querySelector('canvas'), { sampleSize: 48, intervalMs: 220 });
+  liveEffectProbe.start();
+  liveEffectWatchdog = setTimeout(() => {
+    if (liveEffectMotion === 'detecting' && !liveEffectProbe.moved) {
+      liveEffectMotion = 'no-movement';
+    }
+    updateLiveEffectStatus(engine);
+  }, 1400);
+  // A cheap ticker so the Motion label follows the probe. It only reads state and
+  // writes a few text nodes — no pixel work — and the probe itself samples on its
+  // own interval, so the cost is bounded and never touches the draw loop.
+  liveEffectTicker = setInterval(() => updateLiveEffectStatus(engine), 250);
+  updateLiveEffectStatus(engine);
+  wireLiveEffectControls();
+}
+
+/** Tear the Live View down completely: loop, probe, watchdog, ticker and timers. */
+function stopLiveEffect() {
+  if (liveEffectWatchdog) { clearTimeout(liveEffectWatchdog); liveEffectWatchdog = null; }
+  if (liveEffectTicker) { clearInterval(liveEffectTicker); liveEffectTicker = null; }
+  if (liveEffectProbe) { liveEffectProbe.stop(); liveEffectProbe = null; }
+  if (liveEffectLayer) {
+    clearProfileBackgroundEffect(liveEffectLayer);
+    liveEffectLayer = null;
+  }
+  liveEffectController = null;
+  liveEffectPaused = false;
+}
+
+function wireLiveEffectControls() {
+  const toggle = root?.querySelector('#studio-effect-live-toggle');
+  const restart = root?.querySelector('#studio-effect-live-restart');
+  if (toggle) {
+    toggle.addEventListener('click', () => {
+      const controller = getEffectController(liveEffectLayer);
+      if (!controller) return;
+      if (liveEffectPaused) {
+        controller.resume();
+        liveEffectPaused = false;
+        if (liveEffectProbe) { liveEffectProbe.reset(); liveEffectProbe.start(); }
+      } else {
+        controller.pause();
+        liveEffectPaused = true;
+      }
+      // Report the pause as a fact about the preview, not the design.
+      liveEffectMotion = liveEffectPaused ? 'paused' : 'detecting';
+      updateLiveEffectStatus();
+    });
+  }
+  if (restart) {
+    restart.addEventListener('click', () => {
+      const controller = getEffectController(liveEffectLayer);
+      if (!controller) return;
+      // Restart rebuilds the effect from the same definition: preview only, and
+      // the design is not touched or marked dirty.
+      liveEffectPaused = false;
+      controller.restart();
+      liveEffectController = getEffectController(liveEffectLayer);
+      if (liveEffectProbe) { liveEffectProbe.reset(); liveEffectProbe.start(); }
+      liveEffectMotion = 'detecting';
+      updateLiveEffectStatus();
+    });
+  }
+}
+
+function updateLiveEffectStatus(engine) {
+  const badge = root?.querySelector('#studio-effect-live-badge');
+  const motionEl = root?.querySelector('#studio-effect-live-motion');
+  const toggle = root?.querySelector('#studio-effect-live-toggle');
+  if (!badge || !motionEl || !toggle) return;
+
+  const reduce = prefersReducedMotion();
+  if (reduce) {
+    badge.textContent = 'STATIC';
+    badge.dataset.state = 'static';
+    motionEl.textContent = 'Motion: REDUCED MOTION';
+    motionEl.dataset.motion = 'reduced';
+    toggle.textContent = 'Play';
+    return;
+  }
+  if (liveEffectPaused) {
+    badge.textContent = 'PAUSED';
+    badge.dataset.state = 'paused';
+    motionEl.textContent = 'Motion: PAUSED';
+    motionEl.dataset.motion = 'paused';
+    toggle.textContent = 'Play';
+    return;
+  }
+  badge.textContent = 'LIVE';
+  badge.dataset.state = 'live';
+  toggle.textContent = 'Pause';
+
+  // A loop that runs without moving anything must not be reported as ACTIVE.
+  if (liveEffectProbe && liveEffectProbe.moved) {
+    liveEffectMotion = 'active';
+    motionEl.textContent = 'Motion: ACTIVE';
+    motionEl.dataset.motion = 'active';
+  } else if (liveEffectMotion === 'detecting') {
+    motionEl.textContent = 'Motion: detecting…';
+    motionEl.dataset.motion = 'detecting';
+  } else {
+    motionEl.textContent = engine === 'particles'
+      ? 'Motion: NO MOVEMENT DETECTED'
+      : 'Motion: CSS-animated';
+    motionEl.dataset.motion = 'no-movement';
+  }
+}
+// ── CREATOR-13: Live View state ───────────────────────────────────────────────
+// All preview-only. None of it is design state: the layer, the controller, the
+// pixel probe and the watchdog describe a LIVE VIEW, and every one of them is
+// torn down on teardown, on effect switch, and on panel rebuild.
+const LIVE_VIEW_W = 320;
+const LIVE_VIEW_H = 180;
+let liveEffectLayer = null;
+let liveEffectController = null;
+let liveEffectProbe = null;
+let liveEffectWatchdog = null;
+let liveEffectTicker = null;
+let liveEffectPaused = false;
+let liveEffectMotion = 'detecting';
+
 let studioMotionQuery = null;
 let studioMotionHandler = null;
 let effectPlaybackObserver = null;
 let lastPlaybackMotion = null;
-
-function effectPlaybackState() {
-  const layer = root?.querySelector('#studio-profile-effect-layer');
-  const motion = layer?.dataset?.motion || 'none';
-  const frame = Number(layer?.dataset?.frame);
-  return {
-    motion,
-    frame: Number.isFinite(frame) ? frame : null,
-    animated: motion === 'animated',
-    staticFrame: motion === 'static',
-  };
-}
 
 /**
  * CREATOR-10C: keep the playback badge a LIVE view of the renderer.
@@ -3815,6 +4026,8 @@ export function destroyCreatorStudioPage() {
   }
   studioMotionQuery = null;
   studioMotionHandler = null;
+  // CREATOR-13: never leave a Live View loop, probe or timer behind.
+  stopLiveEffect();
   try { effectPlaybackObserver?.disconnect(); } catch { /* best effort */ }
   effectPlaybackObserver = null;
   lastPlaybackMotion = null;

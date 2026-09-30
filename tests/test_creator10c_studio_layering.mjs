@@ -242,8 +242,21 @@ check(f2.frame - f1.frame >= 3,
   `playback is real, not a single extra frame (${f2.frame - f1.frame} frames in 400ms)`);
 
 // The Studio panel must say ANIMATED, not claim something else.
-const badge = await page.$eval('#studio-effect-playback', el => el.textContent.trim()).catch(() => null);
-check(/ANIMATED/.test(badge || ''), `the Studio panel reports ANIMATED, got ${JSON.stringify(badge)}`);
+// CREATOR-13 moved the playback readout into the Live View, which states the
+// same facts from the same renderer state: a play-state badge and a Motion line.
+// Both are read so this still guards "the Studio panel does not lie about
+// playback" without depending on how the wording is split.
+const readLivePanel = () => page.evaluate(() => {
+  const badge = document.querySelector('#studio-effect-live-badge');
+  const motion = document.querySelector('#studio-effect-live-motion');
+  return {
+    badge: badge ? badge.textContent.trim() : null,
+    motion: motion ? motion.textContent.trim() : null,
+  };
+});
+const badge = await readLivePanel();
+check(/LIVE/.test(badge.badge || '') && /ACTIVE/.test(badge.motion || ''),
+  `the Studio panel reports the effect as playing, got ${JSON.stringify(badge)}`);
 
 // ── Reduced motion: static, no playback, still visible ──
 await setMotion('reduce');
@@ -263,9 +276,9 @@ const stillVisible = await page.evaluate(() => {
   return n;
 });
 check(stillVisible > 0, `the effect stays visible as a still frame under reduced motion (${stillVisible} samples)`);
-const badgeStatic = await page.$eval('#studio-effect-playback', el => el.textContent.trim()).catch(() => null);
-check(/STATIC/.test(badgeStatic || '') && /REDUCED MOTION/i.test(badgeStatic || ''),
-  `the Studio panel says STATIC — REDUCED MOTION, got ${JSON.stringify(badgeStatic)}`);
+const badgeStatic = await readLivePanel();
+check(/STATIC/.test(badgeStatic.badge || '') && /REDUCED MOTION/i.test(badgeStatic.motion || ''),
+  `the Studio panel says STATIC - REDUCED MOTION, got ${JSON.stringify(badgeStatic)}`);
 
 // Motion returns when the preference is lifted, with no reload.
 await setMotion('no-preference');

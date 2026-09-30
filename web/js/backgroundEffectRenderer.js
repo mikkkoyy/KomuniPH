@@ -31,16 +31,28 @@ import { clampEffectConfig, resolveEffectConfig, EFFECT_LIMITS } from './backgro
 
 export const EFFECT_LAYER_ID = 'profile-background-effect-layer';
 
-let activeController = null;
-let activeMotionQuery = null;
-let activeMotionHandler = null;
+// CREATOR-13: an effect's playback state is owned PER LAYER, not per module.
+//
+// This used to be a single module-level controller, which works for a public
+// profile (one layer) but cannot host two: starting the Studio's Live View would
+// tear down the effect already playing on the design canvas, and vice versa. Keyed
+// by layer, several surfaces can render independently and each one is stopped by
+// touching only its own layer.
+//
+// The engine is unchanged — this is ownership bookkeeping, not a second renderer.
+const layerControllers = new WeakMap();
+const layerMotion = new WeakMap();
 
-function detachMotionListener() {
-  if (activeMotionQuery && typeof activeMotionQuery.removeEventListener === 'function' && activeMotionHandler) {
-    activeMotionQuery.removeEventListener('change', activeMotionHandler);
+function stopLayerEffect(target) {
+  if (!target) return;
+  const controller = layerControllers.get(target);
+  if (controller && controller.stop) controller.stop();
+  layerControllers.delete(target);
+  const motion = layerMotion.get(target);
+  if (motion && motion.mql && motion.handler && typeof motion.mql.removeEventListener === 'function') {
+    motion.mql.removeEventListener('change', motion.handler);
   }
-  activeMotionQuery = null;
-  activeMotionHandler = null;
+  layerMotion.delete(target);
 }
 
 /** True when the visitor (or the Studio) has asked for reduced motion. */
@@ -50,14 +62,13 @@ export function prefersReducedMotion() {
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
-/** Remove any running effect and empty the layer. Safe to call when absent. */
+/**
+ * Stop this layer's effect and empty it. Other layers are untouched.
+ * Safe to call when there is no layer.
+ */
 export function clearProfileBackgroundEffect(layer) {
-  if (activeController && activeController.stop) {
-    activeController.stop();
-    activeController = null;
-  }
-  detachMotionListener();
   const target = layer || document.getElementById(EFFECT_LAYER_ID);
+  stopLayerEffect(target);
   if (target) {
     target.replaceChildren();
     // Never leave a stale frame count or motion marker behind: a cleared layer
@@ -66,6 +77,91 @@ export function clearProfileBackgroundEffect(layer) {
     delete target.dataset.motion;
   }
   return target;
+}
+
+/** The controller for a layer, so a caller can pause/resume/restart it. */
+export function getEffectController(layer) {
+  const target = layer || document.getElementById(EFFECT_LAYER_ID);
+  return target ? (layerControllers.get(target) || null) : null;
+}
+
+/**
+ * CREATOR-13: a lightweight probe that answers "is anything actually MOVING on
+ * this surface?" using the rendered pixels rather than a frame counter.
+ *
+ * A climbing frame counter only proves `requestAnimationFrame` is being called —
+ * an effect that runs a loop but never moves the particles would still report
+ * ACTIVE, which is exactly the failure a creator cannot see. So this samples a
+ * SMALL fixed region of the surface on an interval and compares it with the
+ * previous sample.
+ *
+ * It is deliberately cheap and bounded:
+ *   • a fixed small region (not the whole canvas), so cost does not scale with
+ *     canvas size;
+ *   • an interval timer, not per-frame, so it never runs inside the draw loop;
+ *   • `willReadFrequently`, so the browser does not fight the readback;
+ *   • `stop()` detaches the timer and drops the stored state.
+ *
+ * It reports a *fact about pixels*, not an opinion: `moved` is true only when the
+ * sampled region genuinely differs from the previous sample.
+ */
+export function createMotionProbe(canvas, { sampleSize = 48, intervalMs = 220 } = {}) {
+  let timer = null;
+  let previous = null;
+  let moved = false;
+  let samples = 0;
+
+  const readRegion = () => {
+    if (!canvas || !canvas.width || !canvas.height) return null;
+    try {
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return null;
+      const w = Math.min(sampleSize, canvas.width);
+      const h = Math.min(sampleSize, canvas.height);
+      // A region in the middle of the surface, where particles are densest.
+      const x = Math.max(0, Math.floor((canvas.width - w) / 2));
+      const y = Math.max(0, Math.floor((canvas.height - h) / 2));
+      const data = ctx.getImageData(x, y, w, h).data;
+      // A compact signature: total alpha-weighted brightness across the region,
+      // plus a coarse checksum, so both "things moved" and "things appeared"
+      // register without retaining the whole buffer.
+      let sum = 0;
+      let checksum = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        sum += data[i] + data[i + 1] + data[i + 2] + data[i + 3];
+        checksum = (checksum + data[i] * 3 + data[i + 3] * 7) % 1000003;
+      }
+      return `${sum}:${checksum}`;
+    } catch {
+      return null;
+    }
+  };
+
+  const tick = () => {
+    const sig = readRegion();
+    if (sig === null) return;
+    if (previous !== null && sig !== previous) moved = true;
+    previous = sig;
+    samples += 1;
+  };
+
+  return {
+    start() {
+      this.stop();
+      moved = false;
+      samples = 0;
+      previous = null;
+      tick();
+      timer = setInterval(tick, intervalMs);
+    },
+    stop() {
+      if (timer) { clearInterval(timer); timer = null; }
+    },
+    reset() { moved = false; samples = 0; previous = null; },
+    /** True once a sample differed from the previous one. */
+    get moved() { return moved; },
+    get samples() { return samples; },
+  };
 }
 
 /**
@@ -143,17 +239,37 @@ export function applyProfileBackgroundEffect(effect, { layer, creatorEffect, red
   // attached here — for every engine and for the still-frame case too — because
   // a still frame is exactly the state that most needs a way to start animating
   // again when the preference is lifted.
+  //
+  // Keyed by layer, so a Live View and the design canvas each keep their own.
   if (typeof window.matchMedia === 'function') {
     try {
-      activeMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
-      activeMotionHandler = () => reapply();
-      if (typeof activeMotionQuery.addEventListener === 'function') {
-        activeMotionQuery.addEventListener('change', activeMotionHandler);
+      const mql = window.matchMedia('(prefers-reduced-motion: reduce)');
+      const handler = () => reapply();
+      if (typeof mql.addEventListener === 'function') {
+        mql.addEventListener('change', handler);
+        layerMotion.set(target, { mql, handler });
       }
     } catch { /* the preference is simply not observable here */ }
   }
 
-  if (resolved.engine === 'particles') return renderParticles(target, resolved, config, reduce, bounds, reapply);
+  // Remember how to re-enter this effect, so Pause/Resume and Restart are
+  // preview operations that never touch the design. Engines overwrite
+  // pause/resume/playing with their own loop-aware implementations.
+  const request = { effect, creatorEffect, reducedMotion, bounds };
+  const controller = {
+    /** Re-apply from scratch: this layer's renderer is stopped and rebuilt. */
+    restart() { applyProfileBackgroundEffect(request.effect, { layer: target, ...request }); },
+    pause() { target.dataset.motion = 'paused'; },
+    resume() { target.dataset.motion = 'animated'; },
+    playing: false,
+    stop() {},
+  };
+  layerControllers.set(target, controller);
+
+  if (resolved.engine === 'particles') {
+    renderParticles(target, resolved, config, reduce, bounds, reapply, controller);
+    return true;
+  }
   if (resolved.engine === 'atmosphere') return renderAtmosphere(target, config, reduce);
   if (resolved.engine === 'lighting') return renderLighting(target, config, reduce);
   if (resolved.engine === 'overlay') return renderOverlay(target, config);
@@ -161,7 +277,7 @@ export function applyProfileBackgroundEffect(effect, { layer, creatorEffect, red
 }
 
 // ── Engine: particles ────────────────────────────────────────────────────────
-function renderParticles(target, resolved, config, reduce, bounds, reapply) {
+function renderParticles(target, resolved, config, reduce, bounds, reapply, controller) {
   const canvas = document.createElement('canvas');
   canvas.className = 'profile-bg-effect-canvas';
   canvas.setAttribute('aria-hidden', 'true');
@@ -346,27 +462,31 @@ function renderParticles(target, resolved, config, reduce, bounds, reapply) {
   const onResize = () => { resize(); if (reduce) draw(0); };
   window.addEventListener('resize', onResize);
 
-  // A visitor who turns on "reduce motion" at the OS level should see the effect
-  // stop WITHOUT reloading the page. Re-apply on the preference change and drop
-  // the running loop, so the change is immediate rather than waiting for
-  // whatever re-render happens to come next.
-  let mql = null;
-  const onMotionChange = () => {
-    clearProfileBackgroundEffect(target);
-    reapply();
+  // Pause/Resume own the loop: cancelling the rAF is what actually stops the
+  // animation, rather than leaving it running and simply not drawing. Resuming
+  // resets `last` so the first frame after a pause does not jump by the whole
+  // paused duration.
+  const stopLoop = () => { if (raf) { cancelAnimationFrame(raf); raf = 0; } };
+  const startLoop = () => {
+    if (raf) return;
+    last = 0;
+    raf = requestAnimationFrame(frame);
   };
-  if (typeof window.matchMedia === 'function') {
-    mql = window.matchMedia('(prefers-reduced-motion: reduce)');
-    if (typeof mql.addEventListener === 'function') mql.addEventListener('change', onMotionChange);
-  }
+  controller.pause = () => {
+    stopLoop();
+    target.dataset.motion = 'paused';
+  };
+  controller.resume = () => {
+    if (reduce) return;
+    startLoop();
+    target.dataset.motion = 'animated';
+  };
+  controller.stop = () => {
+    stopLoop();
+    window.removeEventListener('resize', onResize);
+  };
+  controller.playing = !!raf;
 
-  activeController = {
-    stop() {
-      cancelAnimationFrame(raf);
-      window.removeEventListener('resize', onResize);
-      if (mql && typeof mql.removeEventListener === 'function') mql.removeEventListener('change', onMotionChange);
-    },
-  };
   return true;
 }
 

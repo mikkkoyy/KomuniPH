@@ -587,62 +587,25 @@
   min-width: 100%;
   min-height: 100%;
   overflow: hidden;
-  /* CREATOR-10B: the design canvas FLOATS on the viewer backdrop, so it has to
-     paint above it. It stays exactly 960x1200 and keeps its own zoom/pan
-     transform — only its stacking against the backdrop changed. */
   position: relative;
-  z-index: 1;
 }
 
-/* CREATOR-10B: the Profile Background EFFECT backdrop.
-   It fills the whole VIEWER rather than the 960x1200 design canvas, which is what
-   makes an uploaded background read as the background of the profile instead of a
-   rectangle drawn inside it — matching the published profile, where the backdrop
-   is a fixed full-viewport layer behind the content. It is pure decoration: no
-   geometry, not a component, `pointer-events: none`, and absent from Layers.
+/* -- CREATOR-10C: the Profile Background image and effect are layers OF the
+   design canvas, not a viewer-wide backdrop.
 
-   It is empty and fully transparent until a background is actually active, and
-   the canvas keeps its own light surface in that case, so a design with no
-   background looks precisely as it did. */
-#studio-profile-backdrop {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  overflow: hidden;
-  pointer-events: none;
-  border-radius: inherit;
-}
-#studio-profile-backdrop[data-profile-backdrop="none"] { display: none; }
-#studio-profile-backdrop .studio-profile-background,
-#studio-profile-backdrop .studio-profile-effect-layer {
-  position: absolute;
-  inset: 0;
-}
-/* CREATOR-10C: the canvas is the FOREGROUND editing surface.
-   It used to go fully `transparent` whenever a background was active, which
-   removed the canvas's own surface entirely: the picture then showed through
-   every part of the 960x1200 document and the canvas stopped reading as a
-   sheet at all — the "background painted inside the canvas" result.
+   The canvas stops painting its own light surface when a background is really
+   behind it, so the picture IS the canvas background: a bounded 960x1200
+   panel with the profile structure, guide cards and components drawn over it,
+   and the plain viewer surface around it.
 
-   So it is a SUBTLE surface rather than either extreme: opaque enough that the
-   canvas is unmistakably a distinct foreground panel sitting on the backdrop,
-   translucent enough that the viewer background and the effect layer beneath it
-   still read through as a soft presence instead of being cut off at the canvas
-   edge. The border and shadow are what really sell it as a floating sheet, and
-   they are what the eye uses to tell "panel on top of background" apart from
-   "background showing through a hole".
-
-   This is the CANVAS surface only. The profile skeleton and guide cards keep
-   their own low-fill CREATOR-10B treatment — the compounded ~80% white problem
-   those fixed is not brought back. */
-#studio-canvas-document.studio-canvas-transparent {
-  background:
-    linear-gradient(180deg, rgba(250, 251, 253, 0.80) 0%, rgba(237, 241, 247, 0.80) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.55);
-  box-shadow:
-    0 18px 50px -18px rgba(0, 0, 0, 0.8),
-    0 0 0 1px rgba(15, 23, 42, 0.18);
-}
+   An earlier iteration painted the background across the whole viewer instead.
+   That made the image read as escaping the canvas and smeared it under the
+   studio chrome, so the profile structure became far harder to read over a
+   busy picture. The canvas is still exactly 960x1200 with its own zoom/pan
+   transform and its own saved coordinate system; only where the decoration is
+   painted changed. The profile skeleton and guide cards keep their own
+   low-fill CREATOR-10B treatment either way. */
+#studio-canvas-document.studio-canvas-transparent { background: transparent; }
 #studio-zoom-layer {
   transform-origin: 0 0;
   display: inline-block;
@@ -729,15 +692,15 @@
    card per module, then a guide card on top of each module. At their previous
    alphas that compounded to roughly 80% white across the entire content area, so
    an uploaded background was legible only in the margins and the canvas read as a
-   pale screen sitting on top of the picture — the same complaint as the public
+   pale screen sitting on top of the picture ï¿½ the same complaint as the public
    profile, reproduced in the editor.
 
    The fix mirrors the public profile: the areas still exist and still show where
    each module goes, but they are delineated by BORDER rather than by fill.
-     • the outer background area carries no fill at all — the uploaded image is
+     ï¿½ the outer background area carries no fill at all ï¿½ the uploaded image is
        already painted directly beneath it, so a white wash here only hid it;
-     • a column is a boundary, not a surface, so its fill is nearly nothing;
-     • a module card is a placement marker over the picture, so it stays very
+     ï¿½ a column is a boundary, not a surface, so its fill is nearly nothing;
+     ï¿½ a module card is a placement marker over the picture, so it stays very
        translucent and leans on its border.
 
    Labels sit on a photograph rather than on a flat fill, so they get a small
@@ -1394,13 +1357,16 @@
 }
 
 /* ---------------------------------------------------------------------------
-   CREATOR-12 — the Profile Background EFFECT in the Creator Studio.
+   CREATOR-12 - the Profile Background EFFECT in the Creator Studio.
 
-   Same stacking as the public profile, expressed on the canvas:
+   Same stacking as the public profile, expressed on the design canvas:
 
      .studio-profile-background      (the picture, z-index 0)
      .studio-profile-effect-layer   (the effect,  z-index 1)
      .studio-profile-skeleton + components (the profile, above both)
+
+   Both are layers OF the 960x1200 canvas, not a viewer-wide backdrop, so the
+   effect covers the design area the same way the picture does.
 
    The effect layer is Studio-only chrome with no data-comp-id, so it can never be
    selected, dragged, resized or listed in Layers: individual particles are
@@ -1410,9 +1376,12 @@
 
 #studio-canvas-inner .studio-profile-effect-layer {
   position: absolute;
+  /* Covers the design canvas, exactly like the background layer beside it. Without
+     this the layer had no box of its own, so only the canvas the renderer
+     creates inside it had a size. */
+  inset: 0;
   pointer-events: none;
   z-index: 1;
-  overflow: hidden;
 }
 #studio-canvas-inner .studio-profile-effect-layer:empty { display: none; }
 #studio-canvas-inner .studio-profile-effect-layer canvas {

@@ -130,52 +130,38 @@ const sampleCanvas = async () => {
 };
 const isBg = (p) => !!p && Math.abs(p[0] - BG[0]) + Math.abs(p[1] - BG[1]) + Math.abs(p[2] - BG[2]) < 70;
 
-// ── 1. No background: the canvas keeps its own surface, exactly as before ──────
-await openDesign(withBg);
-const noBgState = await page.evaluate(() => {
-  const backdrop = document.querySelector('#studio-profile-backdrop');
-  const doc = document.querySelector('#studio-canvas-document');
-  return {
-    backdrop: backdrop ? backdrop.dataset.profileBackdrop : null,
-    transparent: doc ? doc.classList.contains('studio-canvas-transparent') : null,
-    docBackground: doc ? getComputedStyle(doc).backgroundImage : '',
-  };
-});
-
-await openDesign(await (async () => {
+// -- 1. No background: the canvas keeps its own surface, exactly as before --
+const noBgId = await (async () => {
   const list = await fetch(`${BASE}/api/profile/design`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json());
   return list.designs.find(d => d.name === 'NoBg').id;
-})());
+})();
+await openDesign(noBgId);
 const noBg = await page.evaluate(() => {
-  const backdrop = document.querySelector('#studio-profile-backdrop');
+  const layer = document.querySelector('#studio-profile-background');
   const doc = document.querySelector('#studio-canvas-document');
   return {
-    backdrop: backdrop ? backdrop.dataset.profileBackdrop : null,
+    bgState: layer ? layer.dataset.profileBackground : null,
     transparent: doc ? doc.classList.contains('studio-canvas-transparent') : null,
     docBackground: doc ? getComputedStyle(doc).backgroundImage : '',
   };
 });
-eq(noBg.backdrop, 'none', 'with no background the backdrop reports none');
+eq(noBg.bgState, 'none', 'with no background the layer reports none');
 eq(noBg.transparent, false, 'with no background the canvas keeps its own surface');
 check(/gradient|rgb/.test(noBg.docBackground), 'with no background the canvas still paints its own surface');
 
-// ── 2. With a background: it fills the viewer, the canvas floats on top ───────
+// -- 2. With a background it is a layer OF the 960x1200 canvas --
 await openDesign(withBg);
 const withBgState = await page.evaluate(() => {
-  const backdrop = document.querySelector('#studio-profile-backdrop');
   const layer = document.querySelector('#studio-profile-background');
-  const inner = document.querySelector('#studio-canvas-inner');
   const doc = document.querySelector('#studio-canvas-document');
   const lr = layer?.getBoundingClientRect();
-  const sr = document.querySelector('#studio-canvas-scroll')?.getBoundingClientRect();
-  const z = (el) => (el ? parseInt(getComputedStyle(el).zIndex || '0', 10) : null);
+  const dr = doc?.getBoundingClientRect();
   return {
-    backdrop: backdrop ? backdrop.dataset.profileBackdrop : null,
     bgState: layer ? layer.dataset.profileBackground : null,
     src: layer?.querySelector('img')?.getAttribute('src') || '',
     transparent: doc ? doc.classList.contains('studio-canvas-transparent') : null,
-    fillsViewer: !!lr && !!sr && Math.abs(lr.width - sr.width) <= 2 && Math.abs(lr.height - sr.height) <= 2,
-    backdropZ: z(backdrop), innerZ: z(inner),
+    coversCanvas: !!lr && !!dr && Math.abs(lr.width - dr.width) <= 2 && Math.abs(lr.height - dr.height) <= 2,
+    insideDoc: !!doc?.contains(layer),
     // The design canvas itself is unchanged: still 960x1200.
     canvasW: doc ? doc.style.width : '',
     canvasH: doc ? doc.style.minHeight : '',
@@ -187,25 +173,24 @@ const withBgState = await page.evaluate(() => {
       const g = document.querySelector('#studio-profile-skeleton [data-skeleton-module="gallery"]');
       return g ? g.dataset.skeletonColumn : null;
     })(),
-    backdropIsComponent: document.querySelectorAll('#studio-profile-backdrop[data-comp-id]').length,
+    bgIsComponent: document.querySelectorAll('#studio-profile-background[data-comp-id]').length,
   };
 });
-eq(withBgState.backdrop, 'set', 'with a background the backdrop is shown');
 eq(withBgState.bgState, 'set', 'the background layer reports set');
 check(/\/uploads\/creator\//.test(withBgState.src), 'the background is the uploaded source');
-check(withBgState.fillsViewer, 'the background fills the whole viewer, not a rectangle inside the canvas');
-eq(withBgState.transparent, true, 'the canvas stops painting over the background');
-check(withBgState.backdropZ < withBgState.innerZ, 'the canvas floats above the backdrop');
+check(withBgState.insideDoc, 'the background is a layer of the design canvas');
+check(withBgState.coversCanvas, 'the background covers exactly the 960x1200 canvas');
+eq(withBgState.transparent, true, 'the canvas stops painting over its own background');
 eq(withBgState.canvasW, '960px', 'the design canvas is still 960 wide');
 eq(withBgState.canvasH, '1200px', 'the design canvas is still 1200 tall');
-eq(withBgState.backdropIsComponent, 0, 'the backdrop is not a design component');
+eq(withBgState.bgIsComponent, 0, 'the background is not a design component');
 
 // ── 3. The measured pixels ───────────────────────────────────────────────────
 // CREATOR-10C changed what this must assert. It used to require the background to
 // be visible ACROSS the canvas, which is exactly the fully-transparent canvas
 // that CREATOR-10C removed: the canvas has to be a distinct FOREGROUND sheet now.
-// The background is therefore shown in the VIEWER, around the canvas, and the
-// canvas interior must be its own surface rather than the raw picture.
+// The background is therefore shown INSIDE the 960x1200 canvas, and the viewer
+// around it stays the plain studio surface.
 const sampleAt = async (shot, pt) => {
   try {
     const p = await sharp(shot).extract({ left: Math.round(pt[0]), top: Math.round(pt[1]), width: 1, height: 1 }).raw().toBuffer();
@@ -215,7 +200,7 @@ const sampleAt = async (shot, pt) => {
 const frame = await page.evaluate(() => {
   const s = document.querySelector('#studio-canvas-scroll').getBoundingClientRect();
   const d = document.querySelector('#studio-canvas-document').getBoundingClientRect();
-  // A viewer margin that is genuinely outside the canvas.
+  // A viewer point genuinely outside the canvas.
   const margin = d.left > s.left + 12
     ? [s.left + 5, s.top + s.height / 2]
     : [s.left + 5, s.top + 5];
@@ -230,16 +215,38 @@ const marginPx = await sampleAt(shot, frame.margin);
 const canvasPx = await sampleAt(shot, frame.canvas);
 const isBgColour = (p) => !!p && Math.abs(p[0] - BG[0]) + Math.abs(p[1] - BG[1]) + Math.abs(p[2] - BG[2]) < 70;
 
-check(isBgColour(marginPx),
-  `the background is visible in the viewer around the canvas (got ${JSON.stringify(marginPx)})`);
-check(!isBgColour(canvasPx),
-  `the canvas interior is not the raw background, so it reads as a surface (got ${JSON.stringify(canvasPx)})`);
+check(isBgColour(canvasPx),
+  `the background is visible inside the canvas (got ${JSON.stringify(canvasPx)})`);
+check(!isBgColour(marginPx),
+  `the viewer around the canvas is NOT the background any more (got ${JSON.stringify(marginPx)})`);
 const dist = (a, b) => (a && b) ? Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) : 0;
 check(dist(canvasPx, marginPx) > 40,
-  `the canvas surface is visibly distinct from the backdrop (${dist(canvasPx, marginPx)}/765 apart)`);
+  `the canvas is clearly distinguishable from the viewer around it (${dist(canvasPx, marginPx)}/765 apart)`);
 
-// And the structure still must not bury the background where the backdrop is
-// genuinely exposed — compare against the same render with the chrome hidden.
+// And the structure is genuinely drawn OVER the background without burying it:
+// a grid across the canvas, sampled with the structure shown and hidden. Both
+// directions matter — a canvas full of opaque cards would fail the first, and a
+// canvas with no visible cards at all would fail the second.
+const gridPoints = await page.evaluate(() => {
+  const d = document.querySelector('#studio-canvas-document').getBoundingClientRect();
+  const s = document.querySelector('#studio-canvas-scroll').getBoundingClientRect();
+  const x0 = Math.max(d.left, s.left); const x1 = Math.min(d.right, s.right);
+  const y0 = Math.max(d.top, s.top); const y1 = Math.min(d.bottom, s.bottom);
+  const pts = [];
+  for (let fx = 0.1; fx <= 0.9; fx += 0.1) {
+    for (let fy = 0.1; fy <= 0.9; fy += 0.1) {
+      pts.push([Math.round(x0 + (x1 - x0) * fx), Math.round(y0 + (y1 - y0) * fy)]);
+    }
+  }
+  return pts;
+});
+const readGrid = async (buf) => {
+  const out = [];
+  for (const pt of gridPoints) out.push(await sampleAt(buf, pt));
+  return out;
+};
+const shownGrid = await readGrid(shot);
+
 await page.evaluate(() => {
   document.querySelectorAll('#studio-profile-skeleton, .studio-guide-card').forEach((el) => {
     el.dataset.c10bsSaved = el.style.display;
@@ -247,15 +254,19 @@ await page.evaluate(() => {
   });
 });
 await new Promise(r => setTimeout(r, 400));
-const bare = await sampleAt(await page.screenshot({ encoding: 'binary' }), frame.margin);
+const bareGrid = await readGrid(await page.screenshot({ encoding: 'binary' }));
 await page.evaluate(() => {
   document.querySelectorAll('[data-c10bs-saved]').forEach((el) => { el.style.display = el.dataset.c10bsSaved; });
 });
-// The Studio chrome is a viewer backdrop, not canvas content, so hiding the
-// structure must leave the exposed background exactly as it was.
-const bareDist = dist(marginPx, bare);
-check(bareDist < 30,
-  `the Studio structure does not alter the exposed background (${bareDist}/765 apart with it hidden)`);
+
+const rawShown = shownGrid.filter(isBgColour).length;
+const rawBare = bareGrid.filter(isBgColour).length;
+check(rawBare > shownGrid.length * 0.6,
+  `hiding the structure exposes the raw background (${rawBare}/${shownGrid.length} samples)`);
+check(rawShown > 0,
+  `the raw background is still visible with the structure shown (${rawShown}/${shownGrid.length})`);
+check(rawShown < rawBare,
+  `the structure is genuinely drawn over the background (${rawShown} visible with it, ${rawBare} without)`);
 
 // ── 4. Structure and controls survive ────────────────────────────────────────
 check(withBgState.skeletonCards >= 12, 'every real profile module is still drawn');

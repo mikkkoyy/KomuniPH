@@ -492,17 +492,6 @@ export function renderCreatorStudioPage() {
           </div>
           <div id="studio-viewer">
             <div id="studio-canvas-scroll">
-              <!-- CREATOR-10B: the Profile Background EFFECT backdrop. It fills the
-                   whole VIEWER, not the 960x1200 design canvas, so an uploaded
-                   background reads as the background of the editing area rather
-                   than as a rectangle sitting inside it - which is what a
-                   published profile does, where the backdrop is a fixed
-                   full-viewport layer. The canvas floats on top of it, so the
-                   design stays exactly 960x1200 and the viewer/canvas split
-                   CREATOR-10 locked is untouched. Empty and invisible until a
-                   background is actually active, so a design with none looks
-                   precisely as it did. -->
-              <div class="studio-profile-backdrop" id="studio-profile-backdrop" aria-hidden="true"></div>
               <div id="studio-canvas-inner"></div>
             </div>
             <div class="studio-viewer-height-grip" id="studio-viewer-height-grip"
@@ -1114,48 +1103,36 @@ function buildProfileSkeleton() {
 }
 
 /**
- * CREATOR-10B: render the Profile Background IMAGE and EFFECT into the viewer
- * backdrop, so they fill the whole editing area with the canvas floating on top.
+ * CREATOR-10C: render the Profile Background IMAGE and EFFECT inside the design
+ * canvas.
  *
- * The backdrop is a sibling of `#studio-canvas-inner` inside the clipping viewer,
- * not a child of the design document. That is what makes an uploaded background
- * read as the background of the profile rather than as a rectangle drawn inside
- * it — and it matches the published profile, where the backdrop is a fixed
- * full-viewport layer behind the content.
- *
- * The design canvas is untouched: still 960x1200, still zoomed and panned by its
- * own transform, still the saved coordinate system. Only the decoration moved out
- * of it. When no background is active the backdrop stays empty and the canvas
- * keeps its own surface, so a design with no background looks exactly as before.
+ * The background is a layer of the 960x1200 design, not a viewer-wide backdrop:
+ * a creator sees their image as the profile's own bounded background, sitting on
+ * the plain canvas surface, with the module outlines drawn over it. Painting it
+ * across the whole viewer instead made it read as escaping the canvas and
+ * smeared the image under the studio chrome, so the profile structure became
+ * much harder to read over a busy picture.
  *
  * Neither layer is a component: no geometry, no data-comp-id, pointer-events
- * none, and absent from Layers.
+ * none, and absent from Layers. Both always exist and carry a `none` state, so
+ * "is anything active?" is a single readable value in the DOM either way.
  */
-function renderStudioProfileBackdrop(doc) {
-  const backdrop = root?.querySelector('#studio-profile-backdrop');
-  if (!backdrop) return;
-  backdrop.replaceChildren();
-
+function renderStudioProfileLayers(doc) {
   const theme = designTheme();
   const url = backgroundImageUrl();
-  // The effect is a profile-wide layer too, so it shares the backdrop and the
-  // same viewer bounds.
+  // The effect is a profile-wide layer too, so it shares the canvas and the same
+  // design bounds.
   const effect = theme && typeof theme.backgroundEffect === 'object' ? theme.backgroundEffect : null;
   const effectActive = !!effect && effect.enabled !== false && !!effect.effectId;
+  if (!doc) return;
 
-  // The canvas only becomes transparent when a background image is really behind
-  // it. Otherwise it keeps its own light surface, exactly as before. `doc` is
-  // passed in because renderCanvas() has not attached it yet.
-  if (doc) doc.classList.toggle('studio-canvas-transparent', !!url);
-  const showing = !!url || effectActive;
-  backdrop.dataset.profileBackdrop = showing ? 'set' : 'none';
+  const c = canvas();
+  const canvasH = Math.max(c.minHeight, PROFILE_LAYOUT.background.height);
 
-  // Both layers are always created, even when there is nothing to show, and carry
-  // their `none` state in a data attribute. That keeps "is anything active?" a
-  // single readable value in the DOM whether the answer is yes or no, which is
-  // the same explicitness CREATOR-10A gave the Properties panel. The backdrop
-  // itself is hidden when there is nothing to show, so an empty layer is not a
-  // visible artefact.
+  // The canvas stops painting its own light surface when a background is really
+  // behind it, so the picture is not hidden by it.
+  doc.classList.toggle('studio-canvas-transparent', !!url);
+
   const imgLayer = document.createElement('div');
   imgLayer.className = 'studio-profile-background';
   imgLayer.id = 'studio-profile-background';
@@ -1173,25 +1150,24 @@ function renderStudioProfileBackdrop(doc) {
     img.style.objectPosition = theme.backgroundPosition || 'center';
     imgLayer.appendChild(img);
   }
-  backdrop.appendChild(imgLayer);
+  doc.appendChild(imgLayer);
 
   const effectLayer = document.createElement('div');
   effectLayer.className = 'studio-profile-effect-layer';
   effectLayer.id = 'studio-profile-effect-layer';
   effectLayer.setAttribute('aria-hidden', 'true');
   effectLayer.dataset.profileEffect = effectActive ? effect.effectId : 'none';
-  backdrop.appendChild(effectLayer);
+  doc.appendChild(effectLayer);
   if (!effectActive) return;
 
-  // The renderer needs a live, sized node, so this runs once it is attached.
-  // The bounds are the VIEWER, matching the published fixed backdrop.
+  // The renderer needs a live, sized node, so this runs once it is attached. The
+  // bounds are the DESIGN CANVAS, so the preview matches the published geometry.
   queueMicrotask(() => {
     if (!effectLayer.isConnected) return;
-    const box = backdrop.getBoundingClientRect();
     applyProfileBackgroundEffect(effect, {
       layer: effectLayer,
       creatorEffect: installedEffectDefinition(effect.effectId),
-      bounds: { width: Math.max(1, box.width), height: Math.max(1, box.height) },
+      bounds: { width: c.width, height: canvasH },
     });
   });
 }
@@ -1220,11 +1196,11 @@ function renderCanvas() {
     doc.appendChild(empty);
   }
 
-  // CREATOR-10B: the background image and effect now live in the VIEWER backdrop
-  // (a sibling of this element), not inside the design canvas, so an uploaded
-  // background fills the editing area with the canvas floating on top. Called
-  // here so every canvas render keeps the backdrop in step with the design.
-  renderStudioProfileBackdrop(doc);
+  // CREATOR-10C: the Profile Background image and effect are layers OF the design
+  // canvas, drawn first so the profile structure, guide cards and components all
+  // sit on top of them. Called here so every canvas render keeps them in step
+  // with the design.
+  renderStudioProfileLayers(doc);
 
   // CREATOR-10: the real profile structure is drawn FIRST, so every component
   // sits on top of it. It is Studio-only editing chrome, so Preview leaves it
@@ -2235,17 +2211,19 @@ function effectPlaybackState() {
  * times a second, stealing focus from whatever the creator is typing into.
  */
 function observeEffectPlayback() {
-  const backdrop = root?.querySelector('#studio-profile-backdrop');
-  if (!backdrop || typeof MutationObserver === 'undefined') return;
+  const scroll = root?.querySelector('#studio-canvas-scroll');
+  if (!scroll || typeof MutationObserver === 'undefined') return;
   try { effectPlaybackObserver?.disconnect(); } catch { /* best effort */ }
-  lastPlaybackMotion = backdrop.querySelector('#studio-profile-effect-layer')?.dataset?.motion || 'none';
+  lastPlaybackMotion = scroll.querySelector('#studio-profile-effect-layer')?.dataset?.motion || 'none';
   effectPlaybackObserver = new MutationObserver(() => {
     const motion = root?.querySelector('#studio-profile-effect-layer')?.dataset?.motion || 'none';
     if (motion === lastPlaybackMotion) return;
     lastPlaybackMotion = motion;
     renderProperties();
   });
-  effectPlaybackObserver.observe(backdrop, {
+  // The effect layer is REPLACED on every canvas render, so the mutation target
+  // is the scroll container, observed through its subtree.
+  effectPlaybackObserver.observe(scroll, {
     childList: true,
     subtree: true,
     attributes: true,

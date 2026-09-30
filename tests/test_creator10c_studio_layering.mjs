@@ -125,31 +125,32 @@ const readLayers = () => page.evaluate(() => {
   const q = (s) => document.querySelector(s);
   const rect = (s) => { const el = q(s); return el ? el.getBoundingClientRect() : null; };
   const z = (s) => { const el = q(s); return el ? parseInt(getComputedStyle(el).zIndex || '0', 10) : null; };
-  const backdrop = q('#studio-profile-backdrop');
-  const inner = q('#studio-canvas-inner');
-  const kids = backdrop ? Array.from(backdrop.children) : [];
+  const doc = q('#studio-canvas-document');
+  const kids = doc ? Array.from(doc.children) : [];
   const lr = rect('#studio-profile-background');
   const er = rect('#studio-profile-effect-layer');
-  const sr = rect('#studio-canvas-scroll');
   const dr = rect('#studio-canvas-document');
+  const idx = (id) => kids.findIndex(el => el.id === id);
   return {
-    backdropExists: !!backdrop,
-    backdropState: backdrop?.dataset.profileBackdrop ?? null,
     bgState: q('#studio-profile-background')?.dataset.profileBackground ?? null,
     effectState: q('#studio-profile-effect-layer')?.dataset.profileEffect ?? null,
-    bgIsViewerSized: !!lr && !!sr && Math.abs(lr.width - sr.width) <= 2 && Math.abs(lr.height - sr.height) <= 2,
-    effectIsViewerSized: !!er && !!sr && Math.abs(er.width - sr.width) <= 2 && Math.abs(er.height - sr.height) <= 2,
-    // DOM order inside the backdrop: background then effect.
-    bgBeforeEffect: kids.findIndex(el => el.id === 'studio-profile-background')
-      < kids.findIndex(el => el.id === 'studio-profile-effect-layer'),
-    backdropBeforeCanvas: backdrop && inner
-      ? (backdrop.compareDocumentPosition(inner) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
-      : false,
-    backdropZ: z('#studio-profile-backdrop'), innerZ: z('#studio-canvas-inner'),
+    // CREATOR-10C: the background and effect are layers OF the 960x1200 canvas,
+    // not a viewer-wide backdrop. They must cover the CANVAS, and must not spill
+    // into the viewer around it.
+    bgCoversCanvas: !!lr && !!dr
+      && Math.abs(lr.width - dr.width) <= 2 && Math.abs(lr.height - dr.height) <= 2,
+    effectCoversCanvas: !!er && !!dr
+      && Math.abs(er.width - dr.width) <= 2 && Math.abs(er.height - dr.height) <= 2,
+    bgInsideDoc: idx('studio-profile-background') >= 0,
+    effectInsideDoc: idx('studio-profile-effect-layer') >= 0,
+    // Order inside the canvas: background, then effect, then the structure.
+    bgBeforeEffect: idx('studio-profile-background') < idx('studio-profile-effect-layer'),
+    bgBeforeSkeleton: idx('studio-profile-background') < kids.findIndex(el => el.id === 'studio-profile-skeleton'),
+    effectBeforeSkeleton: idx('studio-profile-effect-layer') < kids.findIndex(el => el.id === 'studio-profile-skeleton'),
+    bgZ: z('#studio-profile-background'), effectZ: z('#studio-profile-effect-layer'),
     canvasW: q('#studio-canvas-document')?.style.width || '',
     canvasH: q('#studio-canvas-document')?.style.minHeight || '',
-    canvasTransparentClass: q('#studio-canvas-document')?.classList.contains('studio-canvas-transparent') || false,
-    canvasBackground: q('#studio-canvas-document') ? getComputedStyle(q('#studio-canvas-document')).backgroundImage : '',
+    canvasTransparentClass: doc?.classList.contains('studio-canvas-transparent') || false,
     // The background must never be a component.
     bgIsComponent: document.querySelectorAll('#studio-profile-background[data-comp-id]').length,
     effectIsComponent: document.querySelectorAll('#studio-profile-effect-layer[data-comp-id]').length,
@@ -158,14 +159,16 @@ const readLayers = () => page.evaluate(() => {
     effectAriaHidden: q('#studio-profile-effect-layer')?.getAttribute('aria-hidden') ?? null,
     inLayers: Array.from(document.querySelectorAll('#studio-layers-list .studio-layer-name'))
       .some(el => /background|effect|particle|snow/i.test(el.textContent || '')),
-    // Sample points: the VISIBLE part of the canvas, and a viewer margin.
+    // Sample points: inside the canvas, and a viewer margin that must NOT be the
+    // background any more.
     sample: (() => {
-      const v = sr; const d = dr;
-      const x0 = Math.max(d.left, v.left); const x1 = Math.min(d.right, v.right);
-      const y0 = Math.max(d.top, v.top); const y1 = Math.min(d.bottom, v.bottom);
+      const s = rect('#studio-canvas-scroll');
+      const d = rect('#studio-canvas-document');
+      const x0 = Math.max(d.left, s.left); const x1 = Math.min(d.right, s.right);
+      const y0 = Math.max(d.top, s.top); const y1 = Math.min(d.bottom, s.bottom);
       return {
         canvas: [Math.round((x0 + x1) / 2), Math.round(y0 + Math.min(40, (y1 - y0) / 2))],
-        margin: [Math.round(v.left + 5), Math.round(v.top + 5)],
+        margin: [Math.round(s.left + 5), Math.round(s.top + 5)],
       };
     })(),
   };
@@ -178,44 +181,41 @@ const pixelAt = async (buf, [x, y]) => {
 };
 const isBg = (p) => !!p && Math.abs(p[0] - BG[0]) + Math.abs(p[1] - BG[1]) + Math.abs(p[2] - BG[2]) < 70;
 
-// ── A. The background is a viewer-wide backdrop, the canvas a foreground sheet ──
+// ── A. The background is a layer OF the 960x1200 canvas ───────────────────────
 await openDesign(bgOnly);
 const L = await readLayers();
 const shot = await page.screenshot({ encoding: 'binary' });
 const marginPx = await pixelAt(shot, L.sample.margin);
 const canvasPx = await pixelAt(shot, L.sample.canvas);
 
-check(L.backdropExists, 'the viewer backdrop exists');
-eq(L.backdropState, 'set', 'the backdrop reports it is showing a background');
 eq(L.bgState, 'set', 'the background layer reports set');
-check(L.bgIsViewerSized, 'the background is viewer-sized, not confined to the canvas');
-check(L.bgBeforeEffect, 'the background is ordered before the effect inside the backdrop');
-check(L.backdropBeforeCanvas, 'the backdrop precedes the canvas in the document');
-check(L.backdropZ < L.innerZ, `the canvas paints above the backdrop (${L.backdropZ} < ${L.innerZ})`);
+check(L.bgInsideDoc, 'the background is a layer of the design canvas');
+check(L.bgCoversCanvas, 'the background covers exactly the 960x1200 canvas');
+check(L.bgBeforeEffect, 'the background is ordered before the effect');
+check(L.bgBeforeSkeleton, 'the background is painted before the profile structure');
 eq(L.canvasW, '960px', 'the design canvas is still 960 wide');
 eq(L.canvasH, '1200px', 'the design canvas is still 1200 tall');
 eq(L.bgIsComponent, 0, 'the background is not a design component');
 eq(L.bgPointerEvents, 'none', 'the background layer never intercepts pointer events');
 eq(L.inLayers, false, 'the background is not listed in Layers');
-check(L.canvasTransparentClass, 'the canvas is in its foreground-surface mode');
+check(L.canvasTransparentClass, 'the canvas stops painting over its own background');
 
-// The visual separation, measured.
-check(isBg(marginPx), `the viewer background is visible outside the canvas, got ${JSON.stringify(marginPx)}`);
-check(!isBg(canvasPx),
-  `the canvas interior is NOT the raw background image, so it reads as a surface (got ${JSON.stringify(canvasPx)})`);
+// The visual result, measured: the image IS the canvas background, and it does
+// NOT spill into the viewer around the canvas.
+check(isBg(canvasPx), `the canvas interior shows the background image, got ${JSON.stringify(canvasPx)}`);
+check(!isBg(marginPx),
+  `the viewer around the canvas is NOT the background any more, got ${JSON.stringify(marginPx)}`);
 const dist = (a, b) => (a && b) ? Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) : 0;
 check(dist(canvasPx, marginPx) > 40,
-  `the canvas surface is visibly distinct from the backdrop (${dist(canvasPx, marginPx)}/765 apart)`);
-// And it is a surface, not a hole: light enough to read as a sheet, not the dark
-// studio showing through, and not fully opaque (the backdrop still tints it).
-const lum = (p) => (0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]);
-check(lum(canvasPx) > 120, `the canvas interior is a readable light surface, got ${JSON.stringify(canvasPx)}`);
-check(lum(canvasPx) < 252, `the canvas surface is not fully opaque, so the backdrop still tints it, got ${JSON.stringify(canvasPx)}`);
+  `the canvas is clearly distinguishable from the viewer around it (${dist(canvasPx, marginPx)}/765 apart)`);
 
 // ── B. The effect really animates under no-preference ──
 await openDesign(bgPlusEffect);
 const LE = await readLayers();
-check(LE.effectIsViewerSized, 'the effect is viewer-sized, matching the backdrop it lives in');
+check(LE.effectCoversCanvas, 'the effect covers exactly the design canvas, like the background');
+check(LE.effectInsideDoc, 'the effect is a layer of the design canvas');
+check(LE.effectBeforeSkeleton, 'the effect is painted before the profile structure');
+check(LE.bgZ < LE.effectZ, `the effect is above the background (${LE.bgZ} < ${LE.effectZ})`);
 eq(LE.effectIsComponent, 0, 'the effect is not a design component');
 eq(LE.effectPointerEvents, 'none', 'the effect layer never intercepts pointer events');
 eq(LE.effectAriaHidden, 'true', 'the effect layer is hidden from assistive technology');

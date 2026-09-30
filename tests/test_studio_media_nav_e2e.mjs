@@ -1824,31 +1824,26 @@ await step('CREATOR-10: the Profile Background is uploaded and sits behind the w
   // fills the VIEWER rather than the 960x1200 canvas, which is what a published
   // profile does, so the invariant is "the viewer is covered and the canvas is
   // inside that covered area" rather than a fixed pixel width.
+  // CREATOR-10C: the background is a layer OF the 960x1200 design canvas, not a
+  // viewer-wide backdrop. It must cover the canvas exactly, and it must not be
+  // the thing that fills the viewer around it. The canvas may still be clipped
+  // by the viewer at 100% zoom — that is correct, and panning reaches the rest.
   const cover = await page.evaluate(() => {
     const layer = document.querySelector('#studio-profile-background');
-    const scroll = document.querySelector('#studio-canvas-scroll');
     const doc = document.querySelector('#studio-canvas-document');
-    if (!layer || !scroll || !doc) return null;
+    if (!layer || !doc) return null;
     const lr = layer.getBoundingClientRect();
-    const sr = scroll.getBoundingClientRect();
     const dr = doc.getBoundingClientRect();
-    // The canvas may legitimately extend past the viewer at 100% zoom — the
-    // viewer clips it and the creator pans to reach the rest. What must hold is
-    // that the backdrop is exactly the visible area, so every pixel the creator
-    // can actually see of the canvas is over the background.
-    const overlapW = Math.max(0, Math.min(dr.right, sr.right) - Math.max(dr.left, sr.left));
-    const overlapH = Math.max(0, Math.min(dr.bottom, sr.bottom) - Math.max(dr.top, sr.top));
     return {
       layerW: Math.round(lr.width), layerH: Math.round(lr.height),
-      viewW: Math.round(sr.width), viewH: Math.round(sr.height),
-      overlapW: Math.round(overlapW), overlapH: Math.round(overlapH),
-      backdropIsViewer: Math.abs(lr.width - sr.width) <= 2 && Math.abs(lr.height - sr.height) <= 2,
+      canvasW: Math.round(dr.width), canvasH: Math.round(dr.height),
+      insideDoc: doc.contains(layer),
+      coversCanvas: Math.abs(lr.width - dr.width) <= 2 && Math.abs(lr.height - dr.height) <= 2,
     };
   });
-  check(cover && cover.backdropIsViewer,
-    `the background is exactly the visible editing area, got ${JSON.stringify(cover)}`);
-  check(cover && cover.overlapW > 0 && cover.overlapH > 0,
-    `the design canvas is visible within the covered area, got ${JSON.stringify(cover)}`);
+  check(cover && cover.insideDoc, 'the background is a layer of the design canvas');
+  check(cover && cover.coversCanvas,
+    `the background covers exactly the design canvas, got ${JSON.stringify(cover)}`);
   for (const m of applied.main) check(m.inside, 'the main profile area is inside the background');
   for (const m of applied.sidebar) check(m.inside, 'the sidebar area is inside the background');
   for (const m of applied.sidebarCards) check(m.inside, 'every sidebar card is inside the background');
@@ -4527,45 +4522,58 @@ await step('CREATOR-12: the effect is inert and never a component', async () => 
   eq(s.isComponent, 0, 'the effect layer is not a design component');
   eq(s.inLayers, false, 'the effect is not listed in Layers');
   // It sits ABOVE the background and BELOW the profile structure.
+  //
+  // CREATOR-10C: the background and the effect are layers OF the design canvas —
+  // they cover the 960x1200 document, not the whole viewer. A creator sees the
+  // picture as the profile's own bounded background with the module outlines over
+  // it. Painting them across the viewer instead made the image read as escaping
+  // the canvas and smeared it under the studio chrome.
   const order = await page.evaluate(() => {
-    const bg = document.querySelector('#studio-profile-background');
-    const effect = document.querySelector('#studio-profile-effect-layer');
-    const backdrop = document.querySelector('#studio-profile-backdrop');
-    const inner = document.querySelector('#studio-canvas-inner');
-    // CREATOR-10B: the background and the effect now live in the viewer BACKDROP,
-    // a sibling of the canvas, and the canvas floats on top of it. The invariant
-    // is unchanged in meaning — the effect is above the picture and below the
-    // profile — but it is expressed across the two elements rather than as one
-    // ordered list of children of the design document.
-    const kids = Array.from(document.querySelector('#studio-canvas-document').children);
-    const z = (el) => (el ? parseInt(getComputedStyle(el).zIndex || '0', 10) : null);
+    const doc = document.querySelector('#studio-canvas-document');
+    const kids = Array.from(doc ? doc.children : []);
+    const idx = (id) => kids.findIndex(el => el.id === id);
+    const z = (sel) => {
+      const el = document.querySelector(sel);
+      return el ? parseInt(getComputedStyle(el).zIndex || '0', 10) : null;
+    };
+    const box = (sel) => {
+      const el = document.querySelector(sel);
+      return el ? el.getBoundingClientRect() : null;
+    };
     return {
-      bgIndex: backdrop && bg ? Array.from(backdrop.children).indexOf(bg) : -1,
-      effectIndex: backdrop && effect ? Array.from(backdrop.children).indexOf(effect) : -1,
-      firstComp: kids.findIndex(el => el.dataset.compId || el.id === 'studio-profile-skeleton'),
-      // The canvas is a later sibling AND paints above the backdrop.
-      backdropBeforeInner: backdrop && inner
-        ? (backdrop.compareDocumentPosition(inner) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
-        : false,
-      backdropZ: z(backdrop), innerZ: z(inner),
+      bgIndex: idx('studio-profile-background'),
+      effectIndex: idx('studio-profile-effect-layer'),
+      skeletonIndex: kids.findIndex(el => el.id === 'studio-profile-skeleton'),
+      firstComp: kids.findIndex(el => el.dataset.compId),
+      bgZ: z('#studio-profile-background'),
+      effectZ: z('#studio-profile-effect-layer'),
+      // Both layers must cover the canvas, not spill past it into the viewer.
+      bgCoversCanvas: (() => {
+        const l = box('#studio-profile-background'); const d = box('#studio-canvas-document');
+        return !!l && !!d && Math.abs(l.width - d.width) <= 2 && Math.abs(l.height - d.height) <= 2;
+      })(),
+      effectCoversCanvas: (() => {
+        const l = box('#studio-profile-effect-layer'); const d = box('#studio-canvas-document');
+        return !!l && !!d && Math.abs(l.width - d.width) <= 2 && Math.abs(l.height - d.height) <= 2;
+      })(),
       // A press at the top of the canvas must not land on the effect layer. The
       // profile structure above it is pointer-events:none too, so the honest
       // assertion is "the effect never got it", not "a component got it".
       pressSkipsEffect: (() => {
-        const doc = document.querySelector('#studio-canvas-document');
+        if (!doc) return true;
         const r = doc.getBoundingClientRect();
         const el = document.elementFromPoint(r.left + r.width / 2, r.top + 20);
         return !el || !el.closest('#studio-profile-effect-layer');
       })(),
     };
   });
-  check(order.bgIndex >= 0, 'the background layer is in the viewer backdrop');
+  check(order.bgIndex >= 0, 'the background layer is inside the design canvas');
+  check(order.bgCoversCanvas, 'the background covers exactly the design canvas');
   check(order.effectIndex > order.bgIndex, 'the effect layer is painted after the background image');
-  check(order.effectIndex < order.firstComp || order.backdropBeforeInner,
-    'the effect is painted below the profile structure and components');
-  check(order.backdropBeforeInner, 'the backdrop precedes the canvas in the document');
-  check(order.backdropZ < order.innerZ,
-    `the canvas floats above the backdrop (backdrop z=${order.backdropZ}, canvas z=${order.innerZ})`);
+  check(order.effectCoversCanvas, 'the effect covers exactly the design canvas');
+  check(order.effectIndex < order.skeletonIndex,
+    'the effect is painted below the profile structure');
+  check(order.bgZ < order.effectZ, `the effect is above the background (${order.bgZ} < ${order.effectZ})`);
   check(order.pressSkipsEffect, 'a press on the canvas never lands on the effect layer');
 });
 

@@ -1205,6 +1205,16 @@ export function initDatabase() {
   // design; publishing a new one archives the previous. layout_config holds the
   // controlled layout (canvas + components); theme_config optionally restyles
   // the profile via the existing theme field contract.
+  //
+  // CREATOR-14: a profile_designs row IS also a Creator Studio project. Rather
+  // than introduce a parallel `creator_projects` table that would duplicate the
+  // design state and drift from it, the project lifecycle is layered ON TOP of
+  // the existing row: `description` / `thumbnail_url` are project metadata,
+  // `archived_at` marks a project archived, and `deleted_at` is a soft-delete
+  // that hides a project from every query without destroying its data. The
+  // layout/theme engine, ownership checks and the draft/published/archived
+  // status axis are unchanged, so the public profile and the Studio are not
+  // touched. See server/creatorProjects.js for the project API.
   try {
     database.exec(`
       CREATE TABLE IF NOT EXISTS profile_designs (
@@ -1215,12 +1225,31 @@ export function initDatabase() {
         version INTEGER NOT NULL DEFAULT 1,
         layout_config TEXT NOT NULL DEFAULT '{}',
         theme_config TEXT,
+        description TEXT NOT NULL DEFAULT '',
+        thumbnail_url TEXT,
+        archived_at TEXT,
+        deleted_at TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now')),
         published_at TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_profile_designs_user_status ON profile_designs(user_id, status);
+      CREATE INDEX IF NOT EXISTS idx_profile_designs_deleted ON profile_designs(deleted_at);
     `);
+  } catch (err) { /* safe no-op */ }
+
+  // CREATOR-14: idempotent migration for databases created before the project
+  // columns existed. Each ADD COLUMN is wrapped so re-running init on an
+  // already-migrated database is a safe no-op.
+  try {
+    const cols = database.prepare('PRAGMA table_info(profile_designs)').all().map(c => c.name);
+    const addIfMissing = (col, sql) => {
+      if (!cols.includes(col)) database.exec(sql);
+    };
+    addIfMissing("description", "ALTER TABLE profile_designs ADD COLUMN description TEXT NOT NULL DEFAULT ''");
+    addIfMissing("thumbnail_url", "ALTER TABLE profile_designs ADD COLUMN thumbnail_url TEXT");
+    addIfMissing("archived_at", "ALTER TABLE profile_designs ADD COLUMN archived_at TEXT");
+    addIfMissing("deleted_at", "ALTER TABLE profile_designs ADD COLUMN deleted_at TEXT");
   } catch (err) { /* safe no-op */ }
 
   // CREATOR-02: creator asset publishing foundation. A creator asset is a

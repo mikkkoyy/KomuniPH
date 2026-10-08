@@ -15,7 +15,7 @@
  * using the same visual classes as the public renderer.
  */
 
-import { designApi, profileApi, creatorAssetsApi, getAccessToken } from './api.js';
+import { designApi, profileApi, creatorAssetsApi, getAccessToken, projectApi } from './api.js';
 import {
   CONTENT_COMPONENT_TYPES,
   applyGeometryToElement,
@@ -436,9 +436,13 @@ function normalizeDesign(design) {
 export function renderCreatorStudioPage() {
   return `<main id="creator-studio" class="creator-studio">
     <header class="studio-heading">
-      <a href="#/profile">← Return to profile</a>
+      <a href="#/creator-studio/projects" class="studio-back-projects">← Back to Projects</a>
+      <a href="#/profile" class="studio-back-profile">← Return to profile</a>
       <p class="editor-eyebrow">CREATOR STUDIO</p>
-      <h1>Creator Studio</h1>
+      <div class="studio-title-row">
+        <h1>Creator Studio</h1>
+        <p id="studio-project-name" class="studio-project-name" hidden></p>
+      </div>
       <p>Design your profile layout. The canvas is a live preview of where each element lands on
       your public profile — Save a draft anytime, Publish when you are ready.</p>
     </header>
@@ -3827,12 +3831,16 @@ async function switchDesign(designId) {
     // CREATOR-10A: a staged upload belongs to the design it was staged in, so
     // switching designs must never carry it over as a phantom background.
     resetPendingBackground();
+    // CREATOR-13/14: switching projects tears down the Live View so no
+    // animation loop, probe or timer from the previous project survives.
+    stopLiveEffect();
     selectedId = null;
     history = [];
     future = [];
     dirty = false;
     renderAll();
     renderDesignSelect();
+    updateProjectNameIndicator();
     setStatus(`Editing "${currentDesign.name}".`);
   });
 }
@@ -3853,12 +3861,15 @@ async function createNewDesign() {
     // CREATOR-10A: a staged upload belongs to the design it was staged in, so
     // switching designs must never carry it over as a phantom background.
     resetPendingBackground();
+  // CREATOR-13/14: a fresh project starts with no Live View running.
+  stopLiveEffect();
   selectedId = null;
   history = [];
   future = [];
   dirty = false;
   renderAll();
   renderDesignSelect();
+  updateProjectNameIndicator();
   showWorkspace(true);
   setStatus('New design ready.');
 }
@@ -3956,6 +3967,36 @@ function attachEvents() {
 }
 
 // ── Lifecycle ────────────────────────────────────────────────────────────────
+/**
+ * CREATOR-14: read the optional `project` query parameter from the current
+ * hash route (e.g. #/creator-studio?project=<id>). Returns the project id
+ * or null when the studio was opened without one.
+ */
+function getRequestedProjectId() {
+  const hash = window.location.hash.slice(1) || '';
+  const queryIndex = hash.indexOf('?');
+  if (queryIndex === -1) return null;
+  const params = new URLSearchParams(hash.slice(queryIndex + 1));
+  const id = params.get('project');
+  return id && id.trim() ? id.trim() : null;
+}
+
+/**
+ * CREATOR-14: show the name of the project currently open in the studio
+ * header, so the creator always knows which project they are editing.
+ */
+function updateProjectNameIndicator() {
+  const el = root?.querySelector('#studio-project-name');
+  if (!el) return;
+  if (currentDesign && currentDesign.name) {
+    el.textContent = `Project: ${currentDesign.name}`;
+    el.hidden = false;
+  } else {
+    el.textContent = '';
+    el.hidden = true;
+  }
+}
+
 export async function initCreatorStudioPage() {
   root = document.getElementById('creator-studio');
   const mounted = root;
@@ -3980,7 +4021,28 @@ export async function initCreatorStudioPage() {
     if (root !== mounted || !mounted.isConnected) return;
     designs = listResult.designs || [];
 
-    let pick = designs.find(d => d.status === 'draft') || designs[0];
+    // CREATOR-14: a project may be requested directly via the project
+    // manager (#/creator-studio?project=<id>). Load that project when
+    // present; otherwise fall back to the first draft (or the first
+    // design) exactly as before.
+    const requestedProjectId = getRequestedProjectId();
+    let pick = null;
+    if (requestedProjectId) {
+      pick = designs.find(d => d.id === requestedProjectId) || null;
+      if (!pick) {
+        // Not in the list (e.g. archived). Fetch it directly so the
+        // creator can still open an archived project from the manager.
+        try {
+          const result = await designApi.getDesign(requestedProjectId);
+          pick = result.design || null;
+        } catch {
+          pick = null;
+        }
+      }
+    }
+    if (!pick) {
+      pick = designs.find(d => d.status === 'draft') || designs[0];
+    }
     if (!pick) {
       const created = await designApi.createDesign({
         name: 'My Design',
@@ -3999,6 +4061,7 @@ export async function initCreatorStudioPage() {
     dirty = false;
     renderAll();
     renderDesignSelect();
+    updateProjectNameIndicator();
     showWorkspace(true);
     setStatus(`Editing "${currentDesign.name}". Drag elements onto the canvas, then Save or Publish.`);
     void own;

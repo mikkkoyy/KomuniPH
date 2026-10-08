@@ -229,6 +229,43 @@ Snow (Built-in)            Engine: particles
 
   The browser suite asserts on rendered pixels throughout: the live stage is screenshotted twice with a gap and the two must differ (motion is real), must be **identical** while paused (pause really stops it), and must be identical under reduced motion. Effects are told apart by counting pixels that match each effect's own colour family — snow pale, leaves green with no white dots, petals pink — rather than by averaging colours, which a mostly anti-aliased sprite turns grey regardless of its real colour. Repeated `Snow → Leaves → Petals → Snow → Leaves` switching is verified to leave exactly **one** live surface and **one** canvas-preview surface, so no animation loop is left accumulating.
 
+### CREATOR-14 — Creator Studio Project Manager
+
+Creator Studio gains a **Project Manager**: the entry point where a creator sees every project they own, opens one to edit it, and manages its lifecycle. The key architectural decision is that **a Creator Studio project IS a `profile_designs` row** — there is no parallel `creator_projects` table. The project manager is a lifecycle and navigation layer on top of the existing design table, so a project and a design are the same thing and no data is duplicated or migrated.
+
+```
+#/creator-studio/projects
++----------------------------------------+
+|  <- Return to profile                  |
+|  CREATOR STUDIO                        |
+|  Projects                              |
+|  [ New Project ]                       |
+|  +----------+  +----------+            |
+|  | thumb    |  | thumb    |  ...       |
+|  | Draft    |  | Published|            |
+|  | My Design|  | v3  2h   |            |
+|  | [Open]   |  | [Open]   |            |
+|  | [Rename] |  | [Rename] |            |
+|  | [Dup]    |  | [Dup]    |            |
+|  | [Archive]|  | [Archive]|            |
+|  +----------+  +----------+            |
+|  Archived Projects                     |
+|  +----------+                          |
+|  | Archived | [Restore] [Delete]      |
+|  +----------+                          |
++----------------------------------------+
+```
+
+- **A project is a design.** Every project is a `profile_designs` row with the existing `layout_config` / `theme_config`. The project manager adds project metadata to that row — `description`, `thumbnail_url`, `archived_at`, `deleted_at` — and a lifecycle (`draft` / `published` / `archived`) on the existing `status` column. Designs created before CREATOR-14 simply have empty project metadata and behave exactly as before.
+- **Lifecycle.** Create -> rename -> duplicate -> archive -> restore -> delete. **Delete is a soft delete** (`deleted_at`) and is only allowed on **archived** projects, so an active project can never be destroyed by accident — it must be archived first. Archive sets `status = 'archived'` and `archived_at`; restore returns it to `draft` and clears `archived_at`.
+- **Ownership is absolute.** Every query is scoped by the authenticated user (`user.sub`). A second user never sees, opens, renames, duplicates, archives, restores or deletes another user's project — they get **404, not 403**, so project ids are not leaked. Unauthenticated requests are 401.
+- **Duplicate is a deep clone.** The copy gets a new id, a new name (`<name> Copy`, with a uniqueness fallback), `version` reset to 1, `status` reset to `draft`, and a deep-cloned `layout_config` / `theme_config` — mutating the copy never touches the original.
+- **Opening a project.** "Open" navigates to `#/creator-studio?project=<id>`. The Studio reads the `project` query parameter and loads that exact project instead of the first draft. The header shows **"Project: <name>"** so the creator always knows which project is open. Switching projects (via the design selector or "New Design") tears down the CREATOR-13 Live View, clears selection, undo/redo history, staged uploads and dirty state, so no animation loop, probe or timer from the previous project survives.
+- **Validation.** Project name is required, non-empty, at most 100 characters, and rejected if it contains markup tags (`<script>`, `<iframe>`, `<object>`, `<embed>`, `<style>`). Description is optional and at most 500 characters. The stored layout is re-validated on read so stored data cannot break the Studio.
+- **Version history is future work.** The `version` column already exists and increments on publish, but a full version-history browser is CREATOR-15+ work and is explicitly out of scope here.
+
+  - `npm run test:creator14` runs the CREATOR-14 suite (23 checks: create with a valid default layout and draft status, name/description/markup/length validation, authentication required, list ordering and per-user isolation, get by id, cross-user 404 on get/rename/duplicate/archive/restore/delete, rename persisting to the database, duplicate producing an independent deep clone, archive/restore round-trip with `archived_at` set and cleared, delete only on archived projects (soft delete, hidden from list and get), active-project delete rejected, and database persistence of name/description/status/layout)
+
 ### CREATOR-11 â€” Fonts, animation, and Card / Image / Sticker masking
 
 CREATOR-11 extends the validated design model. The same stored properties drive the Creator Studio canvas, the saved draft, the published design and the public profile renderer â€” there is no Studio-only typography or animation system, and no second public renderer.
@@ -343,6 +380,12 @@ Creator Studio Coin Shop Manager suite (CREATOR-05) â€” self-contained (tem
 
 ```bash
 npm run test:coin-shop-manager
+```
+
+Creator Studio Project Manager suite (CREATOR-14) — self-contained (temp DB, runs offline):
+
+```bash
+npm run test:creator14
 ```
 
 BUGFIX regression suite (requires the server running on port 3000):

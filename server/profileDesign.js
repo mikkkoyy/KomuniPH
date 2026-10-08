@@ -818,6 +818,13 @@ function serializeDesignRow(row) {
     version: Number(row.version) || 1,
     layout,
     theme,
+    // CREATOR-14: project metadata. A profile_designs row is a Creator Studio
+    // project, so the design API surfaces the project fields too. They are
+    // optional/empty on designs created before the columns existed.
+    description: row.description || '',
+    thumbnail_url: row.thumbnail_url || null,
+    archived_at: row.archived_at || null,
+    deleted_at: row.deleted_at || null,
     published_at: row.published_at || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -826,7 +833,9 @@ function serializeDesignRow(row) {
 
 function findOwnedDesign(id, userId) {
   return queryOne(
-    `SELECT id, user_id, name, status, version, layout_config, theme_config, published_at, created_at, updated_at
+    `SELECT id, user_id, name, status, version, layout_config, theme_config,
+       description, thumbnail_url, archived_at, deleted_at,
+       published_at, created_at, updated_at
      FROM profile_designs WHERE id = ? AND user_id = ?`,
     [id, userId]
   );
@@ -838,7 +847,9 @@ function findOwnedDesign(id, userId) {
  */
 export function getPublishedDesignForUser(userId) {
   const row = queryOne(
-    `SELECT id, user_id, name, status, version, layout_config, theme_config, published_at, created_at, updated_at
+    `SELECT id, user_id, name, status, version, layout_config, theme_config,
+       description, thumbnail_url, archived_at, deleted_at,
+       published_at, created_at, updated_at
      FROM profile_designs WHERE user_id = ? AND status = 'published'
      ORDER BY published_at DESC LIMIT 1`,
     [userId]
@@ -876,7 +887,9 @@ async function readJsonBody(req, res) {
 export async function handleListDesigns(req, res, user) {
   try {
     const rows = queryAll(
-      `SELECT id, user_id, name, status, version, layout_config, theme_config, published_at, created_at, updated_at
+      `SELECT id, user_id, name, status, version, layout_config, theme_config,
+       description, thumbnail_url, archived_at, deleted_at,
+       published_at, created_at, updated_at
        FROM profile_designs WHERE user_id = ? ORDER BY created_at DESC`,
       [user.sub]
     );

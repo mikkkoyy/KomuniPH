@@ -16,6 +16,16 @@ import { handleAdminLogin, handleAdminChangePassword } from './adminAuth.js';
 import { handleGetSettings, handleUpdateSettings } from './settings.js';
 import { handleGetProfile, handleGetPublicProfile, handleUpdateProfile, handleUploadPhoto, handleUpdateTheme, handleUploadBackground } from './profile.js';
 import { handleListDesigns, handleCreateDesign, handleGetDesign, handleUpdateDesign, handlePublishDesign, handleArchiveDesign } from './profileDesign.js';
+import {
+  handleListProjects,
+  handleGetProject,
+  handleCreateProject,
+  handleUpdateProject,
+  handleDuplicateProject,
+  handleArchiveProject,
+  handleRestoreProject,
+  handleDeleteProject,
+} from './creatorProjects.js';
 import { handleListAssets, handleCreateAsset, handleGetAsset, handleUpdateAsset, handleSubmitAsset, handlePublishAsset, handleArchiveAsset } from './creatorAssets.js';
 import { handleUploadCreatorMedia } from './creatorMedia.js';
 import {
@@ -406,6 +416,54 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
       const user = requireAuth(req, res);
       if (!user) return;
       return handleArchiveDesign(req, res, user, designArchiveMatch);
+    }
+
+    // CREATOR-14: Creator Studio Project Manager
+    // Registered before the generic /api/creator/assets route so "projects" is not
+    // mistaken for an asset id.
+    if (method === 'GET' && path === '/api/creator/projects') {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleListProjects(req, res, user);
+    }
+    if (method === 'POST' && path === '/api/creator/projects') {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleCreateProject(req, res, user);
+    }
+    const projectMatch = matchRoute('/api/creator/projects/:id', path);
+    if (method === 'GET' && projectMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleGetProject(req, res, user, projectMatch);
+    }
+    if (method === 'PATCH' && projectMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleUpdateProject(req, res, user, projectMatch);
+    }
+    const projectDuplicateMatch = matchRoute('/api/creator/projects/:id/duplicate', path);
+    if (method === 'POST' && projectDuplicateMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleDuplicateProject(req, res, user, projectDuplicateMatch);
+    }
+    const projectArchiveMatch = matchRoute('/api/creator/projects/:id/archive', path);
+    if (method === 'POST' && projectArchiveMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleArchiveProject(req, res, user, projectArchiveMatch);
+    }
+    const projectRestoreMatch = matchRoute('/api/creator/projects/:id/restore', path);
+    if (method === 'POST' && projectRestoreMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleRestoreProject(req, res, user, projectRestoreMatch);
+    }
+    if (method === 'DELETE' && projectMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleDeleteProject(req, res, user, projectMatch);
     }
 
     // CREATOR-05: real purchase statistics for the authenticated creator.

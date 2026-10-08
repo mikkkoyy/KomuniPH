@@ -435,6 +435,58 @@ export const creatorAssetsApi = {
 };
 
 /**
+ * Creator Studio Project API (CREATOR-14)
+ * A project IS a profile_designs row with additional metadata.
+ */
+export const projectApi = {
+  async listProjects() {
+    return apiRequest('/creator/projects');
+  },
+
+  async createProject(data) {
+    return apiRequest('/creator/projects', {
+      method: 'POST',
+      body: data,
+    });
+  },
+
+  async getProject(id) {
+    return apiRequest(`/creator/projects/${id}`);
+  },
+
+  async updateProject(id, data) {
+    return apiRequest(`/creator/projects/${id}`, {
+      method: 'PATCH',
+      body: data,
+    });
+  },
+
+  async duplicateProject(id) {
+    return apiRequest(`/creator/projects/${id}/duplicate`, {
+      method: 'POST',
+    });
+  },
+
+  async archiveProject(id) {
+    return apiRequest(`/creator/projects/${id}/archive`, {
+      method: 'POST',
+    });
+  },
+
+  async restoreProject(id) {
+    return apiRequest(`/creator/projects/${id}/restore`, {
+      method: 'POST',
+    });
+  },
+
+  async deleteProject(id) {
+    return apiRequest(`/creator/projects/${id}`, {
+      method: 'DELETE',
+    });
+  },
+};
+
+/**
  * Messages API
  */
 export const messagesApi = {

@@ -9,6 +9,7 @@ import { renderHomePage, initHomePage, renderPlaceholderPage, initPlaceholderPag
 import { renderProfilePage, initProfilePage } from './profile.js';
 import { renderProfileEditorPage, initProfileEditorPage, destroyProfileEditorPage, canLeaveProfileEditor } from './profileEditor.js';
 import { renderCreatorStudioPage, initCreatorStudioPage, destroyCreatorStudioPage, canLeaveCreatorStudio } from './creatorStudio.js';
+import { renderCreatorProjectsPage, initCreatorProjectsPage, destroyCreatorProjectsPage, canLeaveCreatorProjects } from './creatorProjects.js';
 // PHASE-3 GALLERY-SPLIT-01: gallery/album pages live in their own modules
 import { renderGalleryPage, initGalleryPage } from './gallery.js';
 import { renderAlbumPage, initAlbumPage } from './albums.js';
@@ -61,6 +62,15 @@ function render() {
     return;
   }
   if (routePath === '/creator-studio' && isAuthenticated() && document.getElementById('creator-studio')) return;
+
+  // Keep Creator Projects drafts when Back/Forward would leave the workspace.
+  if (routePath !== '/creator-studio/projects' && !canLeaveCreatorProjects()) {
+    window.location.hash = '/creator-studio/projects';
+    return;
+  }
+  if (routePath === '/creator-studio/projects' && isAuthenticated() && document.getElementById('creator-projects')) return;
+
+  destroyCreatorProjectsPage();
 
   // Cleanup previous page
   if (destroyMessagesPage) {
@@ -148,6 +158,14 @@ function render() {
       }
       html = renderCreatorStudioPage();
       initFn = initCreatorStudioPage;
+      break;
+    case '/creator-studio/projects':
+      if (!isAuthenticated()) {
+        navigate('/login');
+        return;
+      }
+      html = renderCreatorProjectsPage();
+      initFn = initCreatorProjectsPage;
       break;
     case '/marketplace':
       if (!isAuthenticated()) {

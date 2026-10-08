@@ -1252,6 +1252,73 @@ export function initDatabase() {
     addIfMissing("deleted_at", "ALTER TABLE profile_designs ADD COLUMN deleted_at TEXT");
   } catch (err) { /* safe no-op */ }
 
+  // CREATOR-15: immutable version history for Creator Studio projects.
+  // Every explicit Save that changes a design appends one row here; the
+  // profile_designs row always reflects the highest saved version.
+  // Rows are never updated or deleted — restoring an old version writes
+  // a NEW row that copies the old contents, so history is append-only.
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS profile_design_versions (
+        id TEXT PRIMARY KEY,
+        design_id TEXT NOT NULL REFERENCES profile_designs(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        version INTEGER NOT NULL CHECK (version >= 1),
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'archived')),
+        layout_config TEXT NOT NULL DEFAULT '{}',
+        theme_config TEXT,
+        thumbnail_url TEXT,
+        restored_from_version INTEGER,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(design_id, version)
+      );
+      CREATE INDEX IF NOT EXISTS idx_profile_design_versions_design
+        ON profile_design_versions(design_id, version DESC);
+    `);
+  } catch (err) { /* safe no-op */ }
+
+  // CREATOR-15: backfill for databases created before version history
+  // existed. Every design with no version rows gets ONE snapshot of its
+  // CURRENT state at its current version number, which preserves the
+  // invariant "current version == highest saved version" for pre-existing
+  // designs (including designs already published at version >= 2). The
+  // snapshot is idempotent: a design that already has version rows is
+  // skipped, so re-running init never duplicates history.
+  try {
+    const unversioned = database.prepare(`
+      SELECT d.id, d.user_id, d.name, d.status, d.version, d.layout_config,
+             d.theme_config, d.thumbnail_url, d.updated_at
+      FROM profile_designs d
+      WHERE NOT EXISTS (
+        SELECT 1 FROM profile_design_versions v WHERE v.design_id = d.id
+      )
+    `).all();
+    if (unversioned.length > 0) {
+      const insertVersion = database.prepare(`
+        INSERT INTO profile_design_versions
+          (id, design_id, user_id, version, name, description, status,
+           layout_config, theme_config, thumbnail_url, restored_from_version, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+      `);
+      const backfill = database.transaction(() => {
+        for (const d of unversioned) {
+          insertVersion.run(
+            crypto.randomUUID(), d.id, d.user_id, Number(d.version) || 1, d.name,
+            d.description || '', d.status, d.layout_config || '{}',
+            d.theme_config || null, d.thumbnail_url || null,
+            d.updated_at || new Date().toISOString()
+          );
+        }
+      });
+      backfill();
+      console.log(`[CREATOR-15] Backfilled ${unversioned.length} design version(s)`);
+    }
+  } catch (err) {
+    console.log('[CREATOR-15] Version backfill skipped:', err.message);
+  }
+
   // CREATOR-02: creator asset publishing foundation. A creator asset is a
   // controlled, versioned product snapshot (theme / background / profile_design
   // / sticker / decoration) owned by exactly one creator. One row is one asset;

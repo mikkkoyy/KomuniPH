@@ -629,12 +629,12 @@
    transform and its own saved coordinate system; only where the decoration is
    painted changed. The profile skeleton and guide cards keep their own
    low-fill CREATOR-10B treatment either way. */
-#studio-canvas-document.studio-canvas-transparent { background: transparent; }
+.studio-canvas-document.studio-canvas-transparent { background: transparent; }
 #studio-zoom-layer {
   transform-origin: 0 0;
   display: inline-block;
 }
-#studio-canvas-document {
+.studio-canvas-document {
   position: relative;
   background: linear-gradient(180deg, #dce3ee 0%, #cdd6e4 100%);
   border-radius: 6px;
@@ -1398,7 +1398,7 @@
    swallows a click meant for a component underneath it.
    --------------------------------------------------------------------------- */
 
-#studio-canvas-inner .studio-profile-effect-layer {
+.studio-canvas-document .studio-profile-effect-layer {
   position: absolute;
   /* Covers the design canvas, exactly like the background layer beside it. Without
      this the layer had no box of its own, so only the canvas the renderer
@@ -1407,16 +1407,16 @@
   pointer-events: none;
   z-index: 1;
 }
-#studio-canvas-inner .studio-profile-effect-layer:empty { display: none; }
-#studio-canvas-inner .studio-profile-effect-layer canvas {
+.studio-canvas-document .studio-profile-effect-layer:empty { display: none; }
+.studio-canvas-document .studio-profile-effect-layer canvas {
   position: absolute;
   inset: 0;
   display: block;
   pointer-events: none;
 }
-#studio-canvas-inner .studio-profile-effect-layer .profile-bg-effect-atmosphere,
-#studio-canvas-inner .studio-profile-effect-layer .profile-bg-effect-lightning,
-#studio-canvas-inner .studio-profile-effect-layer .profile-bg-effect-overlay {
+.studio-canvas-document .studio-profile-effect-layer .profile-bg-effect-atmosphere,
+.studio-canvas-document .studio-profile-effect-layer .profile-bg-effect-lightning,
+.studio-canvas-document .studio-profile-effect-layer .profile-bg-effect-overlay {
   position: absolute;
   inset: 0;
   pointer-events: none;
@@ -1782,4 +1782,123 @@
   .project-actions .btn {
     flex: 1 1 100%;
   }
+}
+
+/* -- CREATOR-15: Version History modal --------------------------------
+   A two-pane modal: the version list (metadata only) on the left and
+   a read-only preview of the selected version on the right. The
+   preview is rendered by the same document builder the canvas uses,
+   so a version previews exactly as the canvas renders the live
+   design. The preview stage scrolls; the document keeps its real
+   design size. */
+
+.studio-version-modal {
+  width: min(1080px, 94vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+.studio-version-body {
+  display: flex;
+  gap: 0.75rem;
+  min-height: 340px;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+.studio-version-list {
+  flex: 0 0 250px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-right: 0.25rem;
+}
+.studio-version-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid var(--studio-line);
+  background: rgba(148, 163, 184, 0.08);
+  color: var(--studio-text);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.studio-version-row:hover {
+  border-color: rgba(20, 184, 166, 0.5);
+  background: rgba(20, 184, 166, 0.1);
+}
+.studio-version-current {
+  border-color: rgba(20, 184, 166, 0.55);
+  background: rgba(20, 184, 166, 0.14);
+}
+.studio-version-num {
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #5eead4;
+  min-width: 2.4rem;
+}
+.studio-version-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.studio-version-meta strong {
+  font-size: 0.78rem;
+  color: var(--studio-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.studio-version-meta small {
+  font-size: 0.66rem;
+  color: var(--studio-muted);
+}
+.studio-version-badge {
+  margin-left: auto;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #5eead4;
+  border: 1px solid rgba(20, 184, 166, 0.55);
+  border-radius: 999px;
+  padding: 0.08rem 0.4rem;
+  white-space: nowrap;
+}
+.studio-version-preview {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: auto;
+  border-radius: 8px;
+  border: 1px solid var(--studio-line);
+  background: rgba(15, 23, 42, 0.5);
+  padding: 0.75rem;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+.studio-version-preview-stage {
+  flex: 0 0 auto;
+}
+.studio-version-result {
+  margin-top: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--studio-muted);
+  min-height: 1rem;
+}
+
+/* CREATOR-15: the open project's version number rides on the title
+   row beside the project name. It is a fixed chip, so showing or
+   hiding it never changes the header height (the same layout-stability
+   rule the project name follows). */
+#creator-studio .studio-title-row .studio-project-version {
+  flex: 0 0 auto;
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #5eead4;
+  white-space: nowrap;
 }

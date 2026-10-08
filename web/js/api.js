@@ -487,6 +487,33 @@ export const projectApi = {
 };
 
 /**
+ * Creator Studio Version History API (CREATOR-15)
+ * Immutable, append-only versions of a project's design state.
+ */
+export const versionApi = {
+  async listVersions(projectId) {
+    return apiRequest(`/creator/projects/${projectId}/versions`);
+  },
+
+  async getVersion(projectId, version) {
+    return apiRequest(`/creator/projects/${projectId}/versions/${version}`);
+  },
+
+  async saveVersion(projectId, payload) {
+    return apiRequest(`/creator/projects/${projectId}/save`, {
+      method: 'POST',
+      body: payload,
+    });
+  },
+
+  async restoreVersion(projectId, version) {
+    return apiRequest(`/creator/projects/${projectId}/versions/${version}/restore`, {
+      method: 'POST',
+    });
+  },
+};
+
+/**
  * Messages API
  */
 export const messagesApi = {

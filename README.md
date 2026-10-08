@@ -262,9 +262,28 @@ Creator Studio gains a **Project Manager**: the entry point where a creator sees
 - **Duplicate is a deep clone.** The copy gets a new id, a new name (`<name> Copy`, with a uniqueness fallback), `version` reset to 1, `status` reset to `draft`, and a deep-cloned `layout_config` / `theme_config` — mutating the copy never touches the original.
 - **Opening a project.** "Open" navigates to `#/creator-studio?project=<id>`. The Studio reads the `project` query parameter and loads that exact project instead of the first draft. The header shows **"Project: <name>"** so the creator always knows which project is open. Switching projects (via the design selector or "New Design") tears down the CREATOR-13 Live View, clears selection, undo/redo history, staged uploads and dirty state, so no animation loop, probe or timer from the previous project survives.
 - **Validation.** Project name is required, non-empty, at most 100 characters, and rejected if it contains markup tags (`<script>`, `<iframe>`, `<object>`, `<embed>`, `<style>`). Description is optional and at most 500 characters. The stored layout is re-validated on read so stored data cannot break the Studio.
-- **Version history is future work.** The `version` column already exists and increments on publish, but a full version-history browser is CREATOR-15+ work and is explicitly out of scope here.
+- **Version history is CREATOR-15.** The `version` column increments on every Save and Publish, and the full version browser is implemented — see CREATOR-15 below.
 
   - `npm run test:creator14` runs the CREATOR-14 suite (23 checks: create with a valid default layout and draft status, name/description/markup/length validation, authentication required, list ordering and per-user isolation, get by id, cross-user 404 on get/rename/duplicate/archive/restore/delete, rename persisting to the database, duplicate producing an independent deep clone, archive/restore round-trip with `archived_at` set and cleared, delete only on archived projects (soft delete, hidden from list and get), active-project delete rejected, and database persistence of name/description/status/layout)
+
+### CREATOR-15 — Project Save, Load & Version History
+
+Every Save in Creator Studio is an explicit, server-validated, **immutable version snapshot**. The version history is complete from the moment a project exists: its creation state IS version 1, every changed Save appends a new version, and restoring an old version never deletes history — it saves the restored state as a NEW version.
+
+- **A dedicated version store.** A new `profile_design_versions` table holds one row per version: the project's name, layout, theme, status and thumbnail at a monotonically increasing `version`, plus `restored_from_version` recording restore provenance. `UNIQUE(design_id, version)` guarantees numbers are never reused, and the `profile_designs.version` column remains the pointer to the current version — it always equals the highest saved version.
+- **Creation state is version 1.** Creating a project (in the Studio, through the design API, by duplicating, or by installing a Marketplace listing) snapshots the initial state, so the history is complete before the first Save.
+- **Save is explicit and server-authoritative.** `POST /api/creator/projects/:id/save` validates the FULL payload (name + layout + theme) with the shared design validator, then compares it against the persisted state with a canonical (sorted-key) JSON fingerprint — "did the design change?" is a question about meaning, never about key order or timestamps. An unchanged Save appends nothing and reports the current version; a changed Save writes the new version and updates the project atomically in one transaction. There is no autosave.
+- **History is metadata-only.** `GET .../versions` lists versions newest-first with `is_current`, name, status, timestamp and restore provenance — never full layout/theme payloads. `GET .../versions/:version` fetches one full snapshot on demand, so browsing a long history stays cheap.
+- **Restore appends, never rewrites.** `POST .../versions/:version/restore` copies the restored contents into a NEW version (recording `restored_from_version`) and makes it current, in one transaction. Every earlier version stays byte-for-byte intact. The Studio reloads the restored state exactly like a design switch, discarding unsaved editor changes (which were never part of any version).
+- **Ownership is absolute.** Every version route is scoped by the authenticated user (`user.sub`); a second user gets **404, not 403**. Version arguments are validated (positive integer, must exist) and never trusted from the client.
+- **The preview reuses the same renderer.** The Version History modal renders a stored snapshot with the same design-document renderer the canvas uses — read-only (no selection handles, no canvas-only element ids) — so a preview can never diverge from what Save stores. Each preview runs its own effect layer and animation loop, torn down when the modal closes; the canvas's loop is never touched. Runtime effect state (frames, rAF handles, controllers) is never versioned — only the declarative effect configuration is.
+- **Studio UI.** The header shows the current version (`v3`) next to the project name; Save reports "Saved as version N" (or "Already saved — no changes since version N"); the Version History modal lists every version, previews the selected one, and restores it.
+- **Migration.** Designs created before CREATOR-15 are backfilled on startup with a snapshot of their current state at their current version number — idempotently, so re-running the migration never duplicates history. Fresh databases simply create the table.
+- **Publish keeps its meaning.** Publishing still bumps the version and now also writes a published save-point, so the history records what was actually published.
+
+  - `npm run test:creator15` runs the CREATOR-15 API suite (27 checks: authentication required on every version route, cross-user 404 on save/history/fetch/restore, the creation state being version 1, the metadata-only history list, changed saves appending v2 then v3, an unchanged save appending nothing, key-order-only changes being no-ops, full snapshot round-trips (geometry, fonts, animation, rotation, style, theme, effect config), newest-first ordering with `is_current`, per-version snapshot fetch, missing-version 404, restore appending a new version with `restored_from_version` while every earlier version stays byte-for-byte identical, the restored state being editable afterwards, cross-project version isolation, duplicate starting an independent history at v1, publish bumping the version AND writing a published save-point, version numbers being unique and never reused, and the idempotent backfill of a pre-CREATOR-15 design at its current version)
+
+  - `npm run test:creator15-e2e` runs the headless-browser E2E (11 checks: UI login, the Studio opening the project at its current version, the canvas animating the seeded snow effect, adding a component and saving appending version 3, the history listing every version newest-first with the current one badged, previewing an older version rendering its snapshot read-only with its own animated effect layer, closing the modal stopping the preview's animation but never the canvas's, restoring v2 appending version 4 and reloading the editor with its contents, an unchanged save writing no new version, the server holding the full append-only chain, and no uncaught page errors)
 
 ### CREATOR-11 â€” Fonts, animation, and Card / Image / Sticker masking
 
@@ -386,6 +405,18 @@ Creator Studio Project Manager suite (CREATOR-14) — self-contained (temp DB, r
 
 ```bash
 npm run test:creator14
+```
+
+Creator Studio Version History suite (CREATOR-15) — self-contained (temp DB, runs offline):
+
+```bash
+npm run test:creator15
+```
+
+Creator Studio Version History browser E2E (CREATOR-15) — headless Chrome (temp DB):
+
+```bash
+npm run test:creator15-e2e
 ```
 
 BUGFIX regression suite (requires the server running on port 3000):

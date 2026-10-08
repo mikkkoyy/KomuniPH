@@ -15,7 +15,7 @@
  * using the same visual classes as the public renderer.
  */
 
-import { designApi, profileApi, creatorAssetsApi, getAccessToken, projectApi } from './api.js';
+import { designApi, profileApi, creatorAssetsApi, getAccessToken, projectApi, versionApi } from './api.js';
 import {
   CONTENT_COMPONENT_TYPES,
   applyGeometryToElement,
@@ -324,6 +324,14 @@ let drag = null;
 let assetModal = null;
 let assetModalAsset = null;
 
+// CREATOR-15: Version History modal session state. The preview
+// effect layer is tracked so closing the modal stops the
+// preview's animation loop — runtime effect state is never
+// persisted and never outlives the preview that plays it.
+let versionHistoryModal = null;
+let versionPreviewEffectLayer = null;
+let versionPreviewVersion = null;
+
 function keyHandler(event) { onKey(event); }
 function beforeUnload(event) {
   if (dirty && !busy) { event.preventDefault(); event.returnValue = ''; }
@@ -442,6 +450,7 @@ export function renderCreatorStudioPage() {
       <div class="studio-title-row">
         <h1>Creator Studio</h1>
         <p id="studio-project-name" class="studio-project-name" hidden></p>
+        <p id="studio-project-version" class="studio-project-version" hidden></p>
       </div>
       <p>Design your profile layout. The canvas is a live preview of where each element lands on
       your public profile — Save a draft anytime, Publish when you are ready.</p>
@@ -463,6 +472,7 @@ export function renderCreatorStudioPage() {
         <span class="studio-spacer" aria-hidden="true"></span>
         <button id="studio-coin-shop" class="btn btn-secondary" type="button" title="Manage the digital assets you sell for KomuniPH Coins">My Coin Shop</button>
         <button id="studio-open-profile" class="btn btn-secondary" type="button" title="Open your published profile in a new tab">Open Profile↗</button>
+        <button id="studio-version-history" class="btn btn-secondary" type="button" title="Browse every saved version of this project and restore an older one">Version History</button>
         <button id="studio-save" class="btn btn-primary" type="button">Save Draft</button>
         <button id="studio-publish" class="btn btn-cta" type="button">Publish</button>
         <button id="studio-save-asset" class="btn btn-secondary" type="button" title="Create a Coin Shop asset from this design">Save as Asset</button>
@@ -995,7 +1005,7 @@ function appendHandles(el) {
   });
 }
 
-function buildComponentNode(comp) {
+function buildComponentNode(comp, { interactive = true } = {}) {
   const el = document.createElement('div');
   el.dataset.compId = comp.id;
   // CREATOR-08: expose the type so the guide can be identified in the DOM
@@ -1031,7 +1041,10 @@ function buildComponentNode(comp) {
   applyCommonStyleToElement(el, comp.style);
   if (comp.visible === false) el.classList.add('studio-comp-hidden');
   if (comp.locked) el.classList.add('studio-comp-locked');
-  if (!previewMode && comp.id === selectedId) appendHandles(el);
+  // CREATOR-15: a Version History preview is read-only, so it never
+  // carries selection handles even when a component of the same id is
+  // selected in the editor.
+  if (interactive && !previewMode && comp.id === selectedId) appendHandles(el);
   return el;
 }
 
@@ -1123,17 +1136,20 @@ function buildProfileSkeleton() {
  * Neither layer is a component: no geometry, no data-comp-id, pointer-events
  * none, and absent from Layers. Both always exist and carry a `none` state, so
  * "is anything active?" is a single readable value in the DOM either way.
+ *
+ * CREATOR-15: the theme and canvas are PARAMETERS with the live design as
+ * the default, so a Version History preview renders a stored version's own
+ * background and effect through this same layer builder — the same renderer
+ * the canvas and the public profile use, never a second one.
  */
-function renderStudioProfileLayers(doc) {
-  const theme = designTheme();
-  const url = backgroundImageUrl();
+function renderStudioProfileLayers(doc, theme = designTheme(), c = canvas()) {
+  const url = theme && typeof theme.backgroundImage === 'string' ? theme.backgroundImage : '';
   // The effect is a profile-wide layer too, so it shares the canvas and the same
   // design bounds.
   const effect = theme && typeof theme.backgroundEffect === 'object' ? theme.backgroundEffect : null;
   const effectActive = !!effect && effect.enabled !== false && !!effect.effectId;
   if (!doc) return;
 
-  const c = canvas();
   const canvasH = Math.max(c.minHeight, PROFILE_LAYOUT.background.height);
 
   // The canvas stops painting its own light surface when a background is really
@@ -1179,48 +1195,62 @@ function renderStudioProfileLayers(doc) {
   });
 }
 
-function renderCanvas() {
-  const inner = root?.querySelector('#studio-canvas-inner');
-  if (!inner || !currentDesign) return;
-
-  const c = canvas();
+/**
+ * CREATOR-15: build the design document — the DOM representation
+ * of a design's layout and theme at the design's own canvas size.
+ *
+ * This is the ONE document builder for the design model. The live
+ * Studio canvas, the Preview toggle and the Version History preview
+ * all render through it, so a stored version previews exactly as the
+ * canvas renders the live design: same background image and effect
+ * layers, same profile skeleton, same component nodes, same nesting.
+ *
+ * `layout` and `theme` are explicit parameters so a caller can
+ * render ANY stored design (a historical version) without touching
+ * the editor's current state.
+ *
+ * `interactive: false` renders read-only: no selection handles and
+ * no canvas-only element ids, for a document that lives outside the
+ * canvas. `includeSkeleton` defaults to the live-canvas behaviour
+ * (Studio chrome on, hidden in Preview); a Version History preview
+ * passes true to show the same module structure the editor shows.
+ */
+function buildDesignDocument(layoutObj, themeObj, { interactive = true, includeSkeleton = null, emptyMessage = null } = {}) {
+  const c = (layoutObj && typeof layoutObj.canvas === 'object' && layoutObj.canvas)
+    ? layoutObj.canvas
+    : { width: 960, minHeight: 1200 };
   const doc = document.createElement('div');
-  doc.id = 'studio-canvas-document';
   doc.className = 'studio-canvas-document';
   doc.style.width = `${c.width}px`;
   doc.style.minHeight = `${c.minHeight}px`;
 
-  // CREATOR-09: state the real design canvas size. It tracks layout.canvas, so
-  // editing the canvas width/height in Properties updates it immediately.
-  const sizeLabel = root?.querySelector('#studio-canvas-size');
-  if (sizeLabel) sizeLabel.textContent = `Canvas ${c.width} × ${c.minHeight} px`;
-
-  const ordered = [...components()].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
-  if (ordered.length === 0) {
+  const ordered = [...((layoutObj && Array.isArray(layoutObj.components)) ? layoutObj.components : [])]
+    .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+  if (ordered.length === 0 && emptyMessage) {
     const empty = document.createElement('div');
     empty.className = 'studio-canvas-empty';
-    empty.textContent = 'Your profile is empty. Click a section or "+" in the Elements panel to place it, or drag it onto the canvas.';
+    empty.textContent = emptyMessage;
     doc.appendChild(empty);
   }
 
   // CREATOR-10C: the Profile Background image and effect are layers OF the design
   // canvas, drawn first so the profile structure, guide cards and components all
-  // sit on top of them. Called here so every canvas render keeps them in step
-  // with the design.
-  renderStudioProfileLayers(doc);
+  // sit on top of them.
+  renderStudioProfileLayers(doc, themeObj, c);
 
   // CREATOR-10: the real profile structure is drawn FIRST, so every component
   // sits on top of it. It is Studio-only editing chrome, so Preview leaves it
   // out — exactly the exclusion the public profile renderer applies.
-  if (!previewMode) doc.appendChild(buildProfileSkeleton());
+  const showSkeleton = includeSkeleton === null ? (interactive && !previewMode) : includeSkeleton;
+  if (showSkeleton) doc.appendChild(buildProfileSkeleton());
 
   // CREATOR-09: guide cards are a Studio-only aid. Preview represents the real
   // published profile, so no guide is drawn there — exactly as the public
   // profile renderer excludes them. The components themselves are untouched and
   // still saved with the design.
-  const visible = previewMode
-    ? ordered.filter(comp => !GUIDE_COMPONENT_TYPES.has(comp.type))
-    : ordered;
+  const visible = showSkeleton
+    ? ordered
+    : ordered.filter(comp => !GUIDE_COMPONENT_TYPES.has(comp.type));
 
   // CREATOR-11: mount containers before their children, then nest each child
   // INSIDE its card element so the card's box genuinely clips it. A child whose
@@ -1230,7 +1260,7 @@ function renderCanvas() {
   const nested = visible.filter(comp => isNested(comp));
   const topLevel = visible.filter(comp => !isNested(comp));
   for (const comp of topLevel) {
-    const node = buildComponentNode(comp);
+    const node = buildComponentNode(comp, { interactive });
     doc.appendChild(node);
     nodes.set(comp.id, node);
   }
@@ -1238,12 +1268,37 @@ function renderCanvas() {
     const parentNode = nodes.get(comp.parentId);
     // Mount into the card's masking surface, matching the public renderer exactly.
     const surface = parentNode ? (parentNode.querySelector(':scope > .design-card-surface')) : null;
-    const node = buildComponentNode(comp);
+    const node = buildComponentNode(comp, { interactive });
     if (surface) surface.appendChild(node);
     else if (parentNode) parentNode.appendChild(node);
     else doc.appendChild(node);
     nodes.set(comp.id, node);
   }
+
+  if (!interactive) {
+    // A preview document is not THE canvas: drop the canvas-only ids
+    // so a preview never duplicates the live canvas's element ids.
+    for (const layer of doc.querySelectorAll('#studio-profile-background, #studio-profile-effect-layer')) {
+      layer.removeAttribute('id');
+    }
+  }
+  return doc;
+}
+
+function renderCanvas() {
+  const inner = root?.querySelector('#studio-canvas-inner');
+  if (!inner || !currentDesign) return;
+
+  const c = canvas();
+  // CREATOR-09: state the real design canvas size. It tracks layout.canvas, so
+  // editing the canvas width/height in Properties updates it immediately.
+  const sizeLabel = root?.querySelector('#studio-canvas-size');
+  if (sizeLabel) sizeLabel.textContent = `Canvas ${c.width} × ${c.minHeight} px`;
+
+  const doc = buildDesignDocument(layout(), designTheme(), {
+    emptyMessage: 'Your profile is empty. Click a section or "+" in the Elements panel to place it, or drag it onto the canvas.',
+  });
+  doc.id = 'studio-canvas-document';
 
   const zoomLayer = document.createElement('div');
   zoomLayer.id = 'studio-zoom-layer';
@@ -3604,7 +3659,11 @@ async function saveDraft() {
   if (!currentDesign) return null;
   return runAction(async () => {
     setStatus('Saving draft…');
-    const result = await designApi.updateDesign(currentDesign.id, {
+    // CREATOR-15: Save is an explicit, versioned snapshot. The server
+    // validates the full design, compares it against the persisted state
+    // and appends a new immutable version only when something changed —
+    // so every Save is a recoverable point in the project's history.
+    const result = await versionApi.saveVersion(currentDesign.id, {
       name: currentDesign.name,
       layout: clone(layout()),
       // CREATOR-10: the Profile Background is design-level theme configuration,
@@ -3612,7 +3671,7 @@ async function saveDraft() {
       // is what carries the background; the server validates it strictly.
       theme: isPlainTheme(currentDesign.theme) ? clone(currentDesign.theme) : null,
     });
-    currentDesign = normalizeDesign(result.design);
+    currentDesign = normalizeDesign(result.project);
     // CREATOR-10A: a staged upload belongs to the design it was staged in, so
     // switching designs must never carry it over as a phantom background.
     resetPendingBackground();
@@ -3621,7 +3680,12 @@ async function saveDraft() {
     renderProperties();
     dirty = false;
     updateToolbar();
-    setStatus('Draft saved. Publish to show it on your profile.');
+    updateProjectNameIndicator();
+    if (result.saved === false) {
+      setStatus(`Already saved — no changes since version ${result.version}.`);
+    } else {
+      setStatus(`Saved as version ${result.version}. Publish to show it on your profile.`);
+    }
     return currentDesign;
   });
 }
@@ -3821,6 +3885,236 @@ function closeAssetModal() {
   assetModalAsset = null;
 }
 
+// ── Version History (CREATOR-15) ────────────────────────────────
+//
+// The history modal lists every saved version (metadata only) and
+// previews a selected version's full snapshot. The preview is
+// rendered by buildDesignDocument — the SAME document builder the
+// canvas uses — so a version previews exactly as the canvas renders
+// the live design. Runtime effect state (frames, rAF loops,
+// controllers) is created for the preview and torn down with it;
+// it is never part of any version.
+
+function escapeVersionText(text) {
+  if (text == null) return '';
+  return String(text)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+function formatVersionTime(isoString) {
+  if (!isoString) return 'Unknown';
+  const date = new Date(String(isoString).replace(' ', 'T'));
+  if (isNaN(date.getTime())) return 'Unknown';
+  return date.toLocaleString(undefined, {
+    month: 'short', day: 'numeric', year: 'numeric',
+    hour: 'numeric', minute: '2-digit',
+  });
+}
+
+/**
+ * Stop the preview's effect loop and drop the tracked layer.
+ * The renderer keeps playback state per layer, so stopping the
+ * preview's layer never touches the canvas's own effect.
+ */
+function stopVersionPreviewEffect() {
+  if (versionPreviewEffectLayer) {
+    try { clearProfileBackgroundEffect(versionPreviewEffectLayer); } catch { /* best effort */ }
+    versionPreviewEffectLayer = null;
+  }
+}
+
+function closeVersionHistoryModal() {
+  stopVersionPreviewEffect();
+  if (versionHistoryModal && versionHistoryModal.parentNode) {
+    versionHistoryModal.remove();
+  }
+  versionHistoryModal = null;
+  versionPreviewVersion = null;
+}
+
+/**
+ * Render a stored version's snapshot into the preview stage,
+ * read-only: no selection handles, no canvas-only element ids.
+ */
+function renderVersionPreview(version) {
+  const stage = versionHistoryModal?.querySelector('#studio-version-preview-stage');
+  if (!stage) return;
+  stopVersionPreviewEffect();
+  stage.replaceChildren();
+  versionPreviewVersion = version;
+
+  const doc = buildDesignDocument(version.layout, version.theme, {
+    interactive: false,
+    includeSkeleton: true,
+  });
+  stage.appendChild(doc);
+
+  // The effect layer the preview just created (its id was stripped
+  // so it cannot collide with the canvas's). Track it so closing
+  // the modal stops its animation loop.
+  versionPreviewEffectLayer = doc.querySelector('.studio-profile-effect-layer') || null;
+
+  const restoreBtn = versionHistoryModal?.querySelector('#studio-version-restore');
+  if (restoreBtn) {
+    restoreBtn.disabled = version.is_current === true;
+    restoreBtn.textContent = version.is_current ? 'Current version' : `Restore v${version.version}`;
+  }
+  const result = versionHistoryModal?.querySelector('#studio-version-result');
+  if (result) result.replaceChildren();
+}
+
+function renderVersionList(versions) {
+  const list = versionHistoryModal?.querySelector('#studio-version-list');
+  if (!list) return;
+  list.replaceChildren();
+  if (!versions.length) {
+    const empty = document.createElement('p');
+    empty.className = 'studio-modal-note';
+    empty.textContent = 'No versions yet. Save the project to create the first version.';
+    list.appendChild(empty);
+    return;
+  }
+  for (const version of versions) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'studio-version-row';
+    if (version.is_current) row.classList.add('studio-version-current');
+
+    const num = document.createElement('span');
+    num.className = 'studio-version-num';
+    num.textContent = `v${version.version}`;
+
+    const meta = document.createElement('span');
+    meta.className = 'studio-version-meta';
+    const name = document.createElement('strong');
+    name.textContent = version.name;
+    const when = document.createElement('small');
+    when.textContent = `${formatVersionTime(version.created_at)}${version.restored_from_version ? ` · restored from v${version.restored_from_version}` : ''}`;
+    meta.append(name, when);
+
+    row.append(num, meta);
+    if (version.is_current) {
+      const badge = document.createElement('span');
+      badge.className = 'studio-version-badge';
+      badge.textContent = 'current';
+      row.appendChild(badge);
+    }
+
+    row.addEventListener('click', () => {
+      // The list carries metadata only; the full snapshot is
+      // fetched on demand, so the history stays cheap.
+      loadVersionPreview(version.version);
+    });
+    list.appendChild(row);
+  }
+}
+
+async function loadVersionPreview(versionNumber) {
+  if (!currentDesign || !versionHistoryModal) return;
+  const result = versionHistoryModal.querySelector('#studio-version-result');
+  if (result) result.replaceChildren();
+  try {
+    const snapshot = await versionApi.getVersion(currentDesign.id, versionNumber);
+    // The modal may have been closed while the request was in flight.
+    if (!versionHistoryModal) return;
+    renderVersionPreview(snapshot.version);
+  } catch (error) {
+    if (!versionHistoryModal) return;
+    if (result) result.textContent = `Could not load version ${versionNumber}: ${error.message}`;
+  }
+}
+
+async function openVersionHistoryModal() {
+  if (!currentDesign) return;
+  closeVersionHistoryModal();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'studio-modal-overlay studio-version-overlay';
+  overlay.dataset.close = '';
+  overlay.innerHTML = `
+    <div class="studio-modal studio-version-modal" role="dialog" aria-modal="true" aria-labelledby="studio-version-title">
+      <button type="button" class="studio-modal-close" data-close aria-label="Close">&times;</button>
+      <h2 id="studio-version-title">Version History</h2>
+      <p class="studio-modal-note">Every Save appends an immutable version of this project.
+      Restoring an older version never deletes history — it saves the restored state as a
+      NEW version.</p>
+      <div class="studio-version-body">
+        <div class="studio-version-list" id="studio-version-list" aria-label="Saved versions"></div>
+        <div class="studio-version-preview">
+          <div class="studio-version-preview-stage" id="studio-version-preview-stage"></div>
+        </div>
+      </div>
+      <div class="studio-modal-actions">
+        <button type="button" class="btn btn-secondary" data-close>Close</button>
+        <button type="button" class="btn btn-primary" id="studio-version-restore" disabled>Restore</button>
+      </div>
+      <div id="studio-version-result" class="studio-version-result"></div>
+    </div>`;
+  versionHistoryModal = overlay;
+  root.appendChild(overlay);
+
+  overlay.addEventListener('pointerdown', event => {
+    if (event.target === overlay || event.target.dataset.close !== undefined) closeVersionHistoryModal();
+  });
+  overlay.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      closeVersionHistoryModal();
+    }
+  });
+
+  overlay.querySelector('#studio-version-restore').addEventListener('click', restoreVersionFromModal);
+
+  const list = overlay.querySelector('#studio-version-list');
+  list.innerHTML = '<p class="studio-modal-note">Loading versions…</p>';
+  try {
+    const result = await versionApi.listVersions(currentDesign.id);
+    // The modal may have been closed while the request was in flight.
+    if (versionHistoryModal !== overlay) return;
+    renderVersionList(result.versions || []);
+  } catch (error) {
+    if (versionHistoryModal !== overlay) return;
+    list.replaceChildren();
+    const err = document.createElement('p');
+    err.className = 'studio-modal-note';
+    err.textContent = `Could not load version history: ${error.message}`;
+    list.appendChild(err);
+  }
+}
+
+async function restoreVersionFromModal() {
+  if (!currentDesign || !versionPreviewVersion) return;
+  const target = versionPreviewVersion;
+  if (target.is_current) return;
+  if (!window.confirm(`Restore version ${target.version} ("${target.name}")? It becomes the new current version. Unsaved editor changes are discarded; the version history is kept.`)) return;
+
+  const restoreBtn = versionHistoryModal?.querySelector('#studio-version-restore');
+  if (restoreBtn) restoreBtn.disabled = true;
+  const resultBox = versionHistoryModal?.querySelector('#studio-version-result');
+  if (resultBox) resultBox.textContent = '';
+
+  try {
+    const result = await versionApi.restoreVersion(currentDesign.id, target.version);
+    // Reload the restored state into the editor exactly like a
+    // design switch: the server is the source of truth for the
+    // new current version. Unsaved editor changes are
+    // intentionally discarded — they were never part of any version.
+    dirty = false;
+    await switchDesign(currentDesign.id);
+    designs = designs.map(d => (d.id === currentDesign.id ? currentDesign : d));
+    renderDesignSelect();
+    updateProjectNameIndicator();
+    setStatus(`Restored version ${target.version} as version ${result.version}.`);
+    closeVersionHistoryModal();
+  } catch (error) {
+    if (resultBox) resultBox.textContent = `Restore failed: ${error.message}`;
+    if (restoreBtn) restoreBtn.disabled = false;
+  }
+}
+
 async function switchDesign(designId) {
   if (dirty && !window.confirm('Discard unsaved changes to the current design?')) return;
   const design = designs.find(d => d.id === designId);
@@ -3918,6 +4212,7 @@ function attachEvents() {
   root.querySelector('#studio-save').addEventListener('click', saveDraft);
   root.querySelector('#studio-publish').addEventListener('click', publish);
   root.querySelector('#studio-save-asset').addEventListener('click', openSaveAssetModal);
+  root.querySelector('#studio-version-history').addEventListener('click', openVersionHistoryModal);
   root.querySelector('#studio-new-design').addEventListener('click', createNewDesign);
   root.querySelector('#studio-open-profile').addEventListener('click', () => navigate('/profile'));
   root.querySelector('#studio-coin-shop').addEventListener('click', () => navigate('/creator-studio/coin-shop'));
@@ -3984,16 +4279,30 @@ function getRequestedProjectId() {
 /**
  * CREATOR-14: show the name of the project currently open in the studio
  * header, so the creator always knows which project they are editing.
+ *
+ * CREATOR-15: the same row carries the project's current version number,
+ * so the creator can see which version the editor holds before saving.
  */
 function updateProjectNameIndicator() {
   const el = root?.querySelector('#studio-project-name');
-  if (!el) return;
-  if (currentDesign && currentDesign.name) {
-    el.textContent = `Project: ${currentDesign.name}`;
-    el.hidden = false;
-  } else {
-    el.textContent = '';
-    el.hidden = true;
+  if (el) {
+    if (currentDesign && currentDesign.name) {
+      el.textContent = `Project: ${currentDesign.name}`;
+      el.hidden = false;
+    } else {
+      el.textContent = '';
+      el.hidden = true;
+    }
+  }
+  const versionEl = root?.querySelector('#studio-project-version');
+  if (versionEl) {
+    if (currentDesign && currentDesign.id) {
+      versionEl.textContent = `v${currentDesign.version || 1}`;
+      versionEl.hidden = false;
+    } else {
+      versionEl.textContent = '';
+      versionEl.hidden = true;
+    }
   }
 }
 
@@ -4078,6 +4387,7 @@ export function canLeaveCreatorStudio() {
 
 export function destroyCreatorStudioPage() {
   closeAssetModal();
+  closeVersionHistoryModal();
   window.removeEventListener('keydown', keyHandler);
   window.removeEventListener('beforeunload', beforeUnload);
   window.removeEventListener('pointermove', onPointerMove);

@@ -913,11 +913,24 @@ export async function handleCreateDesign(req, res, user) {
 
     const id = generateId();
     const ts = now();
-    execute(
-      `INSERT INTO profile_designs (id, user_id, name, status, version, layout_config, theme_config, created_at, updated_at)
-       VALUES (?, ?, ?, 'draft', 1, ?, ?, ?, ?)`,
-      [id, user.sub, data.name, JSON.stringify(data.layout), data.theme ? JSON.stringify(data.theme) : null, ts, ts]
-    );
+    transaction(() => {
+      execute(
+        `INSERT INTO profile_designs (id, user_id, name, status, version, layout_config, theme_config, created_at, updated_at)
+         VALUES (?, ?, ?, 'draft', 1, ?, ?, ?, ?)`,
+        [id, user.sub, data.name, JSON.stringify(data.layout), data.theme ? JSON.stringify(data.theme) : null, ts, ts]
+      );
+      // CREATOR-15: the creation state IS version 1, so every design —
+      // however it was created — has a complete version history from
+      // its first explicit save onward.
+      execute(
+        `INSERT INTO profile_design_versions
+           (id, design_id, user_id, version, name, description, status,
+            layout_config, theme_config, thumbnail_url, restored_from_version, created_at)
+         VALUES (?, ?, ?, 1, ?, '', 'draft', ?, ?, NULL, NULL, ?)`,
+        [generateId(), id, user.sub, data.name, JSON.stringify(data.layout),
+         data.theme ? JSON.stringify(data.theme) : null, ts]
+      );
+    });
 
     const created = findOwnedDesign(id, user.sub);
     jsonResponse(res, 201, { design: serializeDesignRow(created) });
@@ -995,6 +1008,24 @@ export async function handlePublishDesign(req, res, user, params) {
 
     const ts = now();
     const version = Number(existing.version) + 1;
+    // CREATOR-15: publishing bumps the version, so the published
+    // state is itself a save-point — otherwise the current
+    // version would exceed the highest saved version and the
+    // history would no longer describe the live design.
+    let publishLayout = null;
+    let publishTheme = null;
+    try {
+      publishLayout = JSON.parse(existing.layout_config || '{}');
+    } catch (e) {
+      publishLayout = null;
+    }
+    if (existing.theme_config) {
+      try {
+        publishTheme = JSON.parse(existing.theme_config);
+      } catch (e) {
+        publishTheme = null;
+      }
+    }
     transaction(() => {
       execute(
         `UPDATE profile_designs SET status = 'archived', updated_at = ?
@@ -1006,6 +1037,18 @@ export async function handlePublishDesign(req, res, user, params) {
          WHERE id = ? AND user_id = ?`,
         [ts, version, ts, params.id, user.sub]
       );
+      if (publishLayout !== null) {
+        execute(
+          `INSERT INTO profile_design_versions
+             (id, design_id, user_id, version, name, description, status,
+              layout_config, theme_config, thumbnail_url, restored_from_version, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'published', ?, ?, ?, NULL, ?)`,
+          [generateId(), params.id, user.sub, version, existing.name,
+           existing.description || '', JSON.stringify(publishLayout),
+           publishTheme ? JSON.stringify(publishTheme) : null,
+           existing.thumbnail_url || null, ts]
+        );
+      }
     });
 
     const updated = findOwnedDesign(params.id, user.sub);

@@ -25,6 +25,10 @@ import {
   handleArchiveProject,
   handleRestoreProject,
   handleDeleteProject,
+  handleSaveProjectVersion,
+  handleListProjectVersions,
+  handleGetProjectVersion,
+  handleRestoreProjectVersion,
 } from './creatorProjects.js';
 import { handleListAssets, handleCreateAsset, handleGetAsset, handleUpdateAsset, handleSubmitAsset, handlePublishAsset, handleArchiveAsset } from './creatorAssets.js';
 import { handleUploadCreatorMedia } from './creatorMedia.js';
@@ -459,6 +463,34 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
       const user = requireAuth(req, res);
       if (!user) return;
       return handleRestoreProject(req, res, user, projectRestoreMatch);
+    }
+
+    // CREATOR-15: Version History. Explicit save, history list,
+    // per-version snapshot and restore. Registered with the other
+    // project routes, before the generic /api/creator/assets route.
+    const projectSaveMatch = matchRoute('/api/creator/projects/:id/save', path);
+    if (method === 'POST' && projectSaveMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleSaveProjectVersion(req, res, user, projectSaveMatch);
+    }
+    const projectVersionsMatch = matchRoute('/api/creator/projects/:id/versions', path);
+    if (method === 'GET' && projectVersionsMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleListProjectVersions(req, res, user, projectVersionsMatch);
+    }
+    const projectVersionMatch = matchRoute('/api/creator/projects/:id/versions/:version', path);
+    if (method === 'GET' && projectVersionMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleGetProjectVersion(req, res, user, projectVersionMatch);
+    }
+    const projectVersionRestoreMatch = matchRoute('/api/creator/projects/:id/versions/:version/restore', path);
+    if (method === 'POST' && projectVersionRestoreMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleRestoreProjectVersion(req, res, user, projectVersionRestoreMatch);
     }
     if (method === 'DELETE' && projectMatch) {
       const user = requireAuth(req, res);

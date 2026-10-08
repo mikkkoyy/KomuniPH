@@ -128,12 +128,25 @@ export async function handleCreateProject(req, res, user) {
       components: [],
     };
 
-    execute(
-      `INSERT INTO profile_designs
-         (id, user_id, name, description, status, version, layout_config, theme_config, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'draft', 1, ?, ?, ?, ?)`,
-      [id, user.sub, data.name.trim(), data.description.trim(), JSON.stringify(defaultLayout), null, ts, ts]
-    );
+    transaction(() => {
+      execute(
+        `INSERT INTO profile_designs
+           (id, user_id, name, description, status, version, layout_config, theme_config, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'draft', 1, ?, ?, ?, ?)`,
+        [id, user.sub, data.name.trim(), data.description.trim(), JSON.stringify(defaultLayout), null, ts, ts]
+      );
+      // CREATOR-15: the creation state IS version 1, so the version
+      // history is complete from the very first save onward and the
+      // invariant "current version == highest saved version" holds
+      // everywhere, for every project, from every creation path.
+      execute(
+        `INSERT INTO profile_design_versions
+           (id, design_id, user_id, version, name, description, status,
+            layout_config, theme_config, thumbnail_url, restored_from_version, created_at)
+         VALUES (?, ?, ?, 1, ?, ?, 'draft', ?, NULL, NULL, NULL, ?)`,
+        [generateId(), id, user.sub, data.name.trim(), data.description.trim(), JSON.stringify(defaultLayout), ts]
+      );
+    });
 
     const created = findOwnedProject(id, user.sub);
     jsonResponse(res, 201, { project: serializeProjectRow(created) });
@@ -340,6 +353,17 @@ export async function handleDuplicateProject(req, res, user, params) {
        VALUES (?, ?, ?, ?, 'draft', 1, ?, ?, ?, ?)`,
       [newId, user.sub, newName, existing.description || '', JSON.stringify(layout), theme ? JSON.stringify(theme) : null, ts, ts]
     );
+    // CREATOR-15: the duplicate is an independent project whose creation
+    // state (the cloned layout) is its version 1. Its history starts
+    // fresh — it does not inherit the source project's versions.
+    execute(
+      `INSERT INTO profile_design_versions
+         (id, design_id, user_id, version, name, description, status,
+          layout_config, theme_config, thumbnail_url, restored_from_version, created_at)
+       VALUES (?, ?, ?, 1, ?, ?, 'draft', ?, ?, NULL, NULL, ?)`,
+      [generateId(), newId, user.sub, newName, existing.description || '',
+       JSON.stringify(layout), theme ? JSON.stringify(theme) : null, ts]
+    );
 
     const created = findOwnedProject(newId, user.sub);
     jsonResponse(res, 201, { project: serializeProjectRow(created) });
@@ -434,6 +458,345 @@ export async function handleDeleteProject(req, res, user, params) {
     jsonResponse(res, 200, { success: true });
   } catch (err) {
     console.error('[PROJECT] Delete project error:', err);
+    errorResponse(res, 500, 'Internal server error');
+  }
+}
+
+// ── CREATOR-15: Version History ─────────────────────────────────────────
+//
+// A version is an immutable snapshot of a design's name, layout and theme.
+// Saving appends a new row; restoring an old version appends a NEW row that
+// copies the old contents. History is append-only: no row is ever updated
+// or deleted, so every version a creator has saved stays exactly as saved.
+
+/**
+ * Canonical JSON with recursively sorted keys. Two payloads that differ
+ * only in key order compare equal, so "did the design change?" is a
+ * question about MEANING, never about byte order or timestamps.
+ */
+function canonicalJson(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  const keys = Object.keys(value).sort();
+  return `{${keys.map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
+}
+
+/**
+ * Fingerprint of a persisted design row's state. Used for the deterministic
+ * no-change detection: a re-save of identical content writes nothing.
+ */
+function designFingerprint(row) {
+  let layout = null;
+  try {
+    layout = JSON.parse(row.layout_config || '{}');
+  } catch (e) {
+    layout = null;
+  }
+  let theme = null;
+  if (row.theme_config) {
+    try {
+      theme = JSON.parse(row.theme_config);
+    } catch (e) {
+      theme = null;
+    }
+  }
+  return canonicalJson({ name: row.name, layout, theme });
+}
+
+/**
+ * Serialize a profile_design_versions row. Re-validates the stored
+ * layout/theme so a stored snapshot can never break a consumer.
+ */
+function serializeVersionRow(row) {
+  if (!row) return null;
+  let layout = null;
+  try {
+    layout = JSON.parse(row.layout_config || '{}');
+  } catch (e) {
+    return null;
+  }
+  let theme = null;
+  if (row.theme_config) {
+    try {
+      theme = JSON.parse(row.theme_config);
+    } catch (e) {
+      theme = null;
+    }
+  }
+  if (layout === null || typeof layout !== 'object') return null;
+  const check = validateDesignPayload({ name: row.name, layout, theme }, { partial: true });
+  if (check.errors.length > 0) return null;
+
+  return {
+    version: Number(row.version),
+    name: row.name,
+    description: row.description || '',
+    status: row.status,
+    layout,
+    theme,
+    thumbnail_url: row.thumbnail_url || null,
+    restored_from_version:
+      row.restored_from_version === null || row.restored_from_version === undefined
+        ? null
+        : Number(row.restored_from_version),
+    created_at: row.created_at,
+  };
+}
+
+function listDesignVersions(designId) {
+  return queryAll(
+    `SELECT version, name, description, status, thumbnail_url, restored_from_version, created_at
+     FROM profile_design_versions WHERE design_id = ? ORDER BY version DESC`,
+    [designId]
+  );
+}
+
+/**
+ * Serialize a history LIST entry: metadata only. The full
+ * layout/theme of a version is fetched per-version, so the
+ * list stays cheap and never carries a design payload.
+ */
+function serializeVersionSummary(row) {
+  if (!row) return null;
+  return {
+    version: Number(row.version),
+    name: row.name,
+    description: row.description || '',
+    status: row.status,
+    thumbnail_url: row.thumbnail_url || null,
+    restored_from_version:
+      row.restored_from_version === null || row.restored_from_version === undefined
+        ? null
+        : Number(row.restored_from_version),
+    created_at: row.created_at,
+  };
+}
+
+function findDesignVersion(designId, version) {
+  return queryOne(
+    `SELECT version, name, description, status, layout_config, theme_config,
+            thumbnail_url, restored_from_version, created_at
+     FROM profile_design_versions WHERE design_id = ? AND version = ?`,
+    [designId, version]
+  );
+}
+
+/**
+ * The next version number for a design. The server is the only authority:
+ * it is always one above the highest version the design has ever saved,
+ * so a version number can never be reused, decremented or supplied by a
+ * client. The MAX() guard keeps the number collision-free even if a
+ * design row's version ever drifted below its highest saved version.
+ */
+function nextVersionFor(designId, currentVersion) {
+  const row = queryOne(
+    `SELECT MAX(version) AS max_version FROM profile_design_versions WHERE design_id = ?`,
+    [designId]
+  );
+  const maxSaved = Number(row && row.max_version) || 0;
+  return Math.max(Number(currentVersion) || 0, maxSaved) + 1;
+}
+
+/**
+ * Write a version row and update the current design row in one
+ * transaction, so the version history and the current state can never
+ * disagree (an atomic save).
+ */
+function writeVersion(designId, userId, version, name, description, status, layout, theme, thumbnailUrl, restoredFrom, ts) {
+  transaction(() => {
+    execute(
+      `INSERT INTO profile_design_versions
+         (id, design_id, user_id, version, name, description, status,
+          layout_config, theme_config, thumbnail_url, restored_from_version, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [generateId(), designId, userId, version, name, description, status,
+       JSON.stringify(layout), theme ? JSON.stringify(theme) : null,
+       thumbnailUrl || null, restoredFrom, ts]
+    );
+    execute(
+      `UPDATE profile_designs
+       SET name = ?, layout_config = ?, theme_config = ?, version = ?, updated_at = ?
+       WHERE id = ? AND user_id = ? AND deleted_at IS NULL`,
+      [name, JSON.stringify(layout), theme ? JSON.stringify(theme) : null, version, ts, designId, userId]
+    );
+  });
+}
+
+/**
+ * POST /api/creator/projects/:id/save — explicit Save.
+ *
+ * Validates the FULL design payload (name + layout + theme), then compares
+ * it against the persisted state with a canonical fingerprint. An unchanged
+ * design creates NO new version. A changed design writes a new immutable
+ * version and updates the current design atomically.
+ */
+export async function handleSaveProjectVersion(req, res, user, params) {
+  try {
+    const existing = findOwnedProject(params.id, user.sub);
+    if (!existing) return errorResponse(res, 404, 'Project not found');
+
+    const body = await parseBody(req);
+    if (body === null) return;
+
+    // A save is a full snapshot: layout and theme are
+    // required explicitly. The shared validator treats a
+    // MISSING layout as "blank design" and a missing
+    // theme as null (the create contract); a save must
+    // never silently blank a project or drop its theme,
+    // so both keys must be present. An explicit
+    // `theme: null` ("no theme") is a valid value.
+    if (body.layout === undefined || body.theme === undefined) {
+      return errorResponse(res, 400, 'layout and theme are required');
+    }
+
+    const { errors, data } = validateDesignPayload(body, { partial: false });
+    if (errors.length > 0) {
+      return errorResponse(res, 400, errors.join('; '));
+    }
+
+    // Deterministic no-change detection. Timestamps are never consulted:
+    // re-saving identical content is a no-op even though updated_at
+    // would otherwise differ.
+    const incoming = canonicalJson({ name: data.name, layout: data.layout, theme: data.theme });
+    if (incoming === designFingerprint(existing)) {
+      return jsonResponse(res, 200, {
+        project: serializeProjectRow(existing),
+        saved: false,
+        version: Number(existing.version) || 1,
+        message: 'No changes to save',
+      });
+    }
+
+    const ts = now();
+    const version = nextVersionFor(params.id, existing.version);
+    writeVersion(
+      params.id, user.sub, version, data.name, existing.description || '',
+      existing.status, data.layout, data.theme, existing.thumbnail_url || null,
+      null, ts
+    );
+
+    const updated = findOwnedProject(params.id, user.sub);
+    jsonResponse(res, 200, {
+      project: serializeProjectRow(updated),
+      saved: true,
+      version,
+    });
+  } catch (err) {
+    console.error('[PROJECT] Save version error:', err);
+    errorResponse(res, 500, 'Internal server error');
+  }
+}
+
+/**
+ * GET /api/creator/projects/:id/versions — the version history, newest
+ * first. List entries carry metadata only; a version's full layout and
+ * theme are fetched per-version so the list stays cheap.
+ */
+export async function handleListProjectVersions(req, res, user, params) {
+  try {
+    const existing = findOwnedProject(params.id, user.sub);
+    if (!existing) return errorResponse(res, 404, 'Project not found');
+
+    const currentVersion = Number(existing.version) || 1;
+    const versions = [];
+    for (const row of listDesignVersions(params.id)) {
+      const version = serializeVersionSummary(row);
+      if (!version) continue;
+      versions.push({ ...version, is_current: version.version === currentVersion });
+    }
+    jsonResponse(res, 200, { project_id: params.id, versions });
+  } catch (err) {
+    console.error('[PROJECT] List versions error:', err);
+    errorResponse(res, 500, 'Internal server error');
+  }
+}
+
+/**
+ * GET /api/creator/projects/:id/versions/:version — one full snapshot.
+ */
+export async function handleGetProjectVersion(req, res, user, params) {
+  try {
+    const existing = findOwnedProject(params.id, user.sub);
+    if (!existing) return errorResponse(res, 404, 'Project not found');
+
+    const version = Number(params.version);
+    if (!Number.isInteger(version) || version < 1) {
+      return errorResponse(res, 400, 'Version must be a positive integer');
+    }
+
+    const row = findDesignVersion(params.id, version);
+    if (!row) return errorResponse(res, 404, 'Version not found');
+
+    const currentVersion = Number(existing.version) || 1;
+    const snapshot = serializeVersionRow(row);
+    if (!snapshot) return errorResponse(res, 404, 'Version not found');
+    jsonResponse(res, 200, {
+      project_id: params.id,
+      version: { ...snapshot, is_current: snapshot.version === currentVersion },
+    });
+  } catch (err) {
+    console.error('[PROJECT] Get version error:', err);
+    errorResponse(res, 500, 'Internal server error');
+  }
+}
+
+/**
+ * POST /api/creator/projects/:id/versions/:version/restore — restore.
+ *
+ * Restoring NEVER mutates history: it writes a NEW version whose contents
+ * are the selected version's, records the restored-from version on the new
+ * row, and makes the new version the current design. The stored snapshot is
+ * re-validated before anything is written, so a version can never push an
+ * invalid design back into the current row.
+ */
+export async function handleRestoreProjectVersion(req, res, user, params) {
+  try {
+    const existing = findOwnedProject(params.id, user.sub);
+    if (!existing) return errorResponse(res, 404, 'Project not found');
+
+    const version = Number(params.version);
+    if (!Number.isInteger(version) || version < 1) {
+      return errorResponse(res, 400, 'Version must be a positive integer');
+    }
+
+    const target = findDesignVersion(params.id, version);
+    if (!target) return errorResponse(res, 404, 'Version not found');
+
+    let layout = null;
+    let theme = null;
+    try {
+      layout = JSON.parse(target.layout_config || '{}');
+    } catch (e) {
+      layout = null;
+    }
+    if (target.theme_config) {
+      try {
+        theme = JSON.parse(target.theme_config);
+      } catch (e) {
+        theme = null;
+      }
+    }
+    const check = validateDesignPayload({ name: target.name, layout, theme }, { partial: false });
+    if (check.errors.length > 0) {
+      return errorResponse(res, 409, `Version ${version} no longer validates: ${check.errors.join('; ')}`);
+    }
+
+    const ts = now();
+    const nextVersion = nextVersionFor(params.id, existing.version);
+    writeVersion(
+      params.id, user.sub, nextVersion, check.data.name, existing.description || '',
+      existing.status, check.data.layout, check.data.theme, target.thumbnail_url || null,
+      version, ts
+    );
+
+    const updated = findOwnedProject(params.id, user.sub);
+    jsonResponse(res, 200, {
+      project: serializeProjectRow(updated),
+      restored_from_version: version,
+      version: nextVersion,
+    });
+  } catch (err) {
+    console.error('[PROJECT] Restore version error:', err);
     errorResponse(res, 500, 'Internal server error');
   }
 }

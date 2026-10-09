@@ -61,6 +61,12 @@ const config = {
     // separate from creatorDir so a background effect can never be written into
     // (or served from) the image upload area.
     creatorEffectDir: process.env.UPLOAD_CREATOR_EFFECT_DIR || './uploads/creator-effects',
+    // CREATOR-17: isolated storage for uploaded MP3 tracks, kept separate from
+    // creatorDir (images) and creatorEffectDir so audio never mixes with either.
+    creatorAudioDir: process.env.UPLOAD_CREATOR_AUDIO_DIR || './uploads/creator-audio',
+    // MP3s are not re-encoded, so a music-sized cap (15 MB) is enforced here
+    // rather than reusing the 5 MB image cap.
+    creatorMaxAudioSize: parseInt(process.env.UPLOAD_CREATOR_MAX_AUDIO_SIZE || '15728640', 10),
     creatorMaxWidth: parseInt(process.env.UPLOAD_CREATOR_MAX_WIDTH || '1600', 10),
     creatorMaxHeight: parseInt(process.env.UPLOAD_CREATOR_MAX_HEIGHT || '1600', 10),
     maxWidth: parseInt(process.env.UPLOAD_PROFILE_MAX_WIDTH || '1024', 10),

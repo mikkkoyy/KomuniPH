@@ -2081,3 +2081,180 @@
     flex-wrap: wrap;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   CREATOR-17 - MP3 Music Player modal.
+   Dark/translucent like the rest of the Studio: it reuses --studio-* tokens
+   and the shared .studio-modal surface, adding only the compact transport
+   controls and the track list.
+   --------------------------------------------------------------------------- */
+.studio-music-overlay { z-index: 420; }
+.studio-music-modal { width: min(560px, 100%); }
+
+.studio-music-upload {
+  display: flex;
+  gap: 0.55rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 0.4rem;
+}
+#creator-studio .studio-music-upload input[type="file"] {
+  flex: 1 1 240px;
+  min-width: 0;
+  color: var(--studio-muted);
+  font: inherit;
+  font-size: 0.82rem;
+}
+.studio-music-note {
+  margin: 0 0 1rem;
+  color: var(--studio-muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+.studio-music-note[data-error="true"] { color: var(--studio-danger); }
+
+.studio-music-tracks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 220px;
+  overflow-y: auto;
+  margin-bottom: 1rem;
+}
+.studio-music-track {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0.7rem;
+  background: var(--studio-cp-panel);
+  border: 1px solid var(--studio-line);
+  border-radius: 10px;
+}
+.studio-music-track-info { min-width: 0; }
+.studio-music-track-info strong {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--studio-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.studio-music-track-meta {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--studio-muted);
+  margin-top: 0.1rem;
+}
+.studio-music-track .btn-sm { padding: 0.3rem 0.7rem; font-size: 0.72rem; }
+
+/* The player mounts inside the modal, below the track list. */
+.studio-music-player-mount {
+  border-top: 1px solid var(--studio-line);
+  padding-top: 0.9rem;
+}
+
+.studio-music-player {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 0.85rem;
+  background: var(--studio-cp-panel);
+  border: 1px solid var(--studio-line);
+  border-radius: 12px;
+}
+.studio-mp-head { display: flex; align-items: center; gap: 0.6rem; min-width: 0; }
+.studio-mp-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  color: var(--studio-accent);
+  flex-shrink: 0;
+}
+.studio-mp-icon svg { width: 100%; height: 100%; }
+.studio-mp-title {
+  font-size: 0.9rem;
+  color: var(--studio-text);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.studio-mp-transport {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.studio-mp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid var(--studio-line);
+  background: var(--studio-bg-3);
+  color: var(--studio-text);
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.studio-mp-btn:hover:not(:disabled) { border-color: var(--studio-accent-ring); }
+.studio-mp-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.studio-mp-btn.studio-mp-play { width: 44px; height: 44px; font-size: 1.05rem; }
+.studio-mp-time {
+  font-size: 0.76rem;
+  color: var(--studio-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.studio-mp-seek { flex: 1 1 auto; min-width: 60px; }
+.studio-mp-volume { width: 84px; flex-shrink: 0; }
+.studio-mp-seek,
+.studio-mp-volume {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--studio-line);
+  cursor: pointer;
+}
+.studio-mp-seek:disabled,
+.studio-mp-volume:disabled { opacity: 0.4; cursor: not-allowed; }
+.studio-mp-seek::-webkit-slider-thumb,
+.studio-mp-volume::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--studio-accent);
+}
+.studio-mp-seek::-moz-range-thumb,
+.studio-mp-volume::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border: none;
+  border-radius: 50%;
+  background: var(--studio-accent);
+}
+.studio-mp-status {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--studio-muted);
+  min-height: 1.1em;
+}
+/* One state is always shown; the error state is never silent. */
+.studio-music-player[data-state="error"] .studio-mp-status { color: var(--studio-danger); }
+.studio-music-player[data-state="playing"] .studio-mp-status { color: var(--studio-accent); }
+
+@media (max-width: 480px) {
+  .studio-mp-volume { width: 60px; }
+  .studio-mp-time { min-width: 30px; font-size: 0.7rem; }
+}
+

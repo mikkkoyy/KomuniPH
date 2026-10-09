@@ -45,6 +45,7 @@ import {
   handleDeleteLibraryItem,
   handleBatchDeleteLibraryItems,
 } from './creatorLibrary.js';
+import { handleUploadCreatorAudio, handleListCreatorAudio, handleGetCreatorAudio } from './creatorAudio.js';
 import { handleListMarketplaceAssets, handleGetMarketplaceAsset, handleListMarketplaceListings, handleCreateListing, handleGetListing, handleUpdateListing, handlePublishListing, handleArchiveListing, handleListOwnListings, handleCreatorSalesSummary, handleGetCoinShopProduct, handleBuyAsset, handleInstallAsset, handleListPurchasedAssets, handleCheckPurchased } from './marketplace.js';
 import { handleGetTestimonials, handleCreateTestimonial, handleDeleteTestimonial, handleGetUserTestimonials } from './testimonials.js';
 import { handleGetPhotos, handleUploadPhoto as handleGalleryUploadPhoto, handleDeletePhoto, handleGetOwnPhotos } from './gallery.js';
@@ -161,6 +162,9 @@ const MIME_TYPES = {
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
   '.webp': 'image/webp',
+  // CREATOR-17: without this, uploaded MP3s would serve as
+  // application/octet-stream and browsers would refuse to play them.
+  '.mp3': 'audio/mpeg',
 };
 
 const UPLOADS_DIR = resolve(__dirname, '..', 'uploads');
@@ -623,6 +627,28 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
       const user = requireAuth(req, res);
       if (!user) return;
       return handleBatchDeleteLibraryItems(req, res, user);
+    }
+
+    // CREATOR-17: Creator Studio MP3 Music Player (auth required). Uploads and
+    // a creator-scoped list of the caller's own tracks. Ownership comes from the
+    // token inside the handlers; a single-track fetch of another creator's id
+    // returns 404. The bytes are served back by the /uploads static route as
+    // audio/mpeg (see MIME_TYPES).
+    if (method === 'GET' && path === '/api/creator/audio') {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleListCreatorAudio(req, res, user);
+    }
+    if (method === 'POST' && path === '/api/creator/audio') {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleUploadCreatorAudio(req, res, user);
+    }
+    const creatorAudioMatch = matchRoute('/api/creator/audio/:id', path);
+    if (method === 'GET' && creatorAudioMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleGetCreatorAudio(req, res, user, creatorAudioMatch);
     }
 
     // CREATOR-03 Marketplace asset discovery (Coin Shop catalog).

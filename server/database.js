@@ -1517,6 +1517,28 @@ try {
   `);
 } catch (err) { /* safe no-op */ }
 
+// CREATOR-17: Creator Studio MP3 Music Player. A creator-scoped audio upload
+// pipeline mirroring creator_media: one row per successful upload, owned by the
+// uploader, so the player's source can be ownership-validated and a library
+// reference (future milestone) could back it. The file itself is never
+// re-encoded — MP3 is a container for timed audio, not something Sharp can
+// touch — so the pipeline validates the MP3 container (ID3 or frame sync),
+// enforces a size cap, writes it under a generated name, and records the row.
+try {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS creator_audio (
+      id TEXT PRIMARY KEY,
+      creator_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      url TEXT NOT NULL,
+      bytes INTEGER,
+      duration REAL,
+      bitrate INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_creator_audio_creator ON creator_audio(creator_user_id);
+  `);
+} catch (err) { /* safe no-op */ }
+
 // CREATOR-04: external sales/contact destination for normal Marketplace
 // listings. Nullable; validated server-side (http(s) URLs only).
 try {

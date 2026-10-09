@@ -15,7 +15,7 @@
  * using the same visual classes as the public renderer.
  */
 
-import { designApi, profileApi, creatorAssetsApi, getAccessToken, projectApi, versionApi, creatorLibraryApi } from './api.js';
+import { designApi, profileApi, creatorAssetsApi, getAccessToken, projectApi, versionApi, creatorLibraryApi, creatorAudioApi } from './api.js';
 import {
   CONTENT_COMPONENT_TYPES,
   applyGeometryToElement,
@@ -88,6 +88,10 @@ import {
   DEFAULT_VIEWER_HEIGHT,
   DEFAULT_ZOOM,
 } from './studioViewer.js';
+// CREATOR-17: the self-contained MP3 music player. All playback logic and the
+// element lifecycle live in this module; the studio only mounts it in a modal
+// and tears it down on close / navigation.
+import { MusicPlayer } from './musicPlayer.js';
 
 // ── Component catalog (mirrors the server registries) ────────────────────────
 const CONTROLLED_SECTIONS = [
@@ -339,6 +343,14 @@ let libraryFilter = 'all';
 let librarySearch = '';
 let librarySearchDebounce = null;
 
+// CREATOR-17: MP3 Music Player modal session state. The MusicPlayer instance is
+// created fresh per open and destroyed on every close/navigation, so playback
+// can never outlive the modal. musicPlayerTracks holds the creator's uploaded
+// tracks (server-issued URLs only).
+let musicPlayerModal = null;
+let musicPlayer = null;
+let musicPlayerTracks = [];
+
 function keyHandler(event) { onKey(event); }
 function beforeUnload(event) {
   if (dirty && !busy) { event.preventDefault(); event.returnValue = ''; }
@@ -484,6 +496,7 @@ export function renderCreatorStudioPage() {
         <button id="studio-publish" class="btn btn-cta" type="button">Publish</button>
         <button id="studio-save-asset" class="btn btn-secondary" type="button" title="Create a Coin Shop asset from this design">Save as Asset</button>
         <button id="studio-asset-library" class="btn btn-secondary" type="button" title="Open your persistent asset library — browse and reuse images, backgrounds, stickers, effects, projects and creator assets across designs">Asset Library</button>
+        <button id="studio-music-player" class="btn btn-secondary" type="button" title="Open the MP3 music player — upload and preview your own tracks">Music Player</button>
       </div>
       <div class="studio-layout" id="studio-layout">
         <aside id="studio-elements" class="studio-panel" aria-label="Elements">
@@ -4512,6 +4525,195 @@ async function removeLibraryItem(itemId) {
   }
 }
 
+// CREATOR-17: MP3 Music Player modal.
+// A compact player over the creator's OWN uploaded tracks. The player instance
+// is created fresh per open and destroyed on every close, so playback, event
+// listeners and the media element can never outlive the modal or navigation.
+// The track source is always a server-issued /uploads/creator-audio/ URL from
+// an ownership-checked row — the studio never invents a path.
+
+/** Readable label for an audio row: filename stem + size. */
+function audioTrackLabel(track) {
+  const fromUrl = String(track.url || '').split('/').pop() || '';
+  const stem = fromUrl.replace(/\.mp3$/i, '');
+  const short = stem.length > 8 ? `${stem.slice(0, 8)}…` : stem;
+  const mb = track.bytes ? ` · ${(track.bytes / 1024 / 1024).toFixed(1)} MB` : '';
+  return `Track ${short}${mb}`;
+}
+
+function closeMusicPlayerModal() {
+  // Tear the player down FIRST: this stops playback and detaches every
+  // listener before the modal leaves the DOM.
+  if (musicPlayer) {
+    musicPlayer.destroy();
+    musicPlayer = null;
+  }
+  if (musicPlayerModal && musicPlayerModal.parentNode) {
+    musicPlayerModal.remove();
+  }
+  musicPlayerModal = null;
+  musicPlayerTracks = [];
+}
+
+async function openMusicPlayerModal() {
+  if (musicPlayerModal) return;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'studio-modal-overlay studio-music-overlay';
+  overlay.innerHTML = `
+    <div class="studio-modal studio-music-modal" role="dialog" aria-modal="true" aria-labelledby="studio-music-title">
+      <button type="button" class="studio-modal-close" data-close aria-label="Close">&times;</button>
+      <h2 id="studio-music-title">Music Player</h2>
+      <p class="studio-modal-note">Preview your own MP3 tracks. Upload a file, then pick a track to play. Only your uploads are listed, and playback stops when you close this window.</p>
+
+      <div class="studio-music-upload">
+        <input type="file" id="studio-music-file" accept="audio/mpeg,.mp3" aria-label="Choose an MP3 file">
+        <button type="button" class="btn btn-secondary" id="studio-music-upload-btn">Upload MP3</button>
+      </div>
+      <p id="studio-music-upload-status" class="studio-music-note" role="status" aria-live="polite"></p>
+
+      <div id="studio-music-tracks" class="studio-music-tracks" aria-label="Your tracks"></div>
+
+      <div class="studio-music-player-mount" id="studio-music-player-mount"></div>
+
+      <div class="studio-modal-actions">
+        <button type="button" class="btn btn-secondary" data-close>Close</button>
+      </div>
+    </div>`;
+
+  overlay.addEventListener('pointerdown', event => {
+    if (event.target === overlay || event.target.dataset.close !== undefined) closeMusicPlayerModal();
+  });
+  overlay.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      closeMusicPlayerModal();
+    }
+  });
+
+  root.appendChild(overlay);
+  musicPlayerModal = overlay;
+
+  // Mount the player inside the modal. It owns its own <audio> element and UI.
+  const mount = overlay.querySelector('#studio-music-player-mount');
+  musicPlayer = new MusicPlayer(mount);
+
+  overlay.querySelector('#studio-music-upload-btn').addEventListener('click', () => {
+    uploadMusicTrack(overlay.querySelector('#studio-music-file'));
+  });
+
+  await loadMusicTracks();
+}
+
+async function loadMusicTracks() {
+  if (!musicPlayerModal) return;
+  const list = musicPlayerModal.querySelector('#studio-music-tracks');
+  list.replaceChildren();
+  list.innerHTML = '<p class="studio-modal-note">Loading your tracks…</p>';
+  try {
+    const result = await creatorAudioApi.listTracks();
+    // The modal may have closed while the request was in flight.
+    if (musicPlayerModal !== null && !musicPlayerModal.isConnected) return;
+    musicPlayerTracks = result.items || [];
+    renderMusicTracks();
+  } catch (error) {
+    list.replaceChildren();
+    const err = document.createElement('p');
+    err.className = 'studio-modal-note';
+    err.style.color = 'var(--studio-danger)';
+    err.textContent = `Could not load tracks: ${error.message}`;
+    list.appendChild(err);
+  }
+}
+function renderMusicTracks() {
+  if (!musicPlayerModal) return;
+  const list = musicPlayerModal.querySelector('#studio-music-tracks');
+  list.replaceChildren();
+
+  if (musicPlayerTracks.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'studio-modal-note';
+    empty.textContent = 'No tracks yet. Upload an MP3 above to start.';
+    list.appendChild(empty);
+    return;
+  }
+
+  for (const track of musicPlayerTracks) {
+    const row = document.createElement('div');
+    row.className = 'studio-music-track';
+    row.dataset.id = track.id;
+
+    const info = document.createElement('div');
+    info.className = 'studio-music-track-info';
+    const name = document.createElement('strong');
+    name.textContent = audioTrackLabel(track);
+    const meta = document.createElement('span');
+    meta.className = 'studio-music-track-meta';
+    meta.textContent = track.created_at ? new Date(track.created_at).toLocaleString() : '';
+    info.append(name, meta);
+
+    const playBtn = document.createElement('button');
+    playBtn.type = 'button';
+    playBtn.className = 'btn btn-primary btn-sm';
+    playBtn.textContent = 'Play';
+    playBtn.title = 'Load and play this track';
+    playBtn.addEventListener('click', () => playMusicTrack(track));
+
+    row.append(info, playBtn);
+    list.appendChild(row);
+  }
+}
+
+/**
+ * Hand a server-issued track URL to the player. The player never invents a
+ * path — it only ever receives the ownership-checked url from the row.
+ */
+function playMusicTrack(track) {
+  if (!musicPlayer || !track) return;
+  musicPlayer.load(track.url, audioTrackLabel(track));
+  musicPlayer.play();
+}
+
+/**
+ * Upload the chosen MP3 through the server pipeline (which validates the real
+ * bytes and records an ownership row), then refresh the list so the new track
+ * appears and is immediately playable.
+ */
+async function uploadMusicTrack(fileInput) {
+  if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+    setMusicUploadStatus('Choose an MP3 file first.', true);
+    return;
+  }
+  const status = musicPlayerModal?.querySelector('#studio-music-upload-status');
+  const file = fileInput.files[0];
+  const btn = musicPlayerModal?.querySelector('#studio-music-upload-btn');
+  if (btn) btn.disabled = true;
+  if (status) status.textContent = 'Uploading…';
+
+  try {
+    await creatorAudioApi.uploadTrack(file);
+    if (status) status.textContent = 'Uploaded. Pick it below to play.';
+    fileInput.value = '';
+    await loadMusicTracks();
+  } catch (error) {
+    if (status) {
+      status.textContent = error.message || 'Upload failed.';
+      status.dataset.error = 'true';
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function setMusicUploadStatus(message, isError = false) {
+  const status = musicPlayerModal?.querySelector('#studio-music-upload-status');
+  if (!status) return;
+  status.textContent = message;
+  if (isError) status.dataset.error = 'true';
+}
+
+
+
 async function switchDesign(designId) {
   if (dirty && !window.confirm('Discard unsaved changes to the current design?')) return;
   const design = designs.find(d => d.id === designId);
@@ -4611,6 +4813,7 @@ function attachEvents() {
   root.querySelector('#studio-save-asset').addEventListener('click', openSaveAssetModal);
   root.querySelector('#studio-version-history').addEventListener('click', openVersionHistoryModal);
   root.querySelector('#studio-asset-library').addEventListener('click', openLibraryModal);
+  root.querySelector('#studio-music-player').addEventListener('click', openMusicPlayerModal);
   root.querySelector('#studio-new-design').addEventListener('click', createNewDesign);
   root.querySelector('#studio-open-profile').addEventListener('click', () => navigate('/profile'));
   root.querySelector('#studio-coin-shop').addEventListener('click', () => navigate('/creator-studio/coin-shop'));
@@ -4786,6 +4989,8 @@ export function canLeaveCreatorStudio() {
 export function destroyCreatorStudioPage() {
   closeAssetModal();
   closeVersionHistoryModal();
+  // CREATOR-17: a player left mounted could keep playing after navigation.
+  closeMusicPlayerModal();
   window.removeEventListener('keydown', keyHandler);
   window.removeEventListener('beforeunload', beforeUnload);
   window.removeEventListener('pointermove', onPointerMove);

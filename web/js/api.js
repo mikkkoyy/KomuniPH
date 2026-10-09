@@ -563,6 +563,37 @@ export const creatorLibraryApi = {
 };
 
 /**
+ * Creator Studio MP3 Music Player API (CREATOR-17). Creator-scoped audio
+ * uploads. `url` is the application path the player loads; `id` is the row used
+ * for ownership checks. The list only ever returns the caller's own tracks.
+ */
+export const creatorAudioApi = {
+  async listTracks() {
+    return apiRequest('/creator/audio');
+  },
+
+  async uploadTrack(file) {
+    const form = new FormData();
+    form.append('audio', file);
+    const token = getAccessToken();
+    const res = await fetch(`${API_BASE}/creator/audio`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      throw new Error((data && data.error && data.error.message) || 'Upload failed. Please try again.');
+    }
+    return data;
+  },
+
+  async getTrack(id) {
+    return apiRequest(`/creator/audio/${id}`);
+  },
+};
+
+/**
  * Messages API
  */
 export const messagesApi = {

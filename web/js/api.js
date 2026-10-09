@@ -514,6 +514,55 @@ export const versionApi = {
 };
 
 /**
+ * Creator Studio Persistent Asset Library API (CREATOR-16).
+ * A creator-scoped registry of reusable asset references across projects.
+ * Items reference existing assets without duplicating them.
+ */
+export const creatorLibraryApi = {
+  async listItems(options = {}) {
+    const params = new URLSearchParams();
+    if (options.sourceType) params.set('source_type', options.sourceType);
+    if (options.q) params.set('q', options.q);
+    if (options.sort) params.set('sort', options.sort);
+    if (options.limit) params.set('limit', String(options.limit));
+    if (options.offset) params.set('offset', String(options.offset));
+    const qs = params.toString();
+    return apiRequest(`/creator/library${qs ? '?' + qs : ''}`);
+  },
+
+  async createItem(data) {
+    return apiRequest('/creator/library', {
+      method: 'POST',
+      body: data,
+    });
+  },
+
+  async getItem(id) {
+    return apiRequest(`/creator/library/${id}`);
+  },
+
+  async updateItem(id, data) {
+    return apiRequest(`/creator/library/${id}`, {
+      method: 'PATCH',
+      body: data,
+    });
+  },
+
+  async deleteItem(id) {
+    return apiRequest(`/creator/library/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async batchDelete(ids) {
+    return apiRequest('/creator/library/batch-delete', {
+      method: 'POST',
+      body: { ids },
+    });
+  },
+};
+
+/**
  * Messages API
  */
 export const messagesApi = {

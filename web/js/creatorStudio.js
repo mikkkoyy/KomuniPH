@@ -15,7 +15,7 @@
  * using the same visual classes as the public renderer.
  */
 
-import { designApi, profileApi, creatorAssetsApi, getAccessToken, projectApi, versionApi } from './api.js';
+import { designApi, profileApi, creatorAssetsApi, getAccessToken, projectApi, versionApi, creatorLibraryApi } from './api.js';
 import {
   CONTENT_COMPONENT_TYPES,
   applyGeometryToElement,
@@ -332,6 +332,13 @@ let versionHistoryModal = null;
 let versionPreviewEffectLayer = null;
 let versionPreviewVersion = null;
 
+// CREATOR-16: Asset Library modal session state.
+let libraryModal = null;
+let libraryItems = [];
+let libraryFilter = 'all';
+let librarySearch = '';
+let librarySearchDebounce = null;
+
 function keyHandler(event) { onKey(event); }
 function beforeUnload(event) {
   if (dirty && !busy) { event.preventDefault(); event.returnValue = ''; }
@@ -476,6 +483,7 @@ export function renderCreatorStudioPage() {
         <button id="studio-save" class="btn btn-primary" type="button">Save Draft</button>
         <button id="studio-publish" class="btn btn-cta" type="button">Publish</button>
         <button id="studio-save-asset" class="btn btn-secondary" type="button" title="Create a Coin Shop asset from this design">Save as Asset</button>
+        <button id="studio-asset-library" class="btn btn-secondary" type="button" title="Open your persistent asset library — browse and reuse images, backgrounds, stickers, effects, projects and creator assets across designs">Asset Library</button>
       </div>
       <div class="studio-layout" id="studio-layout">
         <aside id="studio-elements" class="studio-panel" aria-label="Elements">
@@ -4115,6 +4123,395 @@ async function restoreVersionFromModal() {
   }
 }
 
+// CREATOR-16: Asset Library modal
+// A creator-scoped registry of reusable asset references across projects.
+// Items reference existing assets without duplicating them.
+const LIBRARY_SOURCE_LABELS = {
+  image: 'Uploaded Image',
+  background: 'Background',
+  sticker: 'Sticker',
+  decoration: 'Decoration',
+  effect: 'Background Effect',
+  project: 'Project',
+  creator_asset: 'Creator Asset',
+};
+
+const LIBRARY_SOURCE_ICONS = {
+  image: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8.5" cy="8.5" r="1.5" fill="currentColor"/><path d="M21 15l-5-5L5 21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  background: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7 16l5-5 5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  sticker: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3z" fill="none" stroke="currentColor" stroke-width="1.5"/><polyline points="15 3 15 9 21 9" stroke="currentColor" stroke-width="1.5"/></svg>`,
+  decoration: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+  effect: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12 12l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+  project: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" fill="none" stroke="currentColor" stroke-width="1.5"/><polyline points="14 2 14 8 20 8" stroke="currentColor" stroke-width="1.5"/></svg>`,
+  creator_asset: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12 6v6l4 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+};
+
+function closeLibraryModal() {
+  if (librarySearchDebounce) {
+    clearTimeout(librarySearchDebounce);
+    librarySearchDebounce = null;
+  }
+  if (libraryModal && libraryModal.parentNode) {
+    libraryModal.remove();
+  }
+  libraryModal = null;
+  libraryItems = [];
+}
+
+async function openLibraryModal() {
+  if (libraryModal) return;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'studio-modal-overlay';
+  overlay.innerHTML = `
+    <div class="studio-modal" role="dialog" aria-modal="true" aria-labelledby="studio-library-title">
+      <h2 id="studio-library-title">Asset Library</h2>
+      <button class="studio-modal-close" data-close aria-label="Close">×</button>
+      <p class="studio-modal-note">Your persistent library of reusable assets. Items reference existing assets — they never duplicate files. Add from any design, use in any design.</p>
+
+      <div class="studio-library-toolbar">
+        <input type="search" id="studio-library-search" class="studio-library-search" placeholder="Search your library..." aria-label="Search library items" maxlength="100">
+        <select id="studio-library-filter" aria-label="Filter by source type">
+          <option value="all">All Types</option>
+          <option value="image">Uploaded Images</option>
+          <option value="background">Backgrounds</option>
+          <option value="sticker">Stickers</option>
+          <option value="decoration">Decorations</option>
+          <option value="effect">Background Effects</option>
+          <option value="project">Projects</option>
+          <option value="creator_asset">Creator Assets</option>
+        </select>
+        <button type="button" class="btn btn-secondary" id="studio-library-add">Add Current Design</button>
+      </div>
+
+      <div id="studio-library-list" class="studio-library-list" aria-label="Library items"></div>
+
+      <div id="studio-library-empty" class="studio-library-empty" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+        <p>Your library is empty</p>
+        <small>Add assets from your designs or upload images to start building your reusable collection.</small>
+      </div>
+
+      <div class="studio-modal-actions">
+        <button type="button" class="btn btn-secondary" data-close>Close</button>
+      </div>
+    </div>`;
+
+  overlay.addEventListener('pointerdown', event => {
+    if (event.target === overlay || event.target.dataset.close !== undefined) closeLibraryModal();
+  });
+  overlay.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      closeLibraryModal();
+    }
+  });
+
+  root.appendChild(overlay);
+  libraryModal = overlay;
+
+  // Filter handler — always reload from the server, so the collection
+  // matches the selected type even when the previous load used another
+  // filter (a client-side re-render can only see stale items).
+  const filterSelect = overlay.querySelector('#studio-library-filter');
+  filterSelect.value = libraryFilter;
+  filterSelect.addEventListener('change', () => {
+    libraryFilter = filterSelect.value;
+    loadLibraryItems();
+  });
+
+  // Search handler (debounced) — the server matches name and description.
+  const searchInput = overlay.querySelector('#studio-library-search');
+  searchInput.value = librarySearch;
+  searchInput.addEventListener('input', () => {
+    librarySearch = searchInput.value;
+    if (librarySearchDebounce) clearTimeout(librarySearchDebounce);
+    librarySearchDebounce = setTimeout(() => {
+      librarySearchDebounce = null;
+      loadLibraryItems();
+    }, 200);
+  });
+
+  // Add current design button
+  overlay.querySelector('#studio-library-add').addEventListener('click', () => addCurrentDesignToLibrary());
+
+  // Load items
+  await loadLibraryItems();
+}
+
+async function loadLibraryItems() {
+  if (!libraryModal) return;
+  const list = libraryModal.querySelector('#studio-library-list');
+  const empty = libraryModal.querySelector('#studio-library-empty');
+  list.replaceChildren();
+  list.innerHTML = '<p class="studio-modal-note">Loading library…</p>';
+
+  try {
+    const result = await creatorLibraryApi.listItems({
+      sourceType: libraryFilter === 'all' ? undefined : libraryFilter,
+      q: librarySearch.trim() || undefined,
+      limit: 100,
+    });
+    libraryItems = result.items || [];
+    renderLibraryList();
+  } catch (error) {
+    list.replaceChildren();
+    const err = document.createElement('p');
+    err.className = 'studio-modal-note';
+    err.style.color = 'var(--studio-danger)';
+    err.textContent = `Could not load library: ${error.message}`;
+    list.appendChild(err);
+  }
+}
+
+function renderLibraryList() {
+  if (!libraryModal) return;
+  const list = libraryModal.querySelector('#studio-library-list');
+  const empty = libraryModal.querySelector('#studio-library-empty');
+  list.replaceChildren();
+
+  const filtered = libraryFilter === 'all'
+    ? libraryItems
+    : libraryItems.filter(item => item.source_type === libraryFilter);
+
+  if (filtered.length === 0) {
+    empty.hidden = false;
+    return;
+  }
+  empty.hidden = true;
+
+  for (const item of filtered) {
+    const row = document.createElement('div');
+    row.className = 'studio-library-item';
+    row.dataset.id = item.id;
+
+    const icon = document.createElement('span');
+    icon.className = 'studio-library-icon';
+    icon.innerHTML = LIBRARY_SOURCE_ICONS[item.source_type] || '';
+
+    const info = document.createElement('div');
+    info.className = 'studio-library-info';
+    const name = document.createElement('strong');
+    name.textContent = item.name;
+    const meta = document.createElement('span');
+    meta.className = 'studio-library-meta';
+    meta.textContent = `${LIBRARY_SOURCE_LABELS[item.source_type] || item.source_type} · ${item.description || 'No description'}`;
+    info.append(name, meta);
+
+    const preview = document.createElement('div');
+    preview.className = 'studio-library-preview';
+    if (item.preview_url) {
+      const img = document.createElement('img');
+      img.src = item.preview_url;
+      img.alt = '';
+      img.loading = 'lazy';
+      preview.appendChild(img);
+    } else {
+      preview.textContent = 'No preview';
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'studio-library-actions';
+
+    // Use button - behavior depends on source type
+    const useBtn = document.createElement('button');
+    useBtn.type = 'button';
+    useBtn.className = 'btn btn-primary btn-sm';
+    useBtn.textContent = getUseButtonLabel(item.source_type);
+    useBtn.title = getUseButtonTitle(item.source_type);
+    useBtn.addEventListener('click', () => useLibraryItem(item));
+    actions.appendChild(useBtn);
+
+    // Remove button
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'btn btn-secondary btn-sm';
+    removeBtn.textContent = 'Remove';
+    removeBtn.title = 'Remove from library (does not delete the source asset)';
+    removeBtn.addEventListener('click', () => removeLibraryItem(item.id));
+    actions.appendChild(removeBtn);
+
+    row.append(icon, info, preview, actions);
+    list.appendChild(row);
+  }
+}
+
+function getUseButtonLabel(sourceType) {
+  switch (sourceType) {
+    case 'image': return 'Use as Image';
+    case 'background': return 'Use as Background';
+    case 'sticker': return 'Use as Sticker';
+    case 'decoration': return 'Use as Decoration';
+    case 'effect': return 'Apply Effect';
+    case 'project': return 'Open Project';
+    case 'creator_asset': return 'View Asset';
+    default: return 'Use';
+  }
+}
+
+function getUseButtonTitle(sourceType) {
+  switch (sourceType) {
+    case 'image': return 'Add this image to the canvas as an Image component';
+    case 'background': return 'Set this as the profile background image';
+    case 'sticker': return 'Add this sticker to the canvas';
+    case 'decoration': return 'Decorations cannot be placed on the canvas yet (future component type)';
+    case 'effect': return 'Apply this background effect to the design';
+    case 'project': return 'Switch to this project';
+    case 'creator_asset': return 'View this asset in Coin Shop';
+    default: return 'Use this asset';
+  }
+}
+
+async function useLibraryItem(item) {
+  if (!libraryModal) return;
+
+  try {
+    switch (item.source_type) {
+      case 'decoration': {
+        // 'decoration' is a FUTURE canvas component type (see
+        // FUTURE_COMPONENT_TYPES in the design validator): inserting one
+        // would produce a design the server refuses to save. The item
+        // stays a valid library reference — say so instead of breaking
+        // the design.
+        setStatus('Decoration components are not yet supported by the design engine — the item stays in your library.');
+        return;
+      }
+      case 'image':
+      case 'sticker': {
+        // Add as Image or Sticker component
+        const type = item.source_type;
+        const fit = item.metadata?.fit || 'cover';
+        const imageUrl = item.preview_url;
+        if (!imageUrl) {
+          setStatus('This item has no preview URL');
+          return;
+        }
+        const c = canvas();
+        const meta = ALL_SECTIONS.find(s => s.type === type);
+        const comp = {
+          id: newId(),
+          type,
+          x: Math.max(0, Math.round((c.width - (meta?.w || 320)) / 2)),
+          y: Math.max(0, Math.round((c.minHeight - (meta?.h || 240)) / 2)),
+          width: meta?.w || 320,
+          height: meta?.h || 240,
+          zIndex: nextZIndex(),
+          visible: true,
+          locked: false,
+          rotation: 0,
+          config: { imageUrl, fit, alt: item.name },
+          style: null,
+        };
+        components().push(comp);
+        selectedId = comp.id;
+        pushHistory();
+        markChanged(`Added "${item.name}" as ${type}.`);
+        closeLibraryModal();
+        break;
+      }
+      case 'background': {
+        // Set as profile background
+        const imageUrl = item.preview_url;
+        if (!imageUrl) {
+          setStatus('This item has no preview URL');
+          return;
+        }
+        const t = designTheme();
+        if (!isPlainTheme(t)) currentDesign.theme = t = {};
+        pushHistory();
+        t.backgroundImage = imageUrl;
+        t.backgroundSize = item.metadata?.fit || 'cover';
+        t.backgroundPosition = 'center';
+        t.backgroundRepeat = 'no-repeat';
+        markChanged(`Background set to "${item.name}".`);
+        closeLibraryModal();
+        break;
+      }
+      case 'effect': {
+        // Apply background effect
+        const def = effectDefinitionFor(item.source_id);
+        if (!def) {
+          setStatus('Effect definition not found');
+          return;
+        }
+        pushHistory();
+        const t = designTheme();
+        if (!isPlainTheme(t)) currentDesign.theme = t = {};
+        t.backgroundEffect = {
+          enabled: true,
+          effectId: item.source_id,
+          source: 'creator',
+          version: 1,
+          config: { ...(def.config || {}) },
+        };
+        markChanged(`Background effect "${item.name}" applied.`);
+        closeLibraryModal();
+        break;
+      }
+      case 'project': {
+        // Switch to project
+        closeLibraryModal();
+        if (dirty && !window.confirm('Discard unsaved changes to switch projects?')) return;
+        await switchDesign(item.source_id);
+        break;
+      }
+      case 'creator_asset': {
+        // Navigate to coin shop product
+        closeLibraryModal();
+        navigate(`/coin-shop/product/${item.source_id}`);
+        break;
+      }
+    }
+  } catch (error) {
+    setStatus(`Error: ${error.message}`);
+  }
+}
+
+async function addCurrentDesignToLibrary() {
+  if (!currentDesign || !libraryModal) return;
+
+  // Get the design's thumbnail if available
+  let previewUrl = null;
+  if (currentDesign.thumbnail_url) {
+    previewUrl = currentDesign.thumbnail_url;
+  }
+
+  const name = currentDesign.name || 'Untitled Design';
+  const description = `Project: ${currentDesign.name}`;
+
+  try {
+    const result = await creatorLibraryApi.createItem({
+      name,
+      description,
+      source_type: 'project',
+      source_id: currentDesign.id,
+      preview_url: previewUrl,
+      metadata: { version: currentDesign.version, status: currentDesign.status },
+    });
+    setStatus(`Added "${result.item.name}" to your library.`);
+    await loadLibraryItems();
+  } catch (error) {
+    if (error.status === 409) {
+      setStatus('This project is already in your library.');
+    } else {
+      setStatus(`Failed to add: ${error.message}`);
+    }
+  }
+}
+
+async function removeLibraryItem(itemId) {
+  if (!libraryModal) return;
+  if (!window.confirm('Remove this item from your library? The source asset is not deleted.')) return;
+
+  try {
+    await creatorLibraryApi.deleteItem(itemId);
+    setStatus('Removed from library.');
+    await loadLibraryItems();
+  } catch (error) {
+    setStatus(`Failed to remove: ${error.message}`);
+  }
+}
+
 async function switchDesign(designId) {
   if (dirty && !window.confirm('Discard unsaved changes to the current design?')) return;
   const design = designs.find(d => d.id === designId);
@@ -4213,6 +4610,7 @@ function attachEvents() {
   root.querySelector('#studio-publish').addEventListener('click', publish);
   root.querySelector('#studio-save-asset').addEventListener('click', openSaveAssetModal);
   root.querySelector('#studio-version-history').addEventListener('click', openVersionHistoryModal);
+  root.querySelector('#studio-asset-library').addEventListener('click', openLibraryModal);
   root.querySelector('#studio-new-design').addEventListener('click', createNewDesign);
   root.querySelector('#studio-open-profile').addEventListener('click', () => navigate('/profile'));
   root.querySelector('#studio-coin-shop').addEventListener('click', () => navigate('/creator-studio/coin-shop'));

@@ -29,6 +29,7 @@ import sharp from 'sharp';
 import crypto from 'crypto';
 import config from './config.js';
 import { jsonResponse, errorResponse } from './utils.js';
+import { execute } from './database.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -129,7 +130,7 @@ export function handleUploadCreatorMedia(req, res, user) {
       return;
     }
     if (fileInfo && !responseSent) {
-      processCreatorUpload(fileInfo)
+      processCreatorUpload(fileInfo, user.sub)
         .then((result) => sendSuccess(result))
         .catch((err) => {
           try {
@@ -146,9 +147,10 @@ export function handleUploadCreatorMedia(req, res, user) {
 /**
  * Validate the COMPLETE buffered upload with Sharp (content is
  * authoritative, not the browser MIME type), resize inside creator bounds,
- * convert to WebP, and write the generated file.
+ * convert to WebP, write the generated file, and record a creator_media row
+ * (CREATOR-16) so the upload has an owner and can back a library reference.
  */
-async function processCreatorUpload(fileInfo) {
+async function processCreatorUpload(fileInfo, userId) {
   const { uniqueFilename, filePath, data } = fileInfo;
 
   if (!data || data.length === 0) {
@@ -199,10 +201,25 @@ async function processCreatorUpload(fileInfo) {
   }
 
   const outputMeta = await sharp(optimizedBuffer).metadata().catch(() => ({}));
+  const width = outputMeta.width || null;
+  const height = outputMeta.height || null;
+  const url = `/uploads/creator/${uniqueFilename}`;
+
+  // CREATOR-16: record the upload so it can be ownership-validated (e.g. as
+  // an "image" asset-library reference). A failed record must fail the
+  // upload honestly — the catch above removes the orphaned file.
+  const mediaId = crypto.randomUUID();
+  execute(
+    `INSERT INTO creator_media (id, creator_user_id, url, width, height, bytes, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [mediaId, userId, url, width, height, optimizedBuffer.length, new Date().toISOString()]
+  );
+
   return {
-    url: `/uploads/creator/${uniqueFilename}`,
-    width: outputMeta.width || null,
-    height: outputMeta.height || null,
+    id: mediaId,
+    url,
+    width,
+    height,
     bytes: optimizedBuffer.length,
   };
 }

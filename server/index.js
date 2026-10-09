@@ -37,6 +37,14 @@ import {
   handleImportCreatorEffect,
   handleArchiveCreatorEffect,
 } from './creatorEffects.js';
+import {
+  handleListLibraryItems,
+  handleCreateLibraryItem,
+  handleGetLibraryItem,
+  handleUpdateLibraryItem,
+  handleDeleteLibraryItem,
+  handleBatchDeleteLibraryItems,
+} from './creatorLibrary.js';
 import { handleListMarketplaceAssets, handleGetMarketplaceAsset, handleListMarketplaceListings, handleCreateListing, handleGetListing, handleUpdateListing, handlePublishListing, handleArchiveListing, handleListOwnListings, handleCreatorSalesSummary, handleGetCoinShopProduct, handleBuyAsset, handleInstallAsset, handleListPurchasedAssets, handleCheckPurchased } from './marketplace.js';
 import { handleGetTestimonials, handleCreateTestimonial, handleDeleteTestimonial, handleGetUserTestimonials } from './testimonials.js';
 import { handleGetPhotos, handleUploadPhoto as handleGalleryUploadPhoto, handleDeletePhoto, handleGetOwnPhotos } from './gallery.js';
@@ -579,6 +587,42 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
       const user = requireAuth(req, res);
       if (!user) return;
       return handleArchiveAsset(req, res, user, creatorAssetArchiveMatch);
+    }
+
+    // CREATOR-16: Persistent Asset Library (auth required). A creator-scoped
+    // registry of reusable asset references across projects. Items reference
+    // existing assets (images, backgrounds, stickers, effects, projects, creator
+    // assets) without duplicating them. Cross-user access returns 404.
+    if (method === 'GET' && path === '/api/creator/library') {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleListLibraryItems(req, res, user);
+    }
+    if (method === 'POST' && path === '/api/creator/library') {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleCreateLibraryItem(req, res, user);
+    }
+    const libraryItemMatch = matchRoute('/api/creator/library/:id', path);
+    if (method === 'GET' && libraryItemMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleGetLibraryItem(req, res, user, libraryItemMatch);
+    }
+    if (method === 'PATCH' && libraryItemMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleUpdateLibraryItem(req, res, user, libraryItemMatch);
+    }
+    if (method === 'DELETE' && libraryItemMatch) {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleDeleteLibraryItem(req, res, user, libraryItemMatch);
+    }
+    if (method === 'POST' && path === '/api/creator/library/batch-delete') {
+      const user = requireAuth(req, res);
+      if (!user) return;
+      return handleBatchDeleteLibraryItems(req, res, user);
     }
 
     // CREATOR-03 Marketplace asset discovery (Coin Shop catalog).

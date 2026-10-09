@@ -263,6 +263,7 @@ Creator Studio gains a **Project Manager**: the entry point where a creator sees
 - **Opening a project.** "Open" navigates to `#/creator-studio?project=<id>`. The Studio reads the `project` query parameter and loads that exact project instead of the first draft. The header shows **"Project: <name>"** so the creator always knows which project is open. Switching projects (via the design selector or "New Design") tears down the CREATOR-13 Live View, clears selection, undo/redo history, staged uploads and dirty state, so no animation loop, probe or timer from the previous project survives.
 - **Validation.** Project name is required, non-empty, at most 100 characters, and rejected if it contains markup tags (`<script>`, `<iframe>`, `<object>`, `<embed>`, `<style>`). Description is optional and at most 500 characters. The stored layout is re-validated on read so stored data cannot break the Studio.
 - **Version history is CREATOR-15.** The `version` column increments on every Save and Publish, and the full version browser is implemented — see CREATOR-15 below.
+- **Persistent Asset Library is CREATOR-16.** A creator-scoped registry of reusable asset references that survives navigation, reloads, project switches and sign-in cycles — see CREATOR-16 below.
 
   - `npm run test:creator14` runs the CREATOR-14 suite (23 checks: create with a valid default layout and draft status, name/description/markup/length validation, authentication required, list ordering and per-user isolation, get by id, cross-user 404 on get/rename/duplicate/archive/restore/delete, rename persisting to the database, duplicate producing an independent deep clone, archive/restore round-trip with `archived_at` set and cleared, delete only on archived projects (soft delete, hidden from list and get), active-project delete rejected, and database persistence of name/description/status/layout)
 
@@ -284,6 +285,40 @@ Every Save in Creator Studio is an explicit, server-validated, **immutable versi
   - `npm run test:creator15` runs the CREATOR-15 API suite (27 checks: authentication required on every version route, cross-user 404 on save/history/fetch/restore, the creation state being version 1, the metadata-only history list, changed saves appending v2 then v3, an unchanged save appending nothing, key-order-only changes being no-ops, full snapshot round-trips (geometry, fonts, animation, rotation, style, theme, effect config), newest-first ordering with `is_current`, per-version snapshot fetch, missing-version 404, restore appending a new version with `restored_from_version` while every earlier version stays byte-for-byte identical, the restored state being editable afterwards, cross-project version isolation, duplicate starting an independent history at v1, publish bumping the version AND writing a published save-point, version numbers being unique and never reused, and the idempotent backfill of a pre-CREATOR-15 design at its current version)
 
   - `npm run test:creator15-e2e` runs the headless-browser E2E (11 checks: UI login, the Studio opening the project at its current version, the canvas animating the seeded snow effect, adding a component and saving appending version 3, the history listing every version newest-first with the current one badged, previewing an older version rendering its snapshot read-only with its own animated effect layer, closing the modal stopping the preview's animation but never the canvas's, restoring v2 appending version 4 and reloading the editor with its contents, an unchanged save writing no new version, the server holding the full append-only chain, and no uncaught page errors)
+
+### CREATOR-16 — Persistent Asset Library
+
+A creator-scoped registry of **reusable asset references** that persists across navigation, reloads, project switches and sign-in cycles. An item is a **REFERENCE, never a copy**: the library stores a source type + source id + lightweight metadata, so the original file, project, version history, effect package or creator product is never duplicated. Removing a library entry deletes only the reference — the source system is untouched.
+
+**Seven supported source types**, each resolved against the owner's own data before registration:
+
+| Source type | Source system | Reference key | Ownership rule |
+|---|---|---|---|
+| `image` | `creator_media` (recorded upload) | the media `id` | the uploader |
+| `background` | `creator_assets` (`asset_type='background'`) | the asset `id` | the creator |
+| `sticker` | `creator_assets` (`asset_type='sticker'`) | the asset `id` | the creator |
+| `decoration` | `creator_assets` (`asset_type='decoration'`) | the asset `id` | the creator |
+| `effect` | `creator_effects` | the stable `effect_id` (not the row id) | only `published` effects |
+| `project` | `profile_designs` | the design `id` | only non-deleted designs |
+| `creator_asset` | `creator_assets` | the asset `id` | only `published` products |
+
+**API** (auth required on every route; unauthenticated → 401; cross-user → 404, never 403):
+
+- `GET /api/creator/library` — list with optional `source_type` filter, `q` search (literal LIKE over name + description, wildcards escaped), `sort` (`newest` default / `oldest` / `name`), and `limit`/`offset` pagination with a `total` count.
+- `POST /api/creator/library` — register a reference. Validates name/description (markup rejected), source type/ID, preview URL (`http(s)` or same-origin `/uploads/` only) and per-type metadata (`fit` allowlist for image/background/sticker/decoration; `engine` string for effects). Rejects unknown, unowned or non-publishable sources with 400, and duplicates with 409.
+- `GET /api/creator/library/:id` — fetch one owned item.
+- `PATCH /api/creator/library/:id` — rename or edit metadata. `source_type` and `source_id` are immutable (409); omitted optional fields are preserved; an explicit `null`/`''` clears them. Unsupported fields are rejected (400), never silently ignored.
+- `DELETE /api/creator/library/:id` — remove the reference only.
+- `POST /api/creator/library/batch-delete` — remove up to 100 owned references in one call; IDs the caller does not own are simply not deleted, and sources are never touched.
+
+**Ownership is absolute.** Owner identity always derives from the authenticated `user.sub` — a `creator_user_id` in the payload is rejected as an unsupported field, and a second creator cannot register, read, update or delete another creator's entries.
+
+**Studio UI.** The "Asset Library" button opens a modal with a search box, a source-type filter, an "Add Current Design" button and per-item Use / Remove actions. Use adapts to the source type: images and stickers become canvas components (reusing the preview URL — no new upload), backgrounds set the draft theme, effects apply the background effect, projects switch through the project manager, and creator assets navigate to the Coin Shop product. Decorations are a future component type, so the action reports that instead of breaking the design. Removing an item only removes the reference.
+
+**Migration.** The `creator_library_items` and `creator_media` tables are created idempotently on startup, so re-running `initDatabase` preserves existing records without duplication.
+
+  - `npm run test:creator16` runs the CREATOR-16 API suite (59 checks: auth on every route, all seven source types registering and listing, idempotent duplicate registration, literal LIKE search over name/description with wildcard escaping, source-type filtering, newest/oldest/name sort with a fallback, limit/offset pagination with a total, rename/metadata updates preserving untouched optional fields, immutable source type/id, unsupported-field rejection, bad source types/IDs/URLs/markup/metadata and nonexistent/archived/draft sources rejected, owner identity from the token, cross-user 404 on read/modify/delete, a second creator registering only their own private source, reference-only deletion of image/project/effect/product/background/sticker/decoration entries, batch-delete validation and ownership scoping, and idempotent migration)
+  - `npm run test:creator16-e2e` runs the headless-browser E2E (16 checks: UI login, the modal opening with the seeded collection, accurate type labels and previews, server-side search and type filtering, Add Current Design, image reuse inserting two components with no new upload, Apply Effect animating the canvas, Use as Background editing only the draft until an explicit Save, Open Project switching and tearing down the effect runtime, Remove deleting only the reference, persistence across a full reload, the save appending exactly one version with the inserted components, and no uncaught page errors)
 
 ### CREATOR-11 â€” Fonts, animation, and Card / Image / Sticker masking
 
@@ -417,6 +452,18 @@ Creator Studio Version History browser E2E (CREATOR-15) — headless Chrome (tem
 
 ```bash
 npm run test:creator15-e2e
+```
+
+Creator Studio Persistent Asset Library suite (CREATOR-16) — self-contained (temp DB, runs offline):
+
+```bash
+npm run test:creator16
+```
+
+Creator Studio Persistent Asset Library browser E2E (CREATOR-16) — headless Chrome (temp DB):
+
+```bash
+npm run test:creator16-e2e
 ```
 
 BUGFIX regression suite (requires the server running on port 3000):

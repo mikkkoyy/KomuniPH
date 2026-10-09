@@ -1459,6 +1459,64 @@ try {
   `);
 } catch (err) { /* safe no-op */ }
 
+// CREATOR-16: Persistent Asset Library — a creator-scoped registry of reusable
+// assets across projects. An item is a REFERENCE to an existing asset (not a
+// copy): the library stores the source type + source id + lightweight metadata,
+// so the original file/data is never duplicated. The library persists across
+// navigation, reloads, project switches, and sign-in cycles, scoped to the
+// authenticated creator. Supported source types:
+//   image          → creator_media (an uploaded file from the existing pipeline)
+//   background     → creator_assets asset_type='background'
+//   sticker        → creator_assets asset_type='sticker'
+//   decoration     → creator_assets asset_type='decoration'
+//   effect         → creator_effects (published effects, by effect_id)
+//   project        → profile_designs (Creator Studio project)
+//   creator_asset  → creator_assets (any published creator asset)
+
+// CREATOR-16: uploaded-media records. The upload pipeline (creatorMedia.js)
+// already re-encodes every upload to WebP under a generated filename, but it
+// was stateless — nothing recorded WHO uploaded a file, so an "image" library
+// reference could never be ownership-validated. One row per successful
+// upload fixes that without changing the file pipeline: the URL still points
+// at the same /uploads/creator/... file the design system already serves.
+try {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS creator_media (
+      id TEXT PRIMARY KEY,
+      creator_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      url TEXT NOT NULL,
+      width INTEGER,
+      height INTEGER,
+      bytes INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_creator_media_creator ON creator_media(creator_user_id);
+  `);
+} catch (err) { /* safe no-op */ }
+
+try {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS creator_library_items (
+      id TEXT PRIMARY KEY,
+      creator_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      source_type TEXT NOT NULL
+        CHECK (source_type IN ('image','background','sticker','decoration','effect','project','creator_asset')),
+      source_id TEXT NOT NULL,
+      -- Optional: a preview URL (e.g. /uploads/creator/... for images, effect preview_path, etc.)
+      preview_url TEXT,
+      -- Optional: metadata specific to the source type (fit for images, engine for effects, etc.)
+      metadata_json TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(creator_user_id, source_type, source_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_creator_library_items_creator ON creator_library_items(creator_user_id);
+    CREATE INDEX IF NOT EXISTS idx_creator_library_items_source ON creator_library_items(source_type, source_id);
+  `);
+} catch (err) { /* safe no-op */ }
+
 // CREATOR-04: external sales/contact destination for normal Marketplace
 // listings. Nullable; validated server-side (http(s) URLs only).
 try {

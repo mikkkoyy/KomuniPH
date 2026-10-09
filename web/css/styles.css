@@ -1740,25 +1740,30 @@ select:focus {
 .profile-header-bio {
   flex: 0 0 320px;
   max-width: 320px;
+  align-self: flex-start;
 }
 
 .profile-bio-box {
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  padding: 0.5rem 0;
+  background: var(--profile-card-surface);
+  border: 1px solid var(--theme-card-border-color, var(--kp-border));
+  border-radius: var(--theme-card-radius, var(--kp-card-radius));
+  padding: 1rem 1.25rem;
   color: var(--theme-text, var(--kp-ink));
   font-size: 0.9rem;
   line-height: 1.6;
   overflow-wrap: break-word;
   word-wrap: break-word;
   white-space: pre-wrap;
+  min-height: 120px;
+  height: auto;
+  box-sizing: border-box;
 }
 
 .profile-bio-empty {
   color: var(--theme-text-secondary, var(--kp-ink-soft));
   font-style: italic;
-  opacity: 0.6;
+  opacity: 0.7;
+  margin: 0;
 }
 
 @media (max-width: 768px) {

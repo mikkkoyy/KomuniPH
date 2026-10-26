@@ -2123,10 +2123,27 @@ function renderProfileMusicPlayer(profile) {
   const container = document.getElementById('music-module-content');
   if (!container) return;
   const isAdminOwner = isOwnUsername(profile?.username) && profile?.role === 'admin';
+  const design = profile?.profile_mp3_player_design && typeof profile.profile_mp3_player_design === 'object'
+    ? profile.profile_mp3_player_design
+    : {};
+  const backgroundUrl = typeof design.backgroundImage === 'string' ? design.backgroundImage : '';
+  const backgroundStyle = backgroundUrl
+    ? `background-image:url('${escapeHtmlAttr(backgroundUrl)}');background-size:${escapeHtmlAttr(design.backgroundFit || 'cover')};background-position:${escapeHtmlAttr(design.backgroundPosition || 'center')};`
+    : '';
+  const playerStyle = [
+    backgroundStyle,
+    `background-color:${escapeHtmlAttr(design.backgroundColor || 'rgba(20, 24, 32, 0.78)')};`,
+    `color:${escapeHtmlAttr(design.textColor || '#ffffff')};`,
+    `border-radius:${Number.isFinite(design.borderRadius) ? design.borderRadius : 16}px;`,
+    `--mp3-accent:${escapeHtmlAttr(design.accentColor || '#42bbaa')};`,
+    `--mp3-progress:${escapeHtmlAttr(design.progressColor || design.accentColor || '#42bbaa')};`,
+    Number.isFinite(design.playerWidth) ? `width:${design.playerWidth}px;max-width:100%;` : '',
+    Number.isFinite(design.playerHeight) ? `min-height:${design.playerHeight}px;` : '',
+  ].join('');
 
   if (!profile || !profile.profile_mp3_url) {
     container.innerHTML = `
-      <div class="music-module-empty" id="music-module-empty">
+      <div class="music-module-empty" id="music-module-empty" style="${playerStyle}">
         No track selected.
         Coming soon.
       </div>
@@ -2163,8 +2180,12 @@ function renderProfileMusicPlayer(profile) {
   }
 
   const title = profile.profile_mp3_title || 'Featured track';
+  const artworkUrl = typeof design?.artwork?.url === 'string' ? design.artwork.url : '';
+  const artworkShape = design?.artwork?.shape === 'circle' ? '50%' : (Number.isFinite(design?.artwork?.radius) ? `${design.artwork.radius}px` : '12px');
+  const artworkSize = Number.isFinite(design?.artwork?.size) ? design.artwork.size : 56;
   container.innerHTML = `
-    <div class="music-module-track">
+    <div class="music-module-track" style="${playerStyle}">
+      ${design?.artwork?.visible !== false && artworkUrl ? `<img class="music-module-artwork" src="${escapeHtmlAttr(artworkUrl)}" alt="" style="width:${artworkSize}px;height:${artworkSize}px;border-radius:${artworkShape};object-fit:cover;">` : ''}
       <div class="music-module-title">${escapeHtml(title)}</div>
       <audio controls preload="metadata" src="${escapeHtmlAttr(profile.profile_mp3_url)}"></audio>
       ${isAdminOwner ? `

@@ -1091,4 +1091,31 @@ export const profileMp3Api = {
   async remove() {
     return apiRequest('/profile/mp3', { method: 'DELETE' });
   },
+
+  async getPlayerDesign() {
+    return apiRequest('/profile/mp3/player-design');
+  },
+
+  async savePlayerDesign(config, publish = false) {
+    return apiRequest('/profile/mp3/player-design', {
+      method: 'PUT',
+      body: { config, publish },
+    });
+  },
+
+  async uploadPlayerImage(file) {
+    const form = new FormData();
+    form.append('image', file);
+    const token = getAccessToken();
+    const res = await fetch(`${API_BASE}/profile/mp3/player-image`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      throw new Error((data && data.error && data.error.message) || 'Image upload failed. Please try again.');
+    }
+    return data;
+  },
 };

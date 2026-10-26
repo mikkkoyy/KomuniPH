@@ -9,6 +9,7 @@ import { renderHomePage, initHomePage, renderPlaceholderPage, initPlaceholderPag
 import { renderProfilePage, initProfilePage } from './profile.js';
 import { renderProfileEditorPage, initProfileEditorPage, destroyProfileEditorPage, canLeaveProfileEditor } from './profileEditor.js';
 import { renderCreatorStudioPage, initCreatorStudioPage, destroyCreatorStudioPage, canLeaveCreatorStudio } from './creatorStudio.js';
+import { renderMp3PlayerDesignerPage, initMp3PlayerDesignerPage, destroyMp3PlayerDesignerPage } from './mp3PlayerDesigner.js';
 import { renderCreatorProjectsPage, initCreatorProjectsPage, destroyCreatorProjectsPage, canLeaveCreatorProjects } from './creatorProjects.js';
 // PHASE-3 GALLERY-SPLIT-01: gallery/album pages live in their own modules
 import { renderGalleryPage, initGalleryPage } from './gallery.js';
@@ -77,6 +78,7 @@ function render() {
     destroyMessagesPage();
   }
   destroyCreatorStudioPage();
+  destroyMp3PlayerDesignerPage();
 
   // Clear tokens on logout
   if (routePath === '/logout') {
@@ -158,6 +160,14 @@ function render() {
       }
       html = renderCreatorStudioPage();
       initFn = initCreatorStudioPage;
+      break;
+    case '/creator-studio/mp3-player':
+      if (!isAuthenticated()) {
+        navigate('/login');
+        return;
+      }
+      html = renderMp3PlayerDesignerPage();
+      initFn = initMp3PlayerDesignerPage;
       break;
     case '/creator-studio/projects':
       if (!isAuthenticated()) {

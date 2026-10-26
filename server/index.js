@@ -15,7 +15,8 @@ import { handleRegister, handleLogin, handleVerify, handleVerifyEmailLink, handl
 import { handleAdminLogin, handleAdminChangePassword } from './adminAuth.js';
 import { handleGetSettings, handleUpdateSettings } from './settings.js';
 import { handleGetProfile, handleGetPublicProfile, handleUpdateProfile, handleUploadPhoto,
-  handleUpdateTheme, handleUploadBackground, handleUploadProfileMp3, handleDeleteProfileMp3 } from './profile.js';
+  handleUpdateTheme, handleUploadBackground, handleUploadProfileMp3, handleDeleteProfileMp3,
+  handleGetProfileMp3PlayerDesign, handleSaveProfileMp3PlayerDesign, handleUploadProfileMp3PlayerImage } from './profile.js';
 import { handleListDesigns, handleCreateDesign, handleGetDesign, handleUpdateDesign, handlePublishDesign, handleArchiveDesign } from './profileDesign.js';
 import {
   handleListProjects,
@@ -417,6 +418,27 @@ async function handleApi(req, res) {
       return errorResponse(res, 429, 'Too Many Requests');
     }
     return handleDeleteProfileMp3(req, res, user);
+  }
+  if (method === 'GET' && path === '/api/profile/mp3/player-design') {
+    const user = requireAdmin(req, res);
+    if (!user) return;
+    return handleGetProfileMp3PlayerDesign(req, res, user);
+  }
+  if (method === 'PUT' && path === '/api/profile/mp3/player-design') {
+    const user = requireAdmin(req, res);
+    if (!user) return;
+    if (!audioRateLimit('upload')(req, res, user)) {
+      return errorResponse(res, 429, 'Too Many Requests');
+    }
+    return handleSaveProfileMp3PlayerDesign(req, res, user);
+  }
+  if (method === 'POST' && path === '/api/profile/mp3/player-image') {
+    const user = requireAdmin(req, res);
+    if (!user) return;
+    if (!audioRateLimit('upload')(req, res, user)) {
+      return errorResponse(res, 429, 'Too Many Requests');
+    }
+    return handleUploadProfileMp3PlayerImage(req, res, user);
   }
 
 // Testimonials routes

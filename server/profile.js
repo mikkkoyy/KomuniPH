@@ -184,6 +184,7 @@ const PROFILE_SELECT = `
     p.interests,
     p.profile_mp3_url,
     p.profile_mp3_title,
+    p.profile_mp3_player_config,
     p.created_at,
     p.updated_at
   FROM profiles p
@@ -256,6 +257,7 @@ function getProfileByUserId(userId) {
     profile.interests = profile.interests || null;
     profile.profile_mp3_url = profile.profile_mp3_url || null;
     profile.profile_mp3_title = profile.profile_mp3_title || null;
+    profile.profile_mp3_player_design = parseProfileMp3PlayerConfig(profile.profile_mp3_player_config);
     const userRow = queryOne('SELECT role FROM users WHERE id = ?', [userId]);
     profile.role = userRow?.role || 'member';
     profile.theme = buildTheme(profile);
@@ -314,6 +316,7 @@ export function handleGetPublicProfile(req, res, params) {
         p.interests,
         p.profile_mp3_url,
         p.profile_mp3_title,
+        p.profile_mp3_player_config,
         p.created_at,
         p.updated_at
       FROM profiles p
@@ -338,6 +341,7 @@ export function handleGetPublicProfile(req, res, params) {
     profile.interests = profile.interests || null;
     profile.profile_mp3_url = profile.profile_mp3_url || null;
     profile.profile_mp3_title = profile.profile_mp3_title || null;
+    profile.profile_mp3_player_design = parsePublishedProfileMp3PlayerConfig(profile.profile_mp3_player_config);
     if (profile.real_name === null) {
       delete profile.real_name;
     }
@@ -1379,6 +1383,28 @@ function removeProfileMp3File(filename) {
   }
 }
 
+/**
+ * Parse stored MP3 player design JSON safely.
+ */
+function parseProfileMp3PlayerConfig(raw) {
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  try {
+    const value = JSON.parse(raw);
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function parsePublishedProfileMp3PlayerConfig(raw) {
+  const config = parseProfileMp3PlayerConfig(raw);
+  if (!config) return null;
+  if (config.published && typeof config.published === 'object' && !Array.isArray(config.published)) {
+    return config.published;
+  }
+  return config;
+}
+
 export function handleUploadProfileMp3(req, res, user) {
   const contentType = req.headers['content-type'] || '';
   if (!contentType.includes('multipart/form-data')) {
@@ -1531,4 +1557,181 @@ export function handleDeleteProfileMp3(req, res, user) {
   );
 
   return jsonResponse(res, 200, { message: 'MP3 removed' });
+}
+export function handleGetProfileMp3PlayerDesign(req, res, user) {
+  const profile = queryOne('SELECT profile_mp3_player_config FROM profiles WHERE user_id = ?', [user.sub]);
+  if (!profile) {
+    return errorResponse(res, 404, 'Profile not found');
+  }
+  return jsonResponse(res, 200, {
+    design: parseProfileMp3PlayerConfig(profile.profile_mp3_player_config),
+  });
+}
+
+export async function handleSaveProfileMp3PlayerDesign(req, res, user) {
+  let body;
+  try {
+    body = await parseBody(req);
+  } catch {
+    return errorResponse(res, 400, 'Invalid JSON');
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return errorResponse(res, 422, 'Design data is required');
+  }
+  if (!body.config || typeof body.config !== 'object' || Array.isArray(body.config)) {
+    return errorResponse(res, 422, 'Design config must be an object');
+  }
+
+  const serialized = JSON.stringify(body.config);
+  if (serialized.length > 100000) {
+    return errorResponse(res, 422, 'Design config is too large');
+  }
+
+  const profile = queryOne('SELECT profile_mp3_player_config FROM profiles WHERE user_id = ?', [user.sub]);
+  if (!profile) {
+    return errorResponse(res, 404, 'Profile not found');
+  }
+
+  const current = parseProfileMp3PlayerConfig(profile.profile_mp3_player_config) || { draft: null, published: null };
+  const next = {
+    draft: body.config,
+    published: body.publish ? body.config : (current.published || null),
+  };
+
+  execute(
+    "UPDATE profiles SET profile_mp3_player_config = ?, updated_at = datetime('now') WHERE user_id = ?",
+    [JSON.stringify(next), user.sub]
+  );
+
+  return jsonResponse(res, 200, { design: next });
+}
+
+export async function handleUploadProfileMp3PlayerImage(req, res, user) {
+  const contentType = req.headers['content-type'] || '';
+  if (!contentType.includes('multipart/form-data')) {
+    return errorResponse(res, 422, 'Content-Type must be multipart/form-data');
+  }
+
+  const busboy = Busboy({
+    headers: req.headers,
+    limits: { files: 1, fileSize: config.upload.maxFileSize },
+  });
+
+  let responseSent = false;
+  const sendError = (status, message) => {
+    if (!responseSent) {
+      responseSent = true;
+      errorResponse(res, status, message);
+    }
+  };
+  const sendSuccess = (data) => {
+    if (!responseSent) {
+      responseSent = true;
+      jsonResponse(res, 200, data);
+    }
+  };
+
+  let fileInfo = null;
+
+  busboy.on('file', (fieldname, file, info) => {
+    if (fieldname !== 'image') {
+      file.resume();
+      sendError(422, 'Field name must be "image"');
+      return;
+    }
+    const { filename, mimeType } = info;
+    const uniqueFilename = `${crypto.randomBytes(16).toString('hex')}.webp`;
+    const filePath = resolve(backgroundUploadDir, uniqueFilename);
+
+    const chunks = [];
+    let fileSize = 0;
+    let tooLarge = false;
+
+    file.on('data', (chunk) => {
+      fileSize += chunk.length;
+      if (fileSize > config.upload.maxFileSize) {
+        tooLarge = true;
+        file.resume();
+        sendError(422, `File too large. Maximum size: ${config.upload.maxFileSize / 1024 / 1024}MB`);
+        return;
+      }
+      chunks.push(chunk);
+    });
+
+    file.on('end', () => {
+      if (tooLarge) return;
+      fileInfo = { filename, mimeType, uniqueFilename, filePath, data: Buffer.concat(chunks), fileSize };
+    });
+
+    file.on('error', () => sendError(500, 'Upload processing failed'));
+  });
+
+  busboy.on('error', () => sendError(500, 'Upload processing failed'));
+
+  busboy.on('finish', () => {
+    if (!fileInfo && !responseSent) {
+      sendError(422, 'No file uploaded');
+      return;
+    }
+    if (fileInfo && !responseSent) {
+      processProfileMp3PlayerImageUpload(fileInfo)
+        .then((url) => sendSuccess({ image_url: url }))
+        .catch((err) => {
+          try {
+            if (existsSync(fileInfo.filePath)) unlinkSync(fileInfo.filePath);
+          } catch { /* best-effort */ }
+          sendError(err.status || 422, err.message || 'Failed to process image.');
+        });
+    }
+  });
+
+  req.pipe(busboy);
+}
+
+async function processProfileMp3PlayerImageUpload(fileInfo) {
+  const { data, filePath, uniqueFilename } = fileInfo;
+
+  if (!data || data.length === 0) {
+    const err = new Error('Failed to process image. Please upload a valid image.');
+    err.status = 422;
+    throw err;
+  }
+
+  let metadata;
+  try {
+    metadata = await sharp(data).metadata();
+  } catch {
+    const err = new Error('Failed to process image. Please upload a valid image.');
+    err.status = 422;
+    throw err;
+  }
+
+  const detectedFormat = String(metadata.format || '').toLowerCase();
+  if (!['jpeg', 'jpg', 'png', 'webp'].includes(detectedFormat)) {
+    const err = new Error('Please upload a valid JPEG, PNG, or WebP image.');
+    err.status = 422;
+    throw err;
+  }
+
+  let optimizedBuffer;
+  try {
+    optimizedBuffer = await sharp(data)
+      .resize({ width: 1920, height: 1080, fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: config.upload.webpQuality })
+      .toBuffer();
+  } catch {
+    const err = new Error('Failed to process image. Please upload a valid image.');
+    err.status = 422;
+    throw err;
+  }
+
+  try {
+    writeFileSync(filePath, optimizedBuffer);
+  } catch {
+    const err = new Error('Failed to save image. Please try again.');
+    err.status = 500;
+    throw err;
+  }
+
+  return `/uploads/backgrounds/${uniqueFilename}`;
 }

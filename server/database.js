@@ -723,9 +723,10 @@ export function initDatabase() {
     database.exec('ALTER TABLE profiles ADD COLUMN profile_mp3_title TEXT');
     database.exec('ALTER TABLE profiles ADD COLUMN profile_mp3_filename TEXT');
     database.exec('ALTER TABLE profiles ADD COLUMN profile_mp3_uploaded_at TEXT');
-  } catch (err) {
-    // Column already exists â€” safe no-op.
-  }
+  } catch (err) { /* column already exists — safe no-op. */ }
+  try {
+    database.exec('ALTER TABLE profiles ADD COLUMN profile_mp3_player_config TEXT');
+  } catch (err) { /* column already exists — safe no-op. */ }
 
   // PHOTO-ALBUM-01: Add album_id column to existing profile_photos tables.
   try {

@@ -497,6 +497,7 @@ export function renderCreatorStudioPage() {
         <button id="studio-save-asset" class="btn btn-secondary" type="button" title="Create a Coin Shop asset from this design">Save as Asset</button>
         <button id="studio-asset-library" class="btn btn-secondary" type="button" title="Open your persistent asset library — browse and reuse images, backgrounds, stickers, effects, projects and creator assets across designs">Asset Library</button>
         <button id="studio-music-player" class="btn btn-secondary" type="button" title="Open the MP3 music player — upload and preview your own tracks">Music Player</button>
+        <button id="studio-mp3-player-designer" class="btn btn-secondary" type="button" title="Design the MP3 player appearance">MP3 Player Designer</button>
       </div>
       <div class="studio-layout" id="studio-layout">
         <aside id="studio-elements" class="studio-panel" aria-label="Elements">
@@ -4814,6 +4815,9 @@ function attachEvents() {
   root.querySelector('#studio-version-history').addEventListener('click', openVersionHistoryModal);
   root.querySelector('#studio-asset-library').addEventListener('click', openLibraryModal);
   root.querySelector('#studio-music-player').addEventListener('click', openMusicPlayerModal);
+  root.querySelector('#studio-mp3-player-designer')?.addEventListener('click', () => {
+    window.location.hash = '/creator-studio/mp3-player';
+  });
   root.querySelector('#studio-new-design').addEventListener('click', createNewDesign);
   root.querySelector('#studio-open-profile').addEventListener('click', () => navigate('/profile'));
   root.querySelector('#studio-coin-shop').addEventListener('click', () => navigate('/creator-studio/coin-shop'));

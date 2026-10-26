@@ -2258,3 +2258,231 @@
   .studio-mp-time { min-width: 30px; font-size: 0.7rem; }
 }
 
+/* CREATOR-STUDIO-MP3-PLAYER-DESIGNER-002: scoped dark theme for the MP3 Player Designer route. */
+#mp3-designer {
+  --mp3d-bg: #0f172a;
+  --mp3d-bg-2: #1b2436;
+  --mp3d-panel: #141d2e;
+  --mp3d-canvas: #0b1120;
+  --mp3d-line: rgba(148, 163, 184, 0.18);
+  --mp3d-text: #e6eaf2;
+  --mp3d-muted: #9aa7ba;
+  --mp3d-accent: #14b8a6;
+  --mp3d-danger: #f87171;
+  --mp3d-radius: 12px;
+
+  background: linear-gradient(180deg, var(--mp3d-bg) 0%, var(--mp3d-bg-2) 100%);
+  color: var(--mp3d-text);
+  min-height: 100vh;
+  padding: 1.5rem 1.25rem 2.5rem;
+  box-sizing: border-box;
+}
+
+#mp3-designer h1,
+#mp3-designer h2,
+#mp3-designer h3 {
+  color: var(--mp3d-text);
+  margin-top: 0;
+}
+
+#mp3-designer p,
+#mp3-designer label,
+#mp3-designer .mp3-designer-status {
+  color: var(--mp3d-muted);
+}
+
+#mp3-designer .mp3-designer-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+#mp3-designer .mp3-designer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+#mp3-designer .mp3-designer-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+#mp3-designer .mp3-designer-panel {
+  background: var(--mp3d-panel);
+  border: 1px solid var(--mp3d-line);
+  border-radius: var(--mp3d-radius);
+  padding: 1rem;
+  box-sizing: border-box;
+  max-height: calc(100vh - 8rem);
+  overflow: auto;
+}
+
+#mp3-designer .mp3-designer-preview {
+  background: var(--mp3d-canvas);
+  border: 1px solid var(--mp3d-line);
+  border-radius: var(--mp3d-radius);
+  padding: 1.5rem;
+  min-height: 320px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#mp3-designer .mp3-designer-preview-player {
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.6rem;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+#mp3-designer .mp3-designer-preview-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+#mp3-designer .mp3-designer-preview-title,
+#mp3-designer .mp3-designer-preview-controls {
+  position: relative;
+  z-index: 1;
+}
+
+#mp3-designer .mp3-designer-preview-progress {
+  position: relative;
+  z-index: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  overflow: hidden;
+}
+
+#mp3-designer .mp3-designer-preview-progress span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+}
+
+#mp3-designer .mp3-designer-preview-art {
+  position: relative;
+  z-index: 1;
+}
+
+#mp3-designer .mp3-designer-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+#mp3-designer label {
+  display: block;
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.875rem;
+}
+
+#mp3-designer input,
+#mp3-designer select,
+#mp3-designer textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(15, 23, 42, 0.88);
+  color: var(--mp3d-text);
+  border: 1px solid var(--mp3d-line);
+  border-radius: 8px;
+  padding: 0.5rem 0.65rem;
+  font: inherit;
+}
+
+#mp3-designer input[type="color"] {
+  min-height: 2.25rem;
+  padding: 0.2rem;
+}
+
+#mp3-designer input[type="range"] {
+  padding: 0;
+}
+
+#mp3-designer input[type="file"] {
+  display: none;
+}
+
+#mp3-designer input:focus,
+#mp3-designer select:focus,
+#mp3-designer textarea:focus {
+  outline: 2px solid var(--mp3d-accent);
+  outline-offset: 1px;
+  border-color: var(--mp3d-accent);
+}
+
+#mp3-designer .btn {
+  background: rgba(30, 41, 59, 0.9);
+  color: var(--mp3d-text);
+  border: 1px solid var(--mp3d-line);
+  border-radius: 8px;
+  padding: 0.5rem 0.85rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+#mp3-designer .btn:hover {
+  background: rgba(51, 65, 85, 0.95);
+}
+
+#mp3-designer .btn-primary {
+  background: var(--mp3d-accent);
+  color: #042f2e;
+  border-color: var(--mp3d-accent);
+}
+
+#mp3-designer .btn-primary:hover {
+  filter: brightness(1.08);
+}
+
+#mp3-designer .btn-secondary {
+  background: rgba(30, 41, 59, 0.9);
+}
+
+#mp3-designer .mp3-designer-status {
+  margin: 0.75rem 0 0;
+  min-height: 1.25rem;
+}
+
+@media (max-width: 900px) {
+  #mp3-designer .mp3-designer-layout {
+    grid-template-columns: 1fr;
+  }
+
+  #mp3-designer .mp3-designer-panel {
+    max-height: none;
+  }
+}
+
+@media (max-width: 640px) {
+  #mp3-designer {
+    padding: 1rem 0.75rem 2rem;
+  }
+
+  #mp3-designer .mp3-designer-header {
+    align-items: stretch;
+  }
+
+  #mp3-designer .mp3-designer-actions {
+    width: 100%;
+  }
+
+  #mp3-designer .mp3-designer-actions .btn {
+    flex: 1 1 auto;
+  }
+}

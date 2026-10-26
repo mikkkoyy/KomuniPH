@@ -871,6 +871,7 @@ export function renderProfileView(profile) {
     }
   }
   if (sidebarName) sidebarName.textContent = nameDisplay;
+  renderProfileMusicPlayer(profile);
   initProfilePhotoUpload();
 }
 
@@ -2119,18 +2120,21 @@ export function setEditorProfile(profile) {
   setCurrentUserProfile(profile);
 }
 function renderProfileMusicPlayer(profile) {
-  const container = document.getElementById('profile-music-player');
+  const container = document.getElementById('music-module-content');
   if (!container) return;
   if (!profile || !profile.profile_mp3_url) {
-    container.hidden = true;
-    container.innerHTML = '';
+    container.innerHTML = `
+      <div class="music-module-empty" id="music-module-empty">
+        No track selected.
+        Coming soon.
+      </div>
+    `;
     return;
   }
   const title = profile.profile_mp3_title || 'Featured track';
-  container.hidden = false;
   container.innerHTML = `
-    <div class="profile-music-card">
-      <div class="profile-music-title">${escapeHtml(title)}</div>
+    <div class="music-module-track">
+      <div class="music-module-title">${escapeHtml(title)}</div>
       <audio controls preload="metadata" src="${escapeHtmlAttr(profile.profile_mp3_url)}"></audio>
     </div>
   `;

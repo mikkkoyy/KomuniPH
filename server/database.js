@@ -718,6 +718,14 @@ export function initDatabase() {
   } catch (err) {
     // Column already exists — safe no-op.
   }
+  try {
+    database.exec('ALTER TABLE profiles ADD COLUMN profile_mp3_url TEXT');
+    database.exec('ALTER TABLE profiles ADD COLUMN profile_mp3_title TEXT');
+    database.exec('ALTER TABLE profiles ADD COLUMN profile_mp3_filename TEXT');
+    database.exec('ALTER TABLE profiles ADD COLUMN profile_mp3_uploaded_at TEXT');
+  } catch (err) {
+    // Column already exists — safe no-op.
+  }
 
   // PHOTO-ALBUM-01: Add album_id column to existing profile_photos tables.
   try {
@@ -1666,6 +1674,13 @@ export async function seedAdminUser() {
     database.prepare(
       "INSERT INTO user_wallets (user_id, balance, frozen_balance) VALUES (?, 0, 0)"
     ).run(adminId);
+
+    const adminProfileExists = database.prepare('SELECT id FROM profiles WHERE user_id = ?').get(adminId);
+    if (!adminProfileExists) {
+      database.prepare(
+        "INSERT INTO profiles (id, user_id, display_name, theme_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+      ).run(crypto.randomUUID(), adminId, 'Admin', 'default', ts, ts);
+    }
 
     console.log('[ADMIN-SEED] Default admin user created (username: admin, password: admin)');
   } catch (err) {

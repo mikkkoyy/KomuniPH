@@ -17,6 +17,7 @@ import { getCountries, getCities, getBarangays } from './locations.js';
 import { seedDefaultTheme } from './database.js';
 import { getPublishedDesignForUser, getPublishedDesignByUsername } from './profileDesign.js';
 import { validateBackgroundEffect } from './creatorEffects.js';
+import { isValidMp3 } from './creatorAudio.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -30,6 +31,11 @@ if (!existsSync(uploadDir)) {
 const backgroundUploadDir = resolve(__dirname, '..', config.upload.backgroundDir);
 if (!existsSync(backgroundUploadDir)) {
   mkdirSync(backgroundUploadDir, { recursive: true });
+}
+
+const profileMp3Dir = resolve(__dirname, '..', config.upload.creatorAudioDir);
+if (!existsSync(profileMp3Dir)) {
+  mkdirSync(profileMp3Dir, { recursive: true });
 }
 
 // Startup diagnostics
@@ -176,6 +182,8 @@ const PROFILE_SELECT = `
     p.company,
     p.hometown,
     p.interests,
+    p.profile_mp3_url,
+    p.profile_mp3_title,
     p.created_at,
     p.updated_at
   FROM profiles p
@@ -246,6 +254,10 @@ function getProfileByUserId(userId) {
     profile.company = profile.company || null;
     profile.hometown = profile.hometown || null;
     profile.interests = profile.interests || null;
+    profile.profile_mp3_url = profile.profile_mp3_url || null;
+    profile.profile_mp3_title = profile.profile_mp3_title || null;
+    const userRow = queryOne('SELECT role FROM users WHERE id = ?', [userId]);
+    profile.role = userRow?.role || 'member';
     profile.theme = buildTheme(profile);
     // CREATOR-01A: the user's published design (validated; null when none or invalid).
     profile.design = getPublishedDesignForUser(userId);
@@ -300,6 +312,8 @@ export function handleGetPublicProfile(req, res, params) {
         p.company,
         p.hometown,
         p.interests,
+        p.profile_mp3_url,
+        p.profile_mp3_title,
         p.created_at,
         p.updated_at
       FROM profiles p
@@ -322,6 +336,8 @@ export function handleGetPublicProfile(req, res, params) {
     profile.company = profile.company || null;
     profile.hometown = profile.hometown || null;
     profile.interests = profile.interests || null;
+    profile.profile_mp3_url = profile.profile_mp3_url || null;
+    profile.profile_mp3_title = profile.profile_mp3_title || null;
     if (profile.real_name === null) {
       delete profile.real_name;
     }
@@ -1339,4 +1355,180 @@ async function removeOldPhotoWithRetry(oldFilePath) {
     }
   }
   return false;
+}
+/**
+ * Profile MP3 (admin-only). Reuses CREATOR-18 audio storage and validation.
+ */
+function safeProfileMp3Filename(name) {
+  return typeof name === 'string' && /^[0-9a-f]{32}\.mp3$/.test(name) ? name : null;
+}
+
+function profileMp3TitleFromFilename(name) {
+  const base = String(name || '').replace(/\\/g, '/').split('/').pop() || '';
+  const noExt = base.replace(/\.[^.]*$/, '');
+  const cleaned = noExt.replace(/[^\w\s\-.,()]/g, '').trim().slice(0, 100);
+  return cleaned || 'Uploaded MP3';
+}
+
+function removeProfileMp3File(filename) {
+  const safe = safeProfileMp3Filename(filename);
+  if (!safe) return;
+  const full = resolve(profileMp3Dir, safe);
+  if (full.startsWith(profileMp3Dir) && existsSync(full)) {
+    try { unlinkSync(full); } catch { /* best effort */ }
+  }
+}
+
+export function handleUploadProfileMp3(req, res, user) {
+  const contentType = req.headers['content-type'] || '';
+  if (!contentType.includes('multipart/form-data')) {
+    return errorResponse(res, 422, 'Content-Type must be multipart/form-data');
+  }
+
+  const busboy = Busboy({
+    headers: req.headers,
+    limits: { files: 1, fileSize: config.upload.creatorMaxAudioSize },
+  });
+
+  let responseSent = false;
+  const sendError = (status, message) => {
+    if (!responseSent) {
+      responseSent = true;
+      errorResponse(res, status, message);
+    }
+  };
+  const sendSuccess = (data) => {
+    if (!responseSent) {
+      responseSent = true;
+      jsonResponse(res, 201, data);
+    }
+  };
+
+  let fileInfo = null;
+
+  busboy.on('file', (fieldname, file, info) => {
+    if (fieldname !== 'audio') {
+      file.resume();
+      sendError(422, 'Field name must be "audio"');
+      return;
+    }
+
+    const originalFilename = info?.filename || 'track.mp3';
+    const uniqueFilename = `${crypto.randomBytes(16).toString('hex')}.mp3`;
+    const filePath = resolve(profileMp3Dir, uniqueFilename);
+
+    if (!filePath.startsWith(profileMp3Dir)) {
+      file.resume();
+      sendError(422, 'Invalid upload target');
+      return;
+    }
+
+    const chunks = [];
+    let fileSize = 0;
+    let tooLarge = false;
+
+    file.on('data', (chunk) => {
+      fileSize += chunk.length;
+      if (fileSize > config.upload.creatorMaxAudioSize) {
+        tooLarge = true;
+        file.resume();
+        sendError(422, `File too large. Maximum size: ${config.upload.creatorMaxAudioSize / 1024 / 1024}MB`);
+        return;
+      }
+      chunks.push(chunk);
+    });
+
+    file.on('end', () => {
+      if (tooLarge) return;
+      fileInfo = { uniqueFilename, filePath, data: Buffer.concat(chunks), fileSize, originalFilename };
+    });
+
+    file.on('error', () => sendError(500, 'Upload processing failed'));
+  });
+
+  busboy.on('error', () => sendError(500, 'Upload processing failed'));
+
+  busboy.on('finish', () => {
+    if (!fileInfo && !responseSent) {
+      sendError(422, 'No file uploaded');
+      return;
+    }
+    if (fileInfo && !responseSent) {
+      processProfileMp3Upload(fileInfo, user.sub)
+        .then((result) => sendSuccess(result))
+        .catch((err) => {
+          try {
+            if (existsSync(fileInfo.filePath)) unlinkSync(fileInfo.filePath);
+          } catch { /* best-effort cleanup */ }
+          sendError(err.status || 422, err.message || 'Failed to process audio.');
+        });
+    }
+  });
+
+  req.pipe(busboy);
+}
+
+async function processProfileMp3Upload(fileInfo, userId) {
+  const { uniqueFilename, filePath, data, originalFilename } = fileInfo;
+
+  if (!data || data.length === 0) {
+    const err = new Error('Empty file. Please upload a valid MP3.');
+    err.status = 422;
+    throw err;
+  }
+
+  if (!isValidMp3(data)) {
+    const err = new Error('That file is not a valid MP3. Please upload an MP3 audio file.');
+    err.status = 422;
+    throw err;
+  }
+
+  let profile = queryOne('SELECT profile_mp3_filename FROM profiles WHERE user_id = ?', [userId]);
+  if (!profile) {
+    execute(
+      'INSERT INTO profiles (id, user_id, display_name, theme_id, created_at, updated_at) VALUES (?, ?, ?, ?, datetime(\'now\'), datetime(\'now\'))',
+      [crypto.randomUUID(), userId, '', 'default']
+    );
+    profile = { profile_mp3_filename: null };
+  }
+
+  removeProfileMp3File(profile.profile_mp3_filename);
+
+  try {
+    writeFileSync(filePath, data);
+  } catch {
+    const err = new Error('Failed to save uploaded audio. Please try again.');
+    err.status = 500;
+    throw err;
+  }
+
+  const title = profileMp3TitleFromFilename(originalFilename);
+  const url = `/uploads/creator-audio/${uniqueFilename}`;
+
+  execute(
+    `UPDATE profiles
+        SET profile_mp3_url = ?, profile_mp3_title = ?, profile_mp3_filename = ?, profile_mp3_uploaded_at = datetime('now'), updated_at = datetime('now')
+      WHERE user_id = ?`,
+    [url, title, uniqueFilename, userId]
+  );
+
+  return { url, title };
+}
+
+export function handleDeleteProfileMp3(req, res, user) {
+  const profile = queryOne('SELECT profile_mp3_filename FROM profiles WHERE user_id = ?', [user.sub]);
+  if (!profile) {
+    return errorResponse(res, 404, 'Profile not found');
+  }
+
+  removeProfileMp3File(profile.profile_mp3_filename);
+
+  execute(
+    `UPDATE profiles
+        SET profile_mp3_url = NULL, profile_mp3_title = NULL, profile_mp3_filename = NULL, profile_mp3_uploaded_at = NULL, updated_at = datetime('now')
+      WHERE user_id = ?`,
+    [user.sub]
+  );
+
+  return jsonResponse(res, 200, { message: 'MP3 removed' });
 }

@@ -14,7 +14,8 @@ import { requireAuth, requireAdmin } from './auth.js';
 import { handleRegister, handleLogin, handleVerify, handleVerifyEmailLink, handleForgotPassword, handleResetPassword } from './auth.js';
 import { handleAdminLogin, handleAdminChangePassword } from './adminAuth.js';
 import { handleGetSettings, handleUpdateSettings } from './settings.js';
-import { handleGetProfile, handleGetPublicProfile, handleUpdateProfile, handleUploadPhoto, handleUpdateTheme, handleUploadBackground } from './profile.js';
+import { handleGetProfile, handleGetPublicProfile, handleUpdateProfile, handleUploadPhoto,
+  handleUpdateTheme, handleUploadBackground, handleUploadProfileMp3, handleDeleteProfileMp3 } from './profile.js';
 import { handleListDesigns, handleCreateDesign, handleGetDesign, handleUpdateDesign, handlePublishDesign, handleArchiveDesign } from './profileDesign.js';
 import {
   handleListProjects,
@@ -401,6 +402,22 @@ async function handleApi(req, res) {
      if (!user) return;
      return handleUploadBackground(req, res, user);
    }
+  if (method === 'POST' && path === '/api/profile/mp3') {
+    const user = requireAdmin(req, res);
+    if (!user) return;
+    if (!audioRateLimit('upload')(req, res, user)) {
+      return errorResponse(res, 429, 'Too Many Requests');
+    }
+    return handleUploadProfileMp3(req, res, user);
+  }
+  if (method === 'DELETE' && path === '/api/profile/mp3') {
+    const user = requireAdmin(req, res);
+    if (!user) return;
+    if (!audioRateLimit('upload')(req, res, user)) {
+      return errorResponse(res, 429, 'Too Many Requests');
+    }
+    return handleDeleteProfileMp3(req, res, user);
+  }
 
 // Testimonials routes
    const testimonialsMatch = matchRoute('/api/profiles/:username/testimonials', path);

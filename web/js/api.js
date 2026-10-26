@@ -1068,3 +1068,27 @@ export const communityApi = {
     });
   },
 };
+/**
+ * Profile MP3 API (admin-only management).
+ */
+export const profileMp3Api = {
+  async upload(file) {
+    const form = new FormData();
+    form.append('audio', file);
+    const token = getAccessToken();
+    const res = await fetch(`${API_BASE}/profile/mp3`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      throw new Error((data && data.error && data.error.message) || 'Upload failed. Please try again.');
+    }
+    return data;
+  },
+
+  async remove() {
+    return apiRequest('/profile/mp3', { method: 'DELETE' });
+  },
+};

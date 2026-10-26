@@ -1,5 +1,5 @@
 /** Dedicated owner workspace; profile data and uploads use the existing APIs. */
-import { profileApi } from './api.js';
+import { profileApi, profileMp3Api } from './api.js';
 import { applyProfileBackground, renderProfileView, renderThemeControls, setEditorProfile, getThemeDraft, renderProfilePage, loadProfilePreviewContent } from './profile.js';
 
 let root = null;
@@ -38,6 +38,18 @@ export function renderProfileEditorPage() {
           <p id="editor-photo-status" role="status"></p>
           <h2>Profile Information</h2><p id="editor-username"></p>
           <div id="profile-edit"></div>
+          <section id="profile-mp3-section" hidden>
+            <h2>MP3 Music</h2>
+            <p>Install one featured MP3 for your public profile. Visitors can play it; only you can manage it.</p>
+            <p id="profile-mp3-current">No song installed.</p>
+            <audio id="profile-mp3-audio" controls hidden></audio>
+            <div class="edit-actions">
+              <label class="btn btn-primary" for="profile-mp3-input">Install MP3</label>
+              <input id="profile-mp3-input" type="file" accept="audio/mpeg,audio/mp3" hidden>
+              <button id="profile-mp3-remove" class="btn btn-secondary" hidden>Remove MP3</button>
+            </div>
+            <p id="profile-mp3-status" role="status"></p>
+          </section>
         </section>
         <section id="customize-panel" role="tabpanel" aria-labelledby="customize-tab" hidden>
           <p>Preview your colors, background and profile cards. Save Changes to apply them.</p>
@@ -142,6 +154,13 @@ export async function initProfileEditorPage() {
     bindUploads();
     bindThemeActions();
     bindPrivacy();
+    if (profile.role === 'admin') {
+      const mp3Section = root.querySelector('#profile-mp3-section');
+      if (mp3Section) {
+        mp3Section.hidden = false;
+        bindProfileMp3(profile);
+      }
+    }
     root.querySelector('#editor-open-preview').onclick = openFullPreview;
     root.querySelector('#editor-back').onclick = closeFullPreview;
     // Preview is read-only, including gallery links and testimonial actions.
@@ -439,4 +458,59 @@ function closeFullPreview() {
 function validateImage(file) {
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error('Choose a JPEG, PNG or WebP image.');
   if (file.size > 5 * 1024 * 1024) throw new Error('Image must be 5MB or smaller.');
+}
+function bindProfileMp3(profile) {
+  const input = root.querySelector('#profile-mp3-input');
+  const audio = root.querySelector('#profile-mp3-audio');
+  const current = root.querySelector('#profile-mp3-current');
+  const removeBtn = root.querySelector('#profile-mp3-remove');
+  const status = root.querySelector('#profile-mp3-status');
+
+  function setTrack(url, title) {
+    if (url) {
+      current.textContent = title ? `Current song: ${title}` : 'Current song installed.';
+      audio.src = url;
+      audio.hidden = false;
+      removeBtn.hidden = false;
+    } else {
+      current.textContent = 'No song installed.';
+      audio.hidden = true;
+      audio.removeAttribute('src');
+      removeBtn.hidden = true;
+    }
+  }
+
+  setTrack(profile.profile_mp3_url, profile.profile_mp3_title);
+
+  input.addEventListener('change', async () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    status.textContent = 'Uploading MP3...';
+    try {
+      const result = await profileMp3Api.upload(file);
+      setTrack(result.url, result.title);
+      if (savedProfile) {
+        savedProfile = { ...savedProfile, profile_mp3_url: result.url, profile_mp3_title: result.title };
+      }
+      status.textContent = 'MP3 installed.';
+    } catch (error) {
+      status.textContent = error.message || 'Upload failed.';
+    } finally {
+      input.value = '';
+    }
+  });
+
+  removeBtn.addEventListener('click', async () => {
+    status.textContent = 'Removing MP3...';
+    try {
+      await profileMp3Api.remove();
+      setTrack(null, null);
+      if (savedProfile) {
+        savedProfile = { ...savedProfile, profile_mp3_url: null, profile_mp3_title: null };
+      }
+      status.textContent = 'MP3 removed.';
+    } catch (error) {
+      status.textContent = error.message || 'Remove failed.';
+    }
+  });
 }

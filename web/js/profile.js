@@ -2118,3 +2118,20 @@ export function setEditorProfile(profile) {
   currentProfile = profile;
   setCurrentUserProfile(profile);
 }
+function renderProfileMusicPlayer(profile) {
+  const container = document.getElementById('profile-music-player');
+  if (!container) return;
+  if (!profile || !profile.profile_mp3_url) {
+    container.hidden = true;
+    container.innerHTML = '';
+    return;
+  }
+  const title = profile.profile_mp3_title || 'Featured track';
+  container.hidden = false;
+  container.innerHTML = `
+    <div class="profile-music-card">
+      <div class="profile-music-title">${escapeHtml(title)}</div>
+      <audio controls preload="metadata" src="${escapeHtmlAttr(profile.profile_mp3_url)}"></audio>
+    </div>
+  `;
+}

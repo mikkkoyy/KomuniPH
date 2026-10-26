@@ -11,9 +11,10 @@
  * test runner). The live database and real user uploads are never touched.
  */
 
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 
@@ -39,6 +40,9 @@ process.env.UPLOAD_CREATOR_DIR = resolve(tmpdir(), `komuniph-c17-creator-${proce
 process.env.UPLOAD_CREATOR_EFFECT_DIR = resolve(tmpdir(), `komuniph-c17-effect-${process.pid}`);
 process.env.UPLOAD_CREATOR_AUDIO_DIR = resolve(tmpdir(), `komuniph-c17-audio-${process.pid}`);
 process.env.UPLOAD_MAX_FILE_SIZE = '5242880';
+// Higher rate limits for testing to avoid interference between test cases
+process.env.AUDIO_UPLOAD_RATE_MAX = '100';
+process.env.AUDIO_READ_RATE_MAX = '500';
 
 // ── Tiny test harness ───────────────────────────────────────────────────────
 const results = [];
@@ -49,7 +53,7 @@ let groupName = '';
 function createMultipartBody(fields, files) {
   const boundary = `----WebKitFormBoundary${randomBytes(16).toString('hex')}`;
   const parts = [];
-  
+
   for (const [name, value] of Object.entries(fields)) {
     parts.push(
       `--${boundary}\r\n`,
@@ -57,7 +61,7 @@ function createMultipartBody(fields, files) {
       `${value}\r\n`
     );
   }
-  
+
   for (const { fieldName, filename, content, type } of files) {
     parts.push(
       `--${boundary}\r\n`,
@@ -67,9 +71,9 @@ function createMultipartBody(fields, files) {
     parts.push(content);
     parts.push('\r\n');
   }
-  
+
   parts.push(`--${boundary}--\r\n`);
-  
+
   const body = Buffer.concat(parts.map(p => Buffer.isBuffer(p) ? p : Buffer.from(p)));
   return { body, contentType: `multipart/form-data; boundary=${boundary}` };
 }
@@ -128,14 +132,14 @@ const domImpl = this;
       }
       set src(v) { this._src = v; }
       get src() { return this._src; }
-      play() { 
-        this.paused = false; 
+      play() {
+        this.paused = false;
         this.dispatchEvent(new this.owner.Event('play'));
         this.dispatchEvent(new this.owner.Event('playing'));
-        return Promise.resolve(); 
+        return Promise.resolve();
       }
-      pause() { 
-        this.paused = true; 
+      pause() {
+        this.paused = true;
         this.dispatchEvent(new this.owner.Event('pause'));
       }
       load() {
@@ -207,12 +211,12 @@ class DOMElement {
   addEventListener(type, fn) { (this._listeners[type] ||= []).push(fn); }
   removeEventListener(type, fn) { const arr = this._listeners[type]; if (arr) { const i = arr.indexOf(fn); if (i >= 0) arr.splice(i, 1); } }
   dispatchEvent(ev) { const arr = this._listeners[ev.type]; if (arr) for (const fn of arr) fn(ev); return true; }
-  click() { 
+  click() {
     // Find the DOMImpl (root owner) to get the Event constructor
     let root = this;
     while (root.owner) root = root.owner;
     const EventCtor = root.Event || class { constructor(type) { this.type = type; this.bubbles = false; } };
-    this.dispatchEvent(new EventCtor('click')); 
+    this.dispatchEvent(new EventCtor('click'));
   }
   setAttribute(k, v) { this.attributes[k] = v; if (k === 'id') this.id = v; if (k.startsWith('data-')) this.dataset[k.slice(5)] = v; }
   getAttribute(k) { return this.attributes[k] ?? null; }
@@ -254,7 +258,7 @@ async function main() {
   const otherId = generateId();
   const ts = new Date().toISOString();
   const passwordHash = await auth.hashPassword('TestPass123!');
-  
+
   database.execute(
     `INSERT INTO users (id, email, username, password_hash, role, account_status, created_at, updated_at)
      VALUES (?, ?, ?, ?, 'member', 'active', ?, ?)`,
@@ -299,11 +303,11 @@ async function uploadPart(path, token, fieldName, filename, bytes, type) {
     const buffer = bytes instanceof Blob
       ? Buffer.from(await bytes.arrayBuffer())
       : Buffer.from(bytes);
-    
+
     const { body, contentType } = createMultipartBody({}, [
       { fieldName, filename, content: buffer, type }
     ]);
-    
+
     const res = await fetch(`${BASE_URL}${path}`, {
       method: 'POST',
       headers: {
@@ -444,32 +448,32 @@ test('PLAYER_STATE and PLAYER_STATE_MESSAGE cover all five UI states', async () 
   function createModal(dom) {
     const modal = dom.document.createElement('div');
     modal.id = 'music-player-modal';
-    
+
     const title = dom.document.createElement('div');
     title.id = 'studio-music-title';
     title.textContent = 'Music Player';
     modal.appendChild(title);
-    
+
     const uploadBtn = dom.document.createElement('button');
     uploadBtn.id = 'studio-music-upload-btn';
     uploadBtn.textContent = 'Upload MP3';
     modal.appendChild(uploadBtn);
-    
+
     const status = dom.document.createElement('div');
     status.id = 'studio-music-upload-status';
     modal.appendChild(status);
-    
+
     const fileInput = dom.document.createElement('input');
     fileInput.type = 'file';
     fileInput.id = 'studio-music-file';
     fileInput.setAttribute('accept', 'audio/mpeg');
     modal.appendChild(fileInput);
-    
+
     const playBtn = dom.document.createElement('button');
     playBtn.setAttribute('data-action', 'play');
     playBtn.textContent = 'Play';
     modal.appendChild(playBtn);
-    
+
     const seekInput = dom.document.createElement('input');
     seekInput.type = 'range';
     seekInput.setAttribute('data-action', 'seek');
@@ -477,7 +481,7 @@ test('PLAYER_STATE and PLAYER_STATE_MESSAGE cover all five UI states', async () 
     seekInput.max = '100';
     seekInput.value = '0';
     modal.appendChild(seekInput);
-    
+
     const volumeInput = dom.document.createElement('input');
     volumeInput.type = 'range';
     volumeInput.setAttribute('data-action', 'volume');
@@ -485,12 +489,12 @@ test('PLAYER_STATE and PLAYER_STATE_MESSAGE cover all five UI states', async () 
     volumeInput.max = '100';
     volumeInput.value = '100';
     modal.appendChild(volumeInput);
-    
+
     const muteBtn = dom.document.createElement('button');
     muteBtn.setAttribute('data-action', 'mute');
     muteBtn.textContent = 'Mute';
     modal.appendChild(muteBtn);
-    
+
     return modal;
   }
 
@@ -532,7 +536,7 @@ test('PLAYER_STATE and PLAYER_STATE_MESSAGE cover all five UI states', async () 
 
     // Create a real MusicPlayer instance with injected fake audio
     const MusicPlayer = musicPlayer.MusicPlayer;
-    
+
     // Override _build to prevent the innerHTML failure in constructor
     const originalBuild = MusicPlayer.prototype._build;
     MusicPlayer.prototype._build = function() {
@@ -544,14 +548,14 @@ test('PLAYER_STATE and PLAYER_STATE_MESSAGE cover all five UI states', async () 
       this.root = root;
       // Don't create child elements or attach listeners here - we'll do it manually
     };
-    
+
     const player = new MusicPlayer(container, {
       audio: () => new dom.window.Audio()
     });
-    
+
     // Restore original _build
     MusicPlayer.prototype._build = originalBuild;
-    
+
     dom.window.musicPlayer = player;
 
     // Manually create the expected UI structure and attach to player
@@ -559,35 +563,34 @@ test('PLAYER_STATE and PLAYER_STATE_MESSAGE cover all five UI states', async () 
     // Build the structure that _build's innerHTML would create
     const head = dom.document.createElement('div');
     head.className = 'studio-mp-head';
-    
+
     const icon = dom.document.createElement('span');
     icon.className = 'studio-mp-icon';
     icon.setAttribute('aria-hidden', 'true');
     head.appendChild(icon);
-    
+
     const title = dom.document.createElement('span');
     title.className = 'studio-mp-title';
     title.id = 'studio-mp-title';
     title.textContent = 'No track loaded';
-    head.appendChild(icon); // Fixed: was head.appendChild(title) but icon not added to head
     head.appendChild(title);
     root.appendChild(head);
-    
+
     const transport = dom.document.createElement('div');
     transport.className = 'studio-mp-transport';
-    
+
     const playBtn = dom.document.createElement('button');
     playBtn.type = 'button';
     playBtn.className = 'studio-mp-btn studio-mp-play';
     playBtn.setAttribute('aria-label', 'Play');
     playBtn.textContent = '▶';
     transport.appendChild(playBtn);
-    
+
     const current = dom.document.createElement('span');
     current.className = 'studio-mp-time studio-mp-current';
     current.textContent = '0:00';
     transport.appendChild(current);
-    
+
     const seek = dom.document.createElement('input');
     seek.type = 'range';
     seek.className = 'studio-mp-seek';
@@ -598,19 +601,19 @@ test('PLAYER_STATE and PLAYER_STATE_MESSAGE cover all five UI states', async () 
     seek.setAttribute('aria-label', 'Seek');
     seek.disabled = true;
     transport.appendChild(seek);
-    
+
     const duration = dom.document.createElement('span');
     duration.className = 'studio-mp-time studio-mp-duration';
     duration.textContent = '0:00';
     transport.appendChild(duration);
-    
+
     const muteBtn = dom.document.createElement('button');
     muteBtn.type = 'button';
     muteBtn.className = 'studio-mp-btn studio-mp-mute';
     muteBtn.setAttribute('aria-label', 'Mute');
     muteBtn.textContent = '🔊';
     transport.appendChild(muteBtn);
-    
+
     const volume = dom.document.createElement('input');
     volume.type = 'range';
     volume.className = 'studio-mp-volume';
@@ -620,15 +623,15 @@ test('PLAYER_STATE and PLAYER_STATE_MESSAGE cover all five UI states', async () 
     volume.step = '1';
     volume.setAttribute('aria-label', 'Volume');
     transport.appendChild(volume);
-    
+
     root.appendChild(transport);
-    
+
     const status = dom.document.createElement('p');
     status.className = 'studio-mp-status';
     status.setAttribute('role', 'status');
     status.setAttribute('aria-live', 'polite');
     root.appendChild(status);
-    
+
     // Assign to player properties directly (since querySelector only searches direct children)
     player.elTitle = title;
     player.elStatus = status;
@@ -638,7 +641,7 @@ test('PLAYER_STATE and PLAYER_STATE_MESSAGE cover all five UI states', async () 
     player.volume = volume;
     player.elCurrent = current;
     player.elDuration = duration;
-    
+
     // Re-attach control event listeners (as _build would do)
     player._on(player.btnPlay, 'click', () => player.togglePlay());
     player._on(player.btnMute, 'click', () => player.toggleMute());
@@ -653,7 +656,7 @@ test('PLAYER_STATE and PLAYER_STATE_MESSAGE cover all five UI states', async () 
     player._on(player.volume, 'input', () => {
       player.setVolume(musicPlayer.clampVolume(Number(player.volume.value) / 100));
     });
-    
+
     // Re-attach media event listeners (as _build would do)
     player._on(player.audio, 'loadedmetadata', () => player._onMetadata());
     player._on(player.audio, 'durationchange', () => player._onMetadata());
@@ -709,6 +712,234 @@ test('PLAYER_STATE and PLAYER_STATE_MESSAGE cover all five UI states', async () 
     eq(player._listeners.length, 0, 'listener ledger cleared after destroy');
     eq(player.audio, null, 'audio element cleared after destroy');
     eq(player.root, null, 'root element cleared after destroy');
+  });
+
+  // ── Part D: HTTP Range, Rate Limit, CORS ─────────────────────────────────────
+  group('D · HTTP Range, Rate Limit, CORS');
+
+  // Helper to upload a test track and return its URL
+  async function uploadTestTrack(token, filename = 'test.mp3') {
+    const res = await uploadPart('/api/creator/audio', token, 'audio', filename, VALID_MP3, 'audio/mpeg');
+    eq(res.status, 201);
+    return res.data.url;
+  }
+
+  test('static audio: full request -> 200, complete bytes, Accept-Ranges', async () => {
+    const url = await uploadTestTrack(ownerToken);
+    const res = await fetch(`${BASE_URL}${url}`);
+    eq(res.status, 200);
+    eq(res.headers.get('accept-ranges'), 'bytes');
+    eq(res.headers.get('content-type'), 'audio/mpeg');
+    const buf = await res.arrayBuffer();
+    eq(buf.byteLength, VALID_MP3.byteLength);
+  });
+
+  test('static audio: Range: bytes=0-3 -> 206, 4 bytes, correct headers', async () => {
+    const url = await uploadTestTrack(ownerToken);
+    const res = await fetch(`${BASE_URL}${url}`, { headers: { Range: 'bytes=0-3' } });
+    eq(res.status, 206);
+    eq(res.headers.get('accept-ranges'), 'bytes');
+    eq(res.headers.get('content-range'), `bytes 0-3/${VALID_MP3.byteLength}`);
+    eq(res.headers.get('content-length'), '4');
+    eq(res.headers.get('content-type'), 'audio/mpeg');
+    const buf = await res.arrayBuffer();
+    eq(buf.byteLength, 4);
+    // Verify first 4 bytes match
+    const view = new Uint8Array(buf);
+    const expected = new Uint8Array(VALID_MP3).slice(0, 4);
+    for (let i = 0; i < 4; i++) {
+      eq(view[i], expected[i], `byte ${i} matches`);
+    }
+  });
+
+  test('static audio: open-ended Range: bytes=10- -> 206, from 10 to end', async () => {
+    const url = await uploadTestTrack(ownerToken);
+    const res = await fetch(`${BASE_URL}${url}`, { headers: { Range: 'bytes=10-' } });
+    eq(res.status, 206);
+    const expectedLen = VALID_MP3.byteLength - 10;
+    eq(res.headers.get('content-length'), String(expectedLen));
+    eq(res.headers.get('content-range'), `bytes 10-${VALID_MP3.byteLength - 1}/${VALID_MP3.byteLength}`);
+    const buf = await res.arrayBuffer();
+    eq(buf.byteLength, expectedLen);
+  });
+
+  test('static audio: suffix Range: bytes=-4 -> 206, last 4 bytes', async () => {
+    const url = await uploadTestTrack(ownerToken);
+    const res = await fetch(`${BASE_URL}${url}`, { headers: { Range: 'bytes=-4' } });
+    eq(res.status, 206);
+    eq(res.headers.get('content-length'), '4');
+    eq(res.headers.get('content-range'), `bytes ${VALID_MP3.byteLength - 4}-${VALID_MP3.byteLength - 1}/${VALID_MP3.byteLength}`);
+    const buf = await res.arrayBuffer();
+    eq(buf.byteLength, 4);
+    const view = new Uint8Array(buf);
+    const expected = new Uint8Array(VALID_MP3).slice(-4);
+    for (let i = 0; i < 4; i++) {
+      eq(view[i], expected[i], `suffix byte ${i} matches`);
+    }
+  });
+
+  test('static audio: unsatisfiable Range -> 416, Content-Range: bytes */size', async () => {
+    const url = await uploadTestTrack(ownerToken);
+    const res = await fetch(`${BASE_URL}${url}`, { headers: { Range: `bytes=${VALID_MP3.byteLength}-` } });
+    eq(res.status, 416);
+    eq(res.headers.get('content-range'), `bytes */${VALID_MP3.byteLength}`);
+    eq(res.headers.get('accept-ranges'), 'bytes');
+  });
+
+  test('static audio: malformed Range -> 400', async () => {
+    const url = await uploadTestTrack(ownerToken);
+    const res = await fetch(`${BASE_URL}${url}`, { headers: { Range: 'bytes=invalid' } });
+    eq(res.status, 400);
+  });
+
+  test('static audio: HEAD request -> 200/206 headers only, no body', async () => {
+    const url = await uploadTestTrack(ownerToken);
+    // HEAD without range
+    const res1 = await fetch(`${BASE_URL}${url}`, { method: 'HEAD' });
+    eq(res1.status, 200);
+    eq(res1.headers.get('accept-ranges'), 'bytes');
+    eq(res1.headers.get('content-length'), String(VALID_MP3.byteLength));
+    // HEAD with range
+    const res2 = await fetch(`${BASE_URL}${url}`, { method: 'HEAD', headers: { Range: 'bytes=0-3' } });
+    eq(res2.status, 206);
+    eq(res2.headers.get('content-length'), '4');
+    eq(res2.headers.get('content-range'), `bytes 0-3/${VALID_MP3.byteLength}`);
+  });
+
+  test('rate limit: upload endpoint -> 429 after threshold', async () => {
+    // Use a fresh token to avoid interference from other tests
+    const freshId = randomBytes(16).toString('hex');
+    const ts = new Date().toISOString();
+    const passwordHash = await auth.hashPassword('TestPass123!');
+    database.execute(
+      `INSERT INTO users (id, email, username, password_hash, role, account_status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'member', 'active', ?, ?)`,
+      [freshId, `ratelimit${Date.now()}@test.com`, `ratelimit${Date.now()}`, passwordHash, ts, ts]
+    );
+    database.execute(
+      `INSERT INTO profiles (id, user_id, display_name, theme_id, created_at, updated_at)
+       VALUES (?, ?, ?, 'default', ?, ?)`,
+      [generateId(), freshId, `ratelimit${Date.now()}`, ts, ts]
+    );
+    const freshToken = auth.createToken(freshId, 'access');
+
+    // Helper to upload and return full response with headers
+    async function doUpload(token, filename) {
+      const { body, contentType } = createMultipartBody({}, [
+        { fieldName: 'audio', filename, content: Buffer.from(VALID_MP3), type: 'audio/mpeg' }
+      ]);
+      return fetch(`${BASE_URL}/api/creator/audio`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': contentType },
+        body,
+      });
+    }
+
+    // Upload up to the limit (100 in test env)
+    for (let i = 0; i < 100; i++) {
+      const res = await doUpload(freshToken, `song${i}.mp3`);
+      eq(res.status, 201, `upload ${i} should succeed`);
+    }
+    // 101st should be 429
+    const res = await doUpload(freshToken, 'song101.mp3');
+    eq(res.status, 429, 'exceeds upload rate limit');
+    // Note: retry-after can be 59 or 60 depending on when in the window the request lands
+    const retryAfter = res.headers.get('retry-after');
+    check(retryAfter === '59' || retryAfter === '60', `retry-after should be 59 or 60, got ${retryAfter}`);
+  });
+
+  test('rate limit: read endpoint (list) -> 429 after threshold', async () => {
+    const freshId = randomBytes(16).toString('hex');
+    const ts = new Date().toISOString();
+    const passwordHash = await auth.hashPassword('TestPass123!');
+    database.execute(
+      `INSERT INTO users (id, email, username, password_hash, role, account_status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'member', 'active', ?, ?)`,
+      [freshId, `ratelimit2${Date.now()}@test.com`, `ratelimit2${Date.now()}`, passwordHash, ts, ts]
+    );
+    database.execute(
+      `INSERT INTO profiles (id, user_id, display_name, theme_id, created_at, updated_at)
+       VALUES (?, ?, ?, 'default', ?, ?)`,
+      [generateId(), freshId, `ratelimit2${Date.now()}`, ts, ts]
+    );
+    const freshToken = auth.createToken(freshId, 'access');
+
+    // List up to the limit (500 in test env)
+    for (let i = 0; i < 500; i++) {
+      const res = await api('GET', '/api/creator/audio', { token: freshToken });
+      eq(res.status, 200, `list ${i} should succeed`);
+    }
+    // 501st should be 429
+    const res = await api('GET', '/api/creator/audio', { token: freshToken });
+    eq(res.status, 429, 'exceeds read rate limit');
+  });
+
+  test('rate limit: separate users have independent buckets', async () => {
+    // ownerToken already exists, use otherToken (different user)
+    // Make some requests with ownerToken
+    for (let i = 0; i < 5; i++) {
+      await api('GET', '/api/creator/audio', { token: ownerToken });
+    }
+    // otherToken should not be affected
+    const res = await api('GET', '/api/creator/audio', { token: otherToken });
+    eq(res.status, 200, 'other user not rate limited by first user');
+  });
+
+  test('CORS: allowed origin gets headers', async () => {
+    const url = await uploadTestTrack(ownerToken);
+    const testOrigin = 'http://localhost:3000';
+    const res = await fetch(`${BASE_URL}${url}`, {
+      headers: { Origin: testOrigin }
+    });
+    const allowedOrigins = res.headers.get('access-control-allow-origin');
+    check(allowedOrigins && allowedOrigins.includes(testOrigin), `CORS origin should include ${testOrigin}, got ${allowedOrigins}`);
+  });
+
+  test('CORS: disallowed origin is rejected', async () => {
+    const url = await uploadTestTrack(ownerToken);
+    const res = await fetch(`${BASE_URL}${url}`, {
+      headers: { Origin: 'https://evil.example' }
+    });
+    eq(res.headers.get('access-control-allow-origin'), null, 'evil origin must not be echoed');
+  });
+
+  test('uploads: traversal via sibling directory prefix is rejected', async () => {
+    const siblingDir = resolve(tmpdir(), `komuniph-c17-audio-sibling-${process.pid}`);
+    const escapeFile = resolve(siblingDir, 'secret.txt');
+    mkdirSync(siblingDir, { recursive: true });
+    writeFileSync(escapeFile, 'secret');
+    const encodedSibling = encodeURIComponent(basename(siblingDir));
+    const rawPath = `/uploads/creator-audio/%2e%2e%2F${encodedSibling}/secret.txt`;
+
+    await new Promise((resolve, reject) => {
+      const req = httpRequest({
+        hostname: '127.0.0.1',
+        port: TEST_PORT,
+        path: rawPath,
+        method: 'GET',
+      }, (res) => {
+        res.resume();
+        eq(res.statusCode, 404, 'path traversal outside creator-audio should be rejected');
+        res.on('end', resolve);
+      });
+      req.on('error', reject);
+      req.end();
+    });
+  });
+
+  test('CORS: preflight OPTIONS on audio endpoint -> 204', async () => {
+    const testOrigin = 'http://localhost:3000';
+    const res = await fetch(`${BASE_URL}/api/creator/audio`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: testOrigin,
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'Content-Type, Authorization'
+      }
+    });
+    eq(res.status, 204);
+    eq(res.headers.get('access-control-allow-methods'), 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    eq(res.headers.get('access-control-allow-headers'), 'Content-Type, Authorization');
   });
 
   // ── Run the test queue ──────────────────────────────────────────────────────

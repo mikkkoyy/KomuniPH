@@ -634,7 +634,7 @@ test('every named import in creatorStudio.js actually resolves', async () => {
   const { readFileSync: read } = await import('node:fs');
   const { pathToFileURL } = await import('node:url');
   const src = read(resolve('web/js/creatorStudio.js'), 'utf8');
-  const check = async (specifier, modulePath, label) => {
+  const assertImportNameCoverage = async (specifier, modulePath, label) => {
     const end = src.indexOf(specifier);
     check(end > 0, `${label} import statement is present`);
     const start = src.lastIndexOf('import {', end);
@@ -647,8 +647,8 @@ test('every named import in creatorStudio.js actually resolves', async () => {
     const missing = names.filter(n => !(n in mod));
     check(missing.length === 0, `${label} exports every imported name, missing: ${missing.join(', ')}`);
   };
-  await check("from './studioViewer.js';", resolve('web/js/studioViewer.js'), 'studioViewer');
-  await check("from './profileDesign.js';", resolve('web/js/profileDesign.js'), 'profileDesign');
+  await assertImportNameCoverage("from './studioViewer.js';", resolve('web/js/studioViewer.js'), 'studioViewer');
+  await assertImportNameCoverage("from './profileDesign.js';", resolve('web/js/profileDesign.js'), 'profileDesign');
 });
 
 test('CREATOR-08: zoom controls exist, but no viewer SIZING controls do', async () => {

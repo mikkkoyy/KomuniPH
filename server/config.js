@@ -23,6 +23,7 @@ const config = {
   server: {
     host: process.env.HOST || '0.0.0.0',
     port: parseInt(process.env.PORT || '3000', 10),
+    trustProxy: process.env.TRUST_PROXY === 'true',
   },
   database: {
     path: process.env.DATABASE_PATH || './data/komuniph.db',

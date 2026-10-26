@@ -4,8 +4,8 @@
  */
 
 import { createServer } from 'http';
-import { readFileSync, existsSync, statSync } from 'fs';
-import { resolve, extname } from 'path';
+import { readFileSync, existsSync, statSync, createReadStream, realpathSync } from 'fs';
+import { resolve, extname, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import config from './config.js';
@@ -168,6 +168,113 @@ const MIME_TYPES = {
 };
 
 const UPLOADS_DIR = resolve(__dirname, '..', 'uploads');
+
+// Map of upload path prefixes to their configured directories
+const UPLOAD_DIRS = {
+  '/uploads/profile': config.upload.profileDir,
+  '/uploads/backgrounds': config.upload.backgroundDir,
+  '/uploads/creator': config.upload.creatorDir,
+  '/uploads/creator-effects': config.upload.creatorEffectDir,
+  '/uploads/creator-audio': config.upload.creatorAudioDir,
+  '/uploads/gallery': config.upload.profileDir.replace('profile', 'gallery'), // fallback
+  '/uploads/gallery/thumbnails': config.upload.profileDir.replace('profile', 'gallery/thumbnails'), // fallback
+};
+
+/**
+ * Simple in-memory rate limiter for audio endpoints.
+ * Per-user buckets for authenticated requests, per-IP for unauthenticated.
+ * Configurable via environment variables.
+ */
+const rateLimitConfig = {
+  // Audio upload: stricter limit (writes are expensive)
+  upload: {
+    windowMs: parseInt(process.env.AUDIO_UPLOAD_RATE_WINDOW_MS || '60000', 10), // 1 minute
+    maxRequests: parseInt(process.env.AUDIO_UPLOAD_RATE_MAX || '10', 10),       // 10 uploads/min
+  },
+  // Audio list/get: generous limit for playback/seeking
+  read: {
+    windowMs: parseInt(process.env.AUDIO_READ_RATE_WINDOW_MS || '60000', 10),   // 1 minute
+    maxRequests: parseInt(process.env.AUDIO_READ_RATE_MAX || '120', 10),        // 120 reads/min
+  },
+};
+
+// In-memory store: Map<key, { count, resetTime }>
+const rateLimitStore = new Map();
+
+/**
+ * Get rate limit key from request.
+ * Authenticated: user ID. Unauthenticated: IP address.
+ */
+function getRateLimitKey(req, user) {
+  if (user && user.sub) {
+    return `user:${user.sub}`;
+  }
+  // Only trust X-Forwarded-For when the server is explicitly configured behind a trusted proxy.
+  // Otherwise, the caller can spoof the client IP and evade rate limits.
+  const forwardedFor = config.server.trustProxy ? req.headers['x-forwarded-for'] : undefined;
+  const ip = forwardedFor?.split(',')[0]?.trim() || req.socket?.remoteAddress || 'unknown';
+  return `ip:${ip}`;
+}
+
+/**
+ * Check and increment rate limit counter.
+ * Returns { allowed: boolean, retryAfter: number|null, limit: number, remaining: number, resetTime: number }
+ */
+function checkRateLimit(key, config) {
+  const now = Date.now();
+  const bucket = rateLimitStore.get(key);
+
+  if (!bucket || now >= bucket.resetTime) {
+    // New window
+    const resetTime = now + config.windowMs;
+    rateLimitStore.set(key, { count: 1, resetTime });
+    return { allowed: true, retryAfter: null, limit: config.maxRequests, remaining: config.maxRequests - 1, resetTime };
+  }
+
+  if (bucket.count >= config.maxRequests) {
+    const retryAfter = Math.ceil((bucket.resetTime - now) / 1000);
+    return { allowed: false, retryAfter, limit: config.maxRequests, remaining: 0, resetTime: bucket.resetTime };
+  }
+
+  bucket.count++;
+  return { allowed: true, retryAfter: null, limit: config.maxRequests, remaining: config.maxRequests - bucket.count, resetTime: bucket.resetTime };
+}
+
+/**
+ * Apply rate limit headers to response.
+ */
+function setRateLimitHeaders(res, info) {
+  res.setHeader('X-RateLimit-Limit', String(info.limit));
+  res.setHeader('X-RateLimit-Remaining', String(info.remaining));
+  res.setHeader('X-RateLimit-Reset', String(Math.ceil(info.resetTime / 1000)));
+  if (info.retryAfter !== null) {
+    res.setHeader('Retry-After', String(info.retryAfter));
+  }
+}
+
+/**
+ * Rate limiter middleware for audio endpoints.
+ * type: 'upload' | 'read'
+ */
+function audioRateLimit(type) {
+  const config = rateLimitConfig[type] || rateLimitConfig.read;
+  return (req, res, user) => {
+    const key = getRateLimitKey(req, user);
+    const result = checkRateLimit(key, config);
+    setRateLimitHeaders(res, result);
+    return result.allowed;
+  };
+}
+
+// Periodic cleanup of expired buckets (every 5 minutes)
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, bucket] of rateLimitStore.entries()) {
+    if (now >= bucket.resetTime) {
+      rateLimitStore.delete(key);
+    }
+  }
+}, 5 * 60 * 1000).unref();
 
 /**
  * Serve static files from the web directory
@@ -637,17 +744,26 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
     if (method === 'GET' && path === '/api/creator/audio') {
       const user = requireAuth(req, res);
       if (!user) return;
+      if (!audioRateLimit('read')(req, res, user)) {
+        return errorResponse(res, 429, 'Too Many Requests');
+      }
       return handleListCreatorAudio(req, res, user);
     }
     if (method === 'POST' && path === '/api/creator/audio') {
       const user = requireAuth(req, res);
       if (!user) return;
+      if (!audioRateLimit('upload')(req, res, user)) {
+        return errorResponse(res, 429, 'Too Many Requests');
+      }
       return handleUploadCreatorAudio(req, res, user);
     }
     const creatorAudioMatch = matchRoute('/api/creator/audio/:id', path);
     if (method === 'GET' && creatorAudioMatch) {
       const user = requireAuth(req, res);
       if (!user) return;
+      if (!audioRateLimit('read')(req, res, user)) {
+        return errorResponse(res, 429, 'Too Many Requests');
+      }
       return handleGetCreatorAudio(req, res, user, creatorAudioMatch);
     }
 
@@ -1198,11 +1314,86 @@ const photoMatch = matchRoute('/api/profile/photos/:id', path);
 }
 
 /**
+ * Serve audio file with HTTP Range support for MP3 seeking.
+ * Only handles single byte ranges (not multipart).
+ */
+function serveAudioRange(req, res, filePath, contentType) {
+  const fileSize = statSync(filePath).size;
+  const rangeHeader = req.headers.range || '';
+
+  // Parse Range header: bytes=start-end, bytes=start-, bytes=-suffix
+  const rangeMatch = rangeHeader.match(/^bytes=(\d*)-(\d*)$/);
+  if (!rangeMatch) {
+    res.setHeader('Accept-Ranges', 'bytes');
+    return errorResponse(res, 400, 'Invalid Range header');
+  }
+
+  let start = rangeMatch[1] ? parseInt(rangeMatch[1], 10) : 0;
+  let end = rangeMatch[2] ? parseInt(rangeMatch[2], 10) : fileSize - 1;
+
+  // Handle suffix-byte-range: bytes=-N (last N bytes)
+  if (!rangeMatch[1] && rangeMatch[2]) {
+    start = Math.max(0, fileSize - end);
+    end = fileSize - 1;
+  }
+
+  // Validate range
+  if (start >= fileSize || end >= fileSize || start > end) {
+    res.setHeader('Content-Range', `bytes */${fileSize}`);
+    res.setHeader('Accept-Ranges', 'bytes');
+    return errorResponse(res, 416, 'Range Not Satisfiable');
+  }
+
+  const chunkSize = end - start + 1;
+
+  // Handle HEAD request - headers only, no body
+  if (req.method === 'HEAD') {
+    res.writeHead(206, {
+      'Content-Type': contentType,
+      'Accept-Ranges': 'bytes',
+      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+      'Content-Length': String(chunkSize),
+    });
+    res.end();
+    return;
+  }
+
+  // Stream the requested range
+  const stream = createReadStream(filePath, { start, end });
+
+  res.writeHead(206, {
+    'Content-Type': contentType,
+    'Accept-Ranges': 'bytes',
+    'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+    'Content-Length': String(chunkSize),
+  });
+
+  stream.pipe(res);
+
+  // Clean up on client disconnect
+  req.on('close', () => {
+    if (!res.writableEnded) {
+      stream.destroy();
+    }
+  });
+
+  stream.on('error', (err) => {
+    if (!res.writableEnded) {
+      errorResponse(res, 500, 'Error streaming file');
+    }
+  });
+}
+
+/**
  * Main request handler
  */
 async function handleRequest(req, res) {
-  // CORS headers
-  res.setHeader('Access-Control-Allow-Origin', config.cors.origins.join(', '));
+  // CORS headers: echo a single trusted origin when the request matches the configured allow-list.
+  const requestOrigin = req.headers.origin;
+  if (requestOrigin && config.cors.origins.includes(requestOrigin)) {
+    res.setHeader('Access-Control-Allow-Origin', requestOrigin);
+    res.setHeader('Vary', 'Origin');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
@@ -1222,15 +1413,73 @@ async function handleRequest(req, res) {
     // Uploads static files
     if (req.url.startsWith('/uploads/')) {
       const uploadPath = req.url.split('?')[0];
-      const fullUploadPath = resolve(UPLOADS_DIR, uploadPath.slice(9));
-      
-      if (fullUploadPath.startsWith(UPLOADS_DIR) && existsSync(fullUploadPath) && statSync(fullUploadPath).isFile()) {
+
+      // Determine which upload directory to use based on path prefix.
+      // Sort prefixes by length (longest first) to match most specific path first.
+      const sortedPrefixes = Object.entries(UPLOAD_DIRS).sort((a, b) => b[0].length - a[0].length);
+
+      let baseDir = UPLOADS_DIR;
+      let pathPrefix = '';
+      for (const [prefix, dir] of sortedPrefixes) {
+        if (uploadPath.startsWith(prefix)) {
+          baseDir = resolve(__dirname, '..', dir);
+          pathPrefix = prefix;
+          break;
+        }
+      }
+
+      // Remove the path prefix (e.g., '/uploads/creator-audio/') to get relative path.
+      // Decode any percent-encoded traversal attempts before resolving and check the
+      // filesystem boundary using a path-relative comparison instead of string-prefix logic.
+      const rawRelativePath = uploadPath.slice(pathPrefix.length + 1); // +1 for leading '/'
+      let relativePath;
+      try {
+        relativePath = decodeURIComponent(rawRelativePath);
+      } catch {
+        // Reject malformed URI encoding rather than attempting an unsafe path.
+        return errorResponse(res, 400, 'Invalid path');
+      }
+
+      const resolvedBaseDir = existsSync(baseDir) ? realpathSync(baseDir) : resolve(baseDir);
+      const fullUploadPath = resolve(resolvedBaseDir, relativePath);
+      const relativeToBase = relative(resolvedBaseDir, fullUploadPath);
+      const isContained = relativeToBase === '' || (
+        !relativeToBase.startsWith('..') &&
+        !isAbsolute(relativeToBase)
+      );
+
+      if (!isContained || !existsSync(fullUploadPath) || !statSync(fullUploadPath).isFile()) {
+        if (pathPrefix) {
+          return errorResponse(res, 404, 'Not Found');
+        }
+        // Not found in this upload directory, continue to other handlers
+      } else {
         const ext = extname(fullUploadPath);
         const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+
+        // HTTP Range support for creator-audio files (MP3 seeking)
+        const isAudioFile = ext === '.mp3' && uploadPath.startsWith('/uploads/creator-audio/');
+        const rangeHeader = req.headers.range || req.headers.Range;
+
+        if (isAudioFile && rangeHeader) {
+          return serveAudioRange(req, res, fullUploadPath, contentType);
+        }
+
+        // Normal full-file response
         try {
           const content = readFileSync(fullUploadPath);
-          res.writeHead(200, { 'Content-Type': contentType });
-          res.end(content);
+          const headers = { 'Content-Type': contentType };
+          if (isAudioFile) {
+            headers['Accept-Ranges'] = 'bytes';
+          }
+          headers['Content-Length'] = String(content.length);
+          if (req.method === 'HEAD') {
+            res.writeHead(200, headers);
+            res.end();
+          } else {
+            res.writeHead(200, headers);
+            res.end(content);
+          }
         } catch (err) {
           errorResponse(res, 500, 'Error reading file');
         }

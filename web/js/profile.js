@@ -2,7 +2,7 @@
  * KomuniPH Lite - Profile UI
  */
 
-import { profileApi, testimonialsApi, galleryApi, albumsApi, authApi, isAuthenticated, getCurrentUserProfile, setCurrentUserProfile } from './api.js';
+import { profileApi, profileMp3Api, testimonialsApi, galleryApi, albumsApi, authApi, isAuthenticated, getCurrentUserProfile, setCurrentUserProfile } from './api.js';
 import { navigate } from './app.js';
 import { renderGalleryItemHtml, bindGalleryGridLightbox, isOwnUsername, safeDecode, renderAlbumCardsHtml } from './gallery.js'; // PHASE-3 GALLERY-SPLIT-01
 import { applyProfileDesign } from './profileDesign.js'; // CREATOR-01A
@@ -2122,20 +2122,100 @@ export function setEditorProfile(profile) {
 function renderProfileMusicPlayer(profile) {
   const container = document.getElementById('music-module-content');
   if (!container) return;
+  const isAdminOwner = isOwnUsername(profile?.username) && profile?.role === 'admin';
+
   if (!profile || !profile.profile_mp3_url) {
     container.innerHTML = `
       <div class="music-module-empty" id="music-module-empty">
         No track selected.
         Coming soon.
       </div>
+      ${isAdminOwner ? `
+        <div class="music-module-actions">
+          <label class="btn btn-primary" for="profile-music-install-input">Install MP3</label>
+          <input id="profile-music-install-input" type="file" accept="audio/mpeg,audio/mp3,.mp3" hidden>
+        </div>
+        <p class="music-module-status" id="profile-music-status" role="status"></p>
+      ` : ''}
     `;
+    if (isAdminOwner) {
+      const input = container.querySelector('#profile-music-install-input');
+      const status = container.querySelector('#profile-music-status');
+      input.addEventListener('change', async () => {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        if (status) status.textContent = 'Uploading MP3...';
+        try {
+          const result = await profileMp3Api.upload(file);
+          if (currentProfile) {
+            currentProfile = { ...currentProfile, profile_mp3_url: result.url, profile_mp3_title: result.title };
+          }
+          renderProfileMusicPlayer(currentProfile || profile);
+          if (status) status.textContent = 'MP3 installed.';
+        } catch (error) {
+          if (status) status.textContent = error.message || 'Upload failed.';
+        } finally {
+          input.value = '';
+        }
+      });
+    }
     return;
   }
+
   const title = profile.profile_mp3_title || 'Featured track';
   container.innerHTML = `
     <div class="music-module-track">
       <div class="music-module-title">${escapeHtml(title)}</div>
       <audio controls preload="metadata" src="${escapeHtmlAttr(profile.profile_mp3_url)}"></audio>
+      ${isAdminOwner ? `
+        <div class="music-module-actions">
+          <label class="btn btn-secondary" for="profile-music-replace-input">Replace MP3</label>
+          <input id="profile-music-replace-input" type="file" accept="audio/mpeg,audio/mp3,.mp3" hidden>
+          <button type="button" class="btn btn-secondary" id="profile-music-remove-btn">Remove MP3</button>
+        </div>
+        <p class="music-module-status" id="profile-music-status" role="status"></p>
+      ` : ''}
     </div>
   `;
+
+  if (isAdminOwner) {
+    const replaceInput = container.querySelector('#profile-music-replace-input');
+    const removeBtn = container.querySelector('#profile-music-remove-btn');
+    const status = container.querySelector('#profile-music-status');
+    if (replaceInput) {
+      replaceInput.addEventListener('change', async () => {
+        const file = replaceInput.files && replaceInput.files[0];
+        if (!file) return;
+        if (status) status.textContent = 'Uploading MP3...';
+        try {
+          const result = await profileMp3Api.upload(file);
+          if (currentProfile) {
+            currentProfile = { ...currentProfile, profile_mp3_url: result.url, profile_mp3_title: result.title };
+          }
+          renderProfileMusicPlayer(currentProfile || profile);
+          if (status) status.textContent = 'MP3 installed.';
+        } catch (error) {
+          if (status) status.textContent = error.message || 'Upload failed.';
+        } finally {
+          replaceInput.value = '';
+        }
+      });
+    }
+    if (removeBtn) {
+      removeBtn.addEventListener('click', async () => {
+        if (!window.confirm('Remove the installed MP3?')) return;
+        if (status) status.textContent = 'Removing MP3...';
+        try {
+          await profileMp3Api.remove();
+          if (currentProfile) {
+            currentProfile = { ...currentProfile, profile_mp3_url: null, profile_mp3_title: null };
+          }
+          renderProfileMusicPlayer(currentProfile || profile);
+          if (status) status.textContent = 'MP3 removed.';
+        } catch (error) {
+          if (status) status.textContent = error.message || 'Remove failed.';
+        }
+      });
+    }
+  }
 }

@@ -1405,6 +1405,74 @@ function parsePublishedProfileMp3PlayerConfig(raw) {
   return config;
 }
 
+const MP3D_ALLOWED_TYPES = new Set(['title', 'subtitle', 'image', 'controls', 'progress', 'timeCurrent', 'timeDuration', 'decorative']);
+const MP3D_REQUIRED_TYPES = new Set(['title', 'controls', 'progress']);
+const MP3D_MAX_ELEMENTS = 40;
+
+function isFiniteNum(v) { return typeof v === 'number' && Number.isFinite(v); }
+function isSafeStyleString(v, max = 200) {
+  if (typeof v !== 'string') return false;
+  if (v.length > max) return false;
+  if (/[<>;"'\\]/.test(v)) return false;
+  if (/url\s*\(/i.test(v)) return false;
+  if (/expression\s*\(/i.test(v)) return false;
+  return true;
+}
+function isSafeImageRef(v) {
+  if (v === '' || v == null) return true;
+  if (typeof v !== 'string' || v.length > 500) return false;
+  if (/[<>"']/.test(v)) return false;
+  return /^\/uploads\/(backgrounds|profile|creator|creator-audio|gallery)\/[A-Za-z0-9._-]+$/.test(v)
+    || /^https?:\/\/[^\s<>"']+$/i.test(v)
+    || /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(v);
+}
+function validateMp3PlayerConfig(config) {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return 'Design config must be an object';
+  const hasElements = Object.prototype.hasOwnProperty.call(config, 'elements');
+  if (!hasElements) return null; // legacy v1 config allowed
+  if (!Array.isArray(config.elements)) return 'Design elements must be an array';
+  if (config.elements.length === 0) return 'Design must include at least one element';
+  if (config.elements.length > MP3D_MAX_ELEMENTS) return `Design cannot contain more than ${MP3D_MAX_ELEMENTS} elements`;
+  const ids = new Set();
+  const typeCounts = new Map();
+  for (let i = 0; i < config.elements.length; i++) {
+    const el = config.elements[i];
+    if (!el || typeof el !== 'object' || Array.isArray(el)) return `Element ${i} is invalid`;
+    if (typeof el.id !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(el.id)) return `Element ${i} has invalid id`;
+    if (ids.has(el.id)) return `Duplicate element id: ${el.id}`;
+    ids.add(el.id);
+    if (!MP3D_ALLOWED_TYPES.has(el.type)) return `Element ${i} has invalid type`;
+    typeCounts.set(el.type, (typeCounts.get(el.type) || 0) + 1);
+    for (const key of ['x', 'y', 'width', 'height', 'zIndex']) {
+      if (!isFiniteNum(el[key])) return `Element ${el.id} has invalid ${key}`;
+    }
+    if (el.width < 8 || el.height < 4 || el.width > 2000 || el.height > 2000) return `Element ${el.id} has invalid dimensions`;
+    if (el.x < -1000 || el.y < -1000 || el.x > 10000 || el.y > 10000) return `Element ${el.id} has invalid position`;
+    if (el.zIndex < -1000 || el.zIndex > 10000) return `Element ${el.id} has invalid zIndex`;
+    if ('visible' in el && typeof el.visible !== 'boolean') return `Element ${el.id} has invalid visible flag`;
+    if ('locked' in el && typeof el.locked !== 'boolean') return `Element ${el.id} has invalid locked flag`;
+    const p = el.props;
+    if (p != null && (typeof p !== 'object' || Array.isArray(p))) return `Element ${el.id} has invalid props`;
+    if (el.type === 'image' && p && 'src' in p && !isSafeImageRef(p.src)) return `Element ${el.id} has invalid image source`;
+    if (p) {
+      for (const [k, v] of Object.entries(p)) {
+        if (k === 'text') { if (typeof v !== 'string' || v.length > 200) return `Element ${el.id} has invalid text`; if (/[<>]/.test(v)) return `Element ${el.id} has unsafe text`; continue; }
+        if (k === 'src') continue;
+        if (typeof v === 'string' && !isSafeStyleString(v, 500)) return `Element ${el.id} has unsafe property: ${k}`;
+        if (typeof v === 'number' && !Number.isFinite(v)) return `Element ${el.id} has invalid number: ${k}`;
+      }
+    }
+  }
+  for (const req of MP3D_REQUIRED_TYPES) {
+    if ((typeCounts.get(req) || 0) < 1) return `Design must include at least one ${req} element`;
+  }
+  // basic player-level checks
+  if ('playerWidth' in config && (!isFiniteNum(config.playerWidth) || config.playerWidth < 120 || config.playerWidth > 1000)) return 'Invalid player width';
+  if ('playerHeight' in config && (!isFiniteNum(config.playerHeight) || config.playerHeight < 40 || config.playerHeight > 1000)) return 'Invalid player height';
+  if ('backgroundImage' in config && !isSafeImageRef(config.backgroundImage || '')) return 'Invalid background image';
+  return null;
+}
+
 export function handleUploadProfileMp3(req, res, user) {
   const contentType = req.headers['content-type'] || '';
   if (!contentType.includes('multipart/form-data')) {
@@ -1580,6 +1648,11 @@ export async function handleSaveProfileMp3PlayerDesign(req, res, user) {
   }
   if (!body.config || typeof body.config !== 'object' || Array.isArray(body.config)) {
     return errorResponse(res, 422, 'Design config must be an object');
+  }
+
+  const validationError = validateMp3PlayerConfig(body.config);
+  if (validationError) {
+    return errorResponse(res, 422, validationError);
   }
 
   const serialized = JSON.stringify(body.config);

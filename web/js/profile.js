@@ -2180,24 +2180,54 @@ function renderProfileMusicPlayer(profile) {
   }
 
   const title = profile.profile_mp3_title || 'Featured track';
-  const artworkUrl = typeof design?.artwork?.url === 'string' ? design.artwork.url : '';
-  const artworkShape = design?.artwork?.shape === 'circle' ? '50%' : (Number.isFinite(design?.artwork?.radius) ? `${design.artwork.radius}px` : '12px');
-  const artworkSize = Number.isFinite(design?.artwork?.size) ? design.artwork.size : 56;
+  const hasElements = Array.isArray(design.elements) && design.elements.length > 0;
+  let playerHtml = '';
+  if (hasElements) {
+    const els = [...design.elements].filter(e => e && e.visible !== false).sort((a,b) => (Number(a.zIndex)||0)-(Number(b.zIndex)||0));
+    const content = els.map(el => renderPublicMp3Element(el, title)).join('');
+    const overlay = backgroundUrl ? `<div class="mp3-public-overlay" style="position:absolute;inset:0;pointer-events:none;opacity:${Number.isFinite(design.overlayOpacity)?design.overlayOpacity:0.12};background:${escapeHtmlAttr(design.overlayColor || '#000')};"></div>` : '';
+    playerHtml = `<div class="music-module-track mp3-public-player" style="${playerStyle};position:relative;overflow:hidden;">${overlay}<div class="mp3-public-stage" style="position:relative;width:100%;height:100%;min-height:${Number.isFinite(design.playerHeight)?design.playerHeight:118}px;">${content}<audio class="mp3-public-audio" preload="metadata" src="${escapeHtmlAttr(profile.profile_mp3_url)}" style="display:none"></audio></div></div>`;
+  } else {
+    const artworkUrl = typeof design?.artwork?.url === 'string' ? design.artwork.url : '';
+    const artworkShape = design?.artwork?.shape === 'circle' ? '50%' : (Number.isFinite(design?.artwork?.radius) ? `${design.artwork.radius}px` : '12px');
+    const artworkSize = Number.isFinite(design?.artwork?.size) ? design.artwork.size : 56;
+    playerHtml = `
+      <div class="music-module-track" style="${playerStyle}">
+        ${design?.artwork?.visible !== false && artworkUrl ? `<img class="music-module-artwork" src="${escapeHtmlAttr(artworkUrl)}" alt="" style="width:${artworkSize}px;height:${artworkSize}px;border-radius:${artworkShape};object-fit:cover;">` : ''}
+        <div class="music-module-title">${escapeHtml(title)}</div>
+        <audio controls preload="metadata" src="${escapeHtmlAttr(profile.profile_mp3_url)}"></audio>
+      </div>`;
+  }
+
   container.innerHTML = `
-    <div class="music-module-track" style="${playerStyle}">
-      ${design?.artwork?.visible !== false && artworkUrl ? `<img class="music-module-artwork" src="${escapeHtmlAttr(artworkUrl)}" alt="" style="width:${artworkSize}px;height:${artworkSize}px;border-radius:${artworkShape};object-fit:cover;">` : ''}
-      <div class="music-module-title">${escapeHtml(title)}</div>
-      <audio controls preload="metadata" src="${escapeHtmlAttr(profile.profile_mp3_url)}"></audio>
-      ${isAdminOwner ? `
-        <div class="music-module-actions">
-          <label class="btn btn-secondary" for="profile-music-replace-input">Replace MP3</label>
-          <input id="profile-music-replace-input" type="file" accept="audio/mpeg,audio/mp3,.mp3" hidden>
-          <button type="button" class="btn btn-secondary" id="profile-music-remove-btn">Remove MP3</button>
-        </div>
-        <p class="music-module-status" id="profile-music-status" role="status"></p>
-      ` : ''}
-    </div>
+    ${playerHtml}
+    ${isAdminOwner ? `
+      <div class="music-module-actions">
+        <label class="btn btn-secondary" for="profile-music-replace-input">Replace MP3</label>
+        <input id="profile-music-replace-input" type="file" accept="audio/mpeg,audio/mp3,.mp3" hidden>
+        <button type="button" class="btn btn-secondary" id="profile-music-remove-btn">Remove MP3</button>
+      </div>
+      <p class="music-module-status" id="profile-music-status" role="status"></p>
+    ` : ''}
   `;
+
+  // wire element-based public player controls if present
+  if (hasElements) {
+    const player = container.querySelector('.mp3-public-player');
+    const audio = container.querySelector('.mp3-public-audio');
+    if (player && audio) {
+      const fmt = (s) => { if (!Number.isFinite(s)) return '0:00'; const m=Math.floor(s/60), sec=Math.floor(s%60); return `${m}:${String(sec).padStart(2,'0')}`; };
+      const curEl = player.querySelector('[data-mp3-role="timeCurrent"]');
+      const durEl = player.querySelector('[data-mp3-role="timeDuration"]');
+      const fill = player.querySelector('[data-mp3-role="progressFill"]');
+      const track = player.querySelector('[data-mp3-role="progressTrack"]');
+      const btn = player.querySelector('[data-mp3-role="playBtn"]');
+      const sync = () => { if(curEl) curEl.textContent = fmt(audio.currentTime); if(durEl) durEl.textContent = fmt(audio.duration); if(fill && Number.isFinite(audio.duration) && audio.duration>0) fill.style.width = `${(audio.currentTime/audio.duration)*100}%`; if(btn) btn.textContent = audio.paused ? '▶' : '❚❚'; };
+      btn?.addEventListener('click', () => { if (audio.paused) audio.play().catch(()=>{}); else audio.pause(); });
+      track?.addEventListener('click', (e) => { const r = track.getBoundingClientRect(); if(!r.width||!Number.isFinite(audio.duration)) return; audio.currentTime = Math.max(0,Math.min(audio.duration, ((e.clientX-r.left)/r.width)*audio.duration)); });
+      audio.addEventListener('timeupdate', sync); audio.addEventListener('loadedmetadata', sync); audio.addEventListener('play', sync); audio.addEventListener('pause', sync); audio.addEventListener('ended', sync); sync();
+    }
+  }
 
   if (isAdminOwner) {
     const replaceInput = container.querySelector('#profile-music-replace-input');
@@ -2239,4 +2269,26 @@ function renderProfileMusicPlayer(profile) {
       });
     }
   }
+}
+
+function renderPublicMp3Element(el, trackTitle) {
+  const t = el && el.type;
+  const p = (el && el.props) || {};
+  const x = Number(el.x)||0, y = Number(el.y)||0, w = Number(el.width)||100, h = Number(el.height)||24;
+  const base = `position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;z-index:${Number(el.zIndex)||0};box-sizing:border-box;overflow:hidden;`;
+  const op = `opacity:${Number.isFinite(p.opacity)?p.opacity:1};`;
+  const textStyle = `${base}${op}color:${escapeHtmlAttr(p.color||'#fff')};font-size:${Number(p.fontSize)||14}px;font-weight:${escapeHtmlAttr(p.fontWeight||'500')};text-align:${escapeHtmlAttr(p.align||'left')};display:flex;align-items:center;white-space:nowrap;`;
+  if (t === 'title') return `<div class="mp3-pub-el mp3-pub-title" style="${textStyle}">${escapeHtml(p.text || trackTitle || 'Featured track')}</div>`;
+  if (t === 'subtitle') return `<div class="mp3-pub-el mp3-pub-subtitle" style="${textStyle}">${escapeHtml(p.text || 'Artist')}</div>`;
+  if (t === 'image') {
+    const radius = p.shape === 'circle' ? '50%' : `${Number(p.borderRadius)||12}px`;
+    if (p.src) return `<div class="mp3-pub-el mp3-pub-image" style="${base}${op}"><img src="${escapeHtmlAttr(p.src)}" alt="" style="width:100%;height:100%;object-fit:${escapeHtmlAttr(p.fit||'cover')};border-radius:${radius};display:block;"></div>`;
+    return `<div class="mp3-pub-el mp3-pub-image mp3-pub-image-empty" style="${base}${op}display:flex;align-items:center;justify-content:center;border-radius:${radius};background:rgba(255,255,255,.08);color:rgba(255,255,255,.6);font-size:12px;">Artwork</div>`;
+  }
+  if (t === 'controls') return `<div class="mp3-pub-el mp3-pub-controls" style="${base}${op}display:flex;align-items:center;justify-content:center;"><button type="button" data-mp3-role="playBtn" aria-label="Play/Pause" style="all:unset;cursor:pointer;color:${escapeHtmlAttr(p.color||'#42bbaa')};font-size:${Number(p.size)||24}px;line-height:1;">▶</button></div>`;
+  if (t === 'progress') return `<div class="mp3-pub-el mp3-pub-progress" style="${base}${op}display:flex;align-items:center;"><div data-mp3-role="progressTrack" style="width:100%;height:${Number(p.thickness)||6}px;background:${escapeHtmlAttr(p.trackColor||'rgba(255,255,255,0.2)')};border-radius:${Number(p.radius)||999}px;cursor:pointer;overflow:hidden;"><div data-mp3-role="progressFill" style="width:0%;height:100%;background:${escapeHtmlAttr(p.progressColor||'#42bbaa')};border-radius:${Number(p.radius)||999}px;"></div></div></div>`;
+  if (t === 'timeCurrent') return `<div class="mp3-pub-el mp3-pub-time" data-mp3-role="timeCurrent" style="${textStyle}">${escapeHtml(p.text || '0:00')}</div>`;
+  if (t === 'timeDuration') return `<div class="mp3-pub-el mp3-pub-time" data-mp3-role="timeDuration" style="${textStyle}">${escapeHtml(p.text || '0:00')}</div>`;
+  if (t === 'decorative') return `<div class="mp3-pub-el mp3-pub-shape" style="${base}${op}background:${escapeHtmlAttr(p.fill||'rgba(255,255,255,0.1)')};border-radius:${Number(p.borderRadius)||8}px;border:${Number(p.borderWidth)||0}px solid ${escapeHtmlAttr(p.borderColor||'transparent')};"></div>`;
+  return '';
 }

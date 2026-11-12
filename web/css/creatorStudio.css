@@ -2486,3 +2486,56 @@
     flex: 1 1 auto;
   }
 }
+/* MP3-DESIGNER-01: graphical element editor workspace */
+#mp3-designer .mp3d-toolbar { display:flex; flex-wrap:wrap; gap:.5rem; align-items:center; margin:.25rem 0 .75rem; padding:.5rem .75rem; background:var(--mp3d-panel); border:1px solid var(--mp3d-line); border-radius:var(--mp3d-radius); }
+#mp3-designer .mp3d-toolbar select { width:auto; min-width:160px; margin:0; }
+#mp3-designer .mp3d-sep { width:1px; height:1.5rem; background:var(--mp3d-line); display:inline-block; }
+#mp3-designer .mp3d-status { margin:.25rem 0 .75rem; min-height:1.25rem; color:var(--mp3d-muted); }
+#mp3-designer .mp3d-workspace { display:grid; grid-template-columns:240px minmax(0,1fr) 320px; gap:1rem; align-items:start; }
+#mp3-designer .mp3d-panel { background:var(--mp3d-panel); border:1px solid var(--mp3d-line); border-radius:var(--mp3d-radius); padding:1rem; box-sizing:border-box; max-height:calc(100vh - 14rem); overflow:auto; }
+#mp3-designer .mp3d-center { display:flex; flex-direction:column; gap:.5rem; min-width:0; }
+#mp3-designer .mp3d-canvas-wrap { background:var(--mp3d-canvas); border:1px solid var(--mp3d-line); border-radius:var(--mp3d-radius); padding:1.5rem; min-height:360px; display:flex; align-items:center; justify-content:center; overflow:auto; }
+#mp3-designer .mp3d-canvas { width:100%; display:flex; align-items:center; justify-content:center; }
+#mp3-designer .mp3d-canvas-stage { padding:12px; }
+#mp3-designer .mp3d-player { position:relative; overflow:hidden; box-shadow:0 12px 32px rgba(0,0,0,.35); user-select:none; touch-action:none; }
+#mp3-designer .mp3d-player-overlay { position:absolute; inset:0; pointer-events:none; z-index:0; }
+#mp3-designer .mp3d-el { position:absolute; box-sizing:border-box; cursor:move; touch-action:none; }
+#mp3-designer .mp3d-el-locked { cursor:not-allowed; }
+#mp3-designer .mp3d-el-selected { outline:2px solid var(--mp3d-accent); outline-offset:0; }
+#mp3-designer .mp3d-el-label { position:absolute; left:0; top:-18px; font-size:10px; line-height:1; padding:2px 4px; background:var(--mp3d-accent); color:#042f2e; border-radius:4px; pointer-events:none; white-space:nowrap; z-index:10000; }
+#mp3-designer .mp3d-handle { position:absolute; width:10px; height:10px; background:#fff; border:2px solid var(--mp3d-accent); border-radius:2px; box-sizing:border-box; z-index:10001; }
+#mp3-designer .mp3d-handle-nw { left:-5px; top:-5px; cursor:nwse-resize; }
+#mp3-designer .mp3d-handle-n  { left:calc(50% - 5px); top:-5px; cursor:ns-resize; }
+#mp3-designer .mp3d-handle-ne { right:-5px; top:-5px; cursor:nesw-resize; }
+#mp3-designer .mp3d-handle-e  { right:-5px; top:calc(50% - 5px); cursor:ew-resize; }
+#mp3-designer .mp3d-handle-se { right:-5px; bottom:-5px; cursor:nwse-resize; }
+#mp3-designer .mp3d-handle-s  { left:calc(50% - 5px); bottom:-5px; cursor:ns-resize; }
+#mp3-designer .mp3d-handle-sw { left:-5px; bottom:-5px; cursor:nesw-resize; }
+#mp3-designer .mp3d-handle-w  { left:-5px; top:calc(50% - 5px); cursor:ew-resize; }
+#mp3-designer .mp3d-content { width:100%; height:100%; box-sizing:border-box; pointer-events:none; overflow:hidden; }
+#mp3-designer .mp3d-text { display:flex; align-items:center; white-space:nowrap; }
+#mp3-designer .mp3d-image { display:block; width:100%; height:100%; }
+#mp3-designer .mp3d-image-empty { display:flex; align-items:center; justify-content:center; background:rgba(148,163,184,.15); border:1px dashed rgba(148,163,184,.4); color:var(--mp3d-muted); font-size:12px; }
+#mp3-designer .mp3d-controls { display:flex; align-items:center; justify-content:center; gap:.25rem; }
+#mp3-designer .mp3d-progress, #mp3-designer .mp3d-progress-track { width:100%; }
+#mp3-designer .mp3d-progress { display:flex; align-items:center; }
+#mp3-designer .mp3d-shape { width:100%; height:100%; }
+#mp3-designer .mp3d-layers { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:.35rem; }
+#mp3-designer .mp3d-layer-item { display:flex; align-items:center; gap:.35rem; padding:.35rem .4rem; border:1px solid var(--mp3d-line); border-radius:8px; background:rgba(15,23,42,.5); }
+#mp3-designer .mp3d-layer-item.is-selected { border-color:var(--mp3d-accent); background:rgba(20,184,166,.12); }
+#mp3-designer .mp3d-layer-vis { background:none; border:none; color:var(--mp3d-text); cursor:pointer; padding:0 .15rem; font-size:14px; width:auto; }
+#mp3-designer .mp3d-layer-select { flex:1; min-width:0; text-align:left; background:none; border:none; color:var(--mp3d-text); cursor:pointer; padding:0; display:flex; flex-direction:column; }
+#mp3-designer .mp3d-layer-type { font-size:.75rem; color:var(--mp3d-muted); }
+#mp3-designer .mp3d-layer-name { font-size:.85rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#mp3-designer .mp3d-layer-z { font-size:.7rem; color:var(--mp3d-muted); }
+#mp3-designer .mp3d-field-grid { display:grid; grid-template-columns:1fr 1fr; gap:.5rem; }
+#mp3-designer .mp3d-field-grid label, #mp3-designer .mp3d-inspector-panel label { margin:.35rem 0 .15rem; }
+#mp3-designer .mp3d-check { display:flex; align-items:center; gap:.5rem; }
+#mp3-designer .mp3d-check input[type="checkbox"] { width:auto; margin:0; }
+#mp3-designer .mp3d-inspector-id { font-size:.75rem; word-break:break-all; margin:.15rem 0 .5rem; }
+#mp3-designer .mp3d-inspector-note { font-size:.75rem; color:#fbbf24; margin:.15rem 0 .5rem; }
+#mp3-designer .mp3d-button-row { display:flex; flex-wrap:wrap; gap:.5rem; align-items:center; margin:.25rem 0; }
+#mp3-designer .mp3d-hint { font-size:.8rem; color:var(--mp3d-muted); margin:0; }
+#mp3-designer .mp3d-empty { color:var(--mp3d-muted); font-size:.85rem; }
+@media (max-width: 1100px) { #mp3-designer .mp3d-workspace { grid-template-columns:1fr; } #mp3-designer .mp3d-panel { max-height:none; } }
+@media (max-width: 640px) { #mp3-designer .mp3d-toolbar { padding:.5rem; } #mp3-designer .mp3d-canvas-wrap { padding:.75rem; min-height:240px; } }

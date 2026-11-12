@@ -6431,3 +6431,8 @@ select:focus {
   backdrop-filter: blur(10px) saturate(115%);
 }
 
+/* MP3 public player element layout (v2 element configs) */
+.mp3-public-player { position: relative; overflow: hidden; box-sizing: border-box; }
+.mp3-public-stage { position: relative; width: 100%; height: 100%; }
+.mp3-pub-el { box-sizing: border-box; }
+.mp3-public-overlay { position: absolute; inset: 0; pointer-events: none; }
